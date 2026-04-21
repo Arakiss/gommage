@@ -6,6 +6,9 @@ use gommage_core::{
     Decision, PictoConsume, PictoLookup, Policy, ToolCall, evaluate,
     runtime::{Expedition, HomeLayout, Runtime, default_policy_env},
 };
+use gommage_stdlib::{
+    CAPABILITIES as STDLIB_CAPABILITIES, POLICIES as STDLIB_POLICIES, StdlibFile,
+};
 use serde::Serialize;
 use std::{
     io::{self, Read},
@@ -1468,48 +1471,6 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-const STDLIB_POLICIES: &[(&str, &str)] = &[
-    (
-        "00-hard-stops.yaml",
-        include_str!("../../../policies/00-hard-stops.yaml"),
-    ),
-    (
-        "10-filesystem.yaml",
-        include_str!("../../../policies/10-filesystem.yaml"),
-    ),
-    (
-        "15-agent-tools.yaml",
-        include_str!("../../../policies/15-agent-tools.yaml"),
-    ),
-    ("20-git.yaml", include_str!("../../../policies/20-git.yaml")),
-    (
-        "30-package-managers.yaml",
-        include_str!("../../../policies/30-package-managers.yaml"),
-    ),
-    (
-        "40-cloud.yaml",
-        include_str!("../../../policies/40-cloud.yaml"),
-    ),
-    (
-        "50-cloud-tools.yaml",
-        include_str!("../../../policies/50-cloud-tools.yaml"),
-    ),
-];
-
-const STDLIB_CAPABILITIES: &[(&str, &str)] = &[
-    ("bash.yaml", include_str!("../../../capabilities/bash.yaml")),
-    (
-        "cloud-tools.yaml",
-        include_str!("../../../capabilities/cloud-tools.yaml"),
-    ),
-    (
-        "filesystem.yaml",
-        include_str!("../../../capabilities/filesystem.yaml"),
-    ),
-    ("mcp.yaml", include_str!("../../../capabilities/mcp.yaml")),
-    ("web.yaml", include_str!("../../../capabilities/web.yaml")),
-];
-
 fn install_stdlib(layout: &HomeLayout, force: bool) -> Result<(usize, usize)> {
     let policies = install_embedded_files(&layout.policy_dir, STDLIB_POLICIES, force)?;
     let capabilities =
@@ -1519,17 +1480,17 @@ fn install_stdlib(layout: &HomeLayout, force: bool) -> Result<(usize, usize)> {
 
 fn install_embedded_files(
     dir: &std::path::Path,
-    files: &[(&str, &str)],
+    files: &[StdlibFile],
     force: bool,
 ) -> Result<usize> {
     std::fs::create_dir_all(dir)?;
     let mut installed = 0usize;
-    for (name, contents) in files {
-        let path = dir.join(name);
+    for file in files {
+        let path = dir.join(file.name);
         if path.exists() && !force {
             continue;
         }
-        std::fs::write(path, contents)?;
+        std::fs::write(path, file.contents)?;
         installed += 1;
     }
     Ok(installed)

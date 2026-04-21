@@ -1,0 +1,72 @@
+# Filesystem policy defaults.
+#
+# ${EXPEDITION_ROOT} is substituted at load time with the current expedition's
+# root directory (set by `gommage expedition start`). If unset, nothing under
+# the project matches and these rules deny by fail-closed at the end.
+
+# --- Fail-safe: deny traversal escapes early ----------------------------------
+# Gommage treats paths as opaque strings (see docs/input-schema.md) — it does
+# NOT collapse `..`. This rule covers the common attacker shape "root + ../.."
+# so an agent that emits `${EXPEDITION_ROOT}/../../etc/passwd` gets gommaged
+# even though the string has the EXPEDITION_ROOT prefix. Users who genuinely
+# need `..` in a path must canonicalise in the agent before tool invocation.
+- name: deny-dotdot-escape
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.read:**/../**"
+      - "fs.search:**/../**"
+      - "fs.write:**/../**"
+  reason: "path contains '..'; canonicalise in the agent, do not rely on string prefixes"
+
+- name: no-writes-to-build-artifacts
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write:**/node_modules/**"
+      - "fs.write:**/.next/**"
+      - "fs.write:**/.turbo/**"
+      - "fs.write:**/dist/**"
+      - "fs.write:**/build/**"
+      - "fs.write:**/target/**"
+      - "fs.write:**/.git/**"
+  reason: "build artifacts and VCS metadata are not edit targets"
+
+- name: no-writes-to-home-dotfiles
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write:${HOME}/.*"
+      - "fs.write:${HOME}/.ssh/**"
+      - "fs.write:${HOME}/.aws/**"
+      - "fs.write:${HOME}/.gnupg/**"
+  reason: "agent must not touch user dotfiles or credential directories"
+
+- name: allow-project-reads
+  decision: allow
+  match:
+    all_capability:
+      - "fs.read:${EXPEDITION_ROOT}/**"
+  reason: "reads within the current expedition's root are allowed"
+
+- name: allow-project-searches
+  decision: allow
+  match:
+    all_capability:
+      - "fs.search:${EXPEDITION_ROOT}/**"
+  reason: "searches within the current expedition's root are allowed"
+
+- name: allow-project-writes
+  decision: allow
+  match:
+    all_capability:
+      - "fs.write:${EXPEDITION_ROOT}/**"
+  reason: "writes within the current expedition's root are allowed"
+
+- name: allow-tmp-writes
+  decision: allow
+  match:
+    any_capability:
+      - "fs.write:/tmp/**"
+      - "fs.write:/var/tmp/**"
+  reason: "ephemeral tmp paths are fair game"

@@ -523,6 +523,7 @@ dependencies = [
  "ed25519-dalek",
  "gommage-audit",
  "gommage-core",
+ "gommage-stdlib",
  "rand_core 0.6.4",
  "serde",
  "serde_json",
@@ -544,6 +545,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "globset",
+ "gommage-stdlib",
  "hex",
  "proptest",
  "rand_core 0.6.4",
@@ -597,6 +599,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "gommage-stdlib"
+version = "0.1.0-alpha.1"
 
 [[package]]
 name = "hashbrown"

@@ -27,6 +27,7 @@ uuid.workspace = true
 dirs.workspace = true
 
 [dev-dependencies]
+gommage-stdlib.workspace = true
 serde_json = { workspace = true }
 tempfile = "3"
 proptest = "=1.11.0"

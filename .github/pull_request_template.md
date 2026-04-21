@@ -19,7 +19,8 @@ security} and scope (when present) is one of the scopes listed in
 ## Determinism impact
 
 <!-- Required for any PR that touches crates/gommage-core,
-     crates/gommage-audit, policies/, capabilities/, or any pinned dep. -->
+     crates/gommage-audit, crates/gommage-stdlib, policies/,
+     capabilities/, or any pinned dep. -->
 
 - [ ] No impact (docs, CI-only, tests that do not change decisions).
 - [ ] Evaluator / mapper / policy / hardstop change. I have run the determinism suite locally (`cargo test -p gommage-core --test determinism`) and it is green, forward and shuffled.

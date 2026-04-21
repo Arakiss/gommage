@@ -34,6 +34,7 @@ The package names checked during the readiness pass were:
 
 - `gommage-core`
 - `gommage-audit`
+- `gommage-stdlib`
 - `gommage-cli`
 - `gommage-daemon`
 - `gommage-mcp`
@@ -44,13 +45,16 @@ policy stdlib are still changing quickly.
 
 ## Intended publish order
 
-When publishing opens, publish crates in dependency order:
+When publishing opens, publish crates in dependency order. `gommage-stdlib`
+must go first because the determinism test suite uses the packaged stdlib as a
+dev-dependency:
 
-1. `gommage-core`
-2. `gommage-audit`
-3. `gommage-cli`
-4. `gommage-daemon`
-5. `gommage-mcp`
+1. `gommage-stdlib`
+2. `gommage-core`
+3. `gommage-audit`
+4. `gommage-cli`
+5. `gommage-daemon`
+6. `gommage-mcp`
 
 The workspace dependencies already carry registry version requirements beside
 their local paths so `cargo package` has the metadata it needs after Cargo
@@ -58,7 +62,16 @@ strips path dependencies for crates.io consumers.
 
 ## Gates before flipping `publish = false`
 
-Do not publish until all of these pass:
+First-publish gates are sequential. Before `gommage-stdlib` exists on
+crates.io, package commands for crates that depend on it will fail with "no
+matching package named `gommage-stdlib` found". That is expected. Package and
+publish `gommage-stdlib` first, then run the remaining gates:
+
+```sh
+cargo package -p gommage-stdlib
+```
+
+After `gommage-stdlib` is available on crates.io:
 
 ```sh
 cargo package -p gommage-core
@@ -68,11 +81,15 @@ cargo package -p gommage-daemon
 cargo package -p gommage-mcp
 ```
 
-Also confirm that `gommage-cli` packages the embedded policy/capability stdlib
-instead of relying on files outside the crate package. Today the source build
-embeds `policies/` and `capabilities/` from the repository root; crates.io
-packaging must either vendor those files into the package or move the stdlib
-into a publishable crate before `cargo install gommage-cli` becomes supported.
+`gommage-stdlib` owns the packaged policy/capability YAML that `gommage-cli`
+embeds at compile time. The repository-root `policies/` and `capabilities/`
+directories are review-friendly mirrors; CI must keep them byte-identical to
+the packaged crate assets with:
+
+```sh
+diff -ru policies crates/gommage-stdlib/policies
+diff -ru capabilities crates/gommage-stdlib/capabilities
+```
 
 ## Release automation target
 

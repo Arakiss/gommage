@@ -1,5 +1,6 @@
 {
   ".": "0.1.0-alpha.1",
+  "crates/gommage-stdlib": "0.1.0-alpha.1",
   "crates/gommage-core": "0.2.0-alpha.1",
   "crates/gommage-audit": "0.2.0-alpha.1",
   "crates/gommage-cli": "0.4.0-alpha.1",

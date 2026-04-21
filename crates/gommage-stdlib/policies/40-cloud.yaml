@@ -1,0 +1,17 @@
+# Cloud / deployment policy defaults.
+
+- name: gate-vercel-prod-deploy
+  decision: ask_picto
+  required_scope: "deploy.vercel:prod"
+  match:
+    any_capability:
+      - "deploy.vercel:<prod-or-preview>"
+  reason: "vercel production deploys require a picto"
+
+- name: ask-docker-push
+  decision: ask_picto
+  required_scope: "docker.push"
+  match:
+    any_capability:
+      - "docker.push:**"
+  reason: "docker pushes require a picto (registry-wide action)"
