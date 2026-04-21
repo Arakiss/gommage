@@ -1,0 +1,48 @@
+# Generates a CycloneDX SBOM and attaches it to the user-facing release.
+#
+# Why gated on the `gommage-cli-v*` tag:
+#   release-please creates one GitHub Release per workspace member (core,
+#   audit, cli, daemon, mcp). Without the filter, this workflow would fire
+#   five times per release train and attach five identical SBOMs. The CLI
+#   tag is the single user-visible artefact line (the one binary-build in
+#   release.yml also keys on), so we mirror that choice here.
+#
+# Why Syft (via anchore/sbom-action) instead of cargo-cyclonedx:
+#   Syft reads Cargo.lock directly and emits CycloneDX 1.5 in one step
+#   with automatic release-asset upload. cargo-cyclonedx produces more
+#   precise per-crate feature-flag metadata but needs a separate
+#   `gh release upload`. For a pre-1.0 project, Syft's fidelity is enough;
+#   if downstream compliance consumers ask for feature-flag granularity,
+#   we can swap.
+
+name: sbom
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  cyclonedx:
+    name: cyclonedx (${{ github.event.release.tag_name }})
+    if: startsWith(github.event.release.tag_name, 'gommage-cli-v')
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed so anchore/sbom-action can attach the SBOM file to the
+      # triggering release as a downloadable asset.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Generate and attach CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: cyclonedx-json
+          artifact-name: gommage-${{ github.event.release.tag_name }}.cdx.json
+          # Uploads the SBOM as an asset on the triggering release.
+          upload-release-assets: true

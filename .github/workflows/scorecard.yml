@@ -1,0 +1,63 @@
+# OSSF Scorecard — https://github.com/ossf/scorecard
+#
+# Produces a third-party signal about the repo's supply-chain posture:
+# branch protection, token permissions, pinned deps, signed releases, SAST,
+# dangerous workflows, and so on. Results land in the Security tab (SARIF
+# upload) and, because `publish_results: true`, in the public OpenSSF API
+# consumed by deps.dev and the scorecard badge.
+#
+# Permissions are intentionally narrow:
+#   - top level: `read-all` (no workflow-wide writes)
+#   - job level: only the specific scopes the action needs
+# This is the canonical OSSF template; deviating here would cost the
+# `Token-Permissions` check points it is supposed to measure.
+
+name: scorecard
+
+on:
+  # Recomputes the score whenever branch-protection rules change so the
+  # public signal stays truthful.
+  branch_protection_rule:
+  schedule:
+    # Weekly, Saturday 01:30 UTC — outside the week's CI rush.
+    - cron: '30 1 * * 6'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      # Upload the SARIF result to the Security tab.
+      security-events: write
+      # Required for `publish_results: true` — the action uses OIDC to prove
+      # to the OpenSSF publishing service that this run comes from this repo.
+      id-token: write
+      # Read-only repo access is all the scorecard checks need.
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Do not persist the checkout token into the runner git config —
+          # later steps should not inherit push capability.
+          persist-credentials: false
+
+      - name: Run analysis
+        uses: ossf/scorecard-action@v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # Publishes results to the public OpenSSF API. Requires
+          # `id-token: write` above. Disabling this makes the scorecard
+          # badge go dark.
+          publish_results: true
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
