@@ -15,9 +15,13 @@
 
 > _« ce qui n'a pas lieu d'être, s'efface. »_
 
-**Policy-as-code for AI coding agents. Zero heuristics. No prior accumulation. You own the rules.**
+**Policy-as-code for AI coding agent tool calls. Deterministic decisions. Signed audit. You own the rules.**
 
-Gommage is an independent permission harness for AI coding agents. It supports **Claude Code** and **OpenAI Codex CLI** today via their `PreToolUse` hooks. It sits in front of the agent's tool calls and applies a declarative policy — the same way Kubernetes admission controllers or OPA sit in front of a cluster. Same input, same decision, every time. No classifier, no Bayesian prior accumulating over the transcript, no mystery denies halfway through a task.
+Gommage is a **policy decision and audit harness** for AI coding agents. It supports **Claude Code** and **OpenAI Codex CLI** today via their `PreToolUse` hooks. It sits between the agent and the operation the agent wants to perform, consults a declarative policy written in YAML, and emits `allow` / `deny` / `ask` — the same way Kubernetes admission controllers or OPA sit in front of a cluster.
+
+Gommage is **not a sandbox** and does not mediate execution. It decides, audits, and optionally requires a signed grant (picto) to proceed. For OS-level confinement, stack it under AppArmor / SELinux / `seccomp-bpf` / macOS Seatbelt / Codex's own `--sandbox` modes. See [`THREAT_MODEL.md`](THREAT_MODEL.md) for what that split means in practice.
+
+Within its scope, the decision is **deterministic**: same `(tool_call, policy)` pair → same decision, every time, in forward order, in shuffled order, on every OS. No classifier, no Bayesian prior over the transcript, no mystery denies halfway through a task. CI enforces that property with a determinism regression suite that runs 10 times per build.
 
 ## Why
 
@@ -25,10 +29,11 @@ Modern coding agents ship their security layer baked into the binary: a heuristi
 
 Gommage takes the opposite stance:
 
-- **Deterministic.** Same `{tool, input}` + same policy → same decision, every time. No state leaks from the transcript into the evaluator.
+- **Deterministic, and we define what that means.** The evaluator reads exactly `(capabilities, policy)` and nothing else — no clock, no env, no CWD, no transcript, no filesystem state. Regex matching on tool inputs and glob matching on capability patterns are part of the deterministic transform; they are not heuristics. What Gommage does NOT do: classify, score, infer intent, or accumulate state across decisions. See [`THREAT_MODEL.md` §3](THREAT_MODEL.md#3-canonical-decision-input) for the exact contract.
 - **Declarative.** Policies are YAML in `~/.gommage/policy.d/`. Version them, review them in PRs, `cat` them to understand why something got denied.
 - **Capability-first.** Tool calls are mapped to capabilities (`git.push:main`, `fs.write:**/node_modules/**`, `net.out:api.stripe.com`). Policies match on capabilities, not on command strings.
 - **Break-glass is real.** _Pictos_ (signed, TTL'd, usage-bounded grants) are first-class citizens of the policy. If a picto matches, it passes — no secret layer vetoing from above. The only override is a hardcoded, documented, finite hard-stop set.
+- **Signed audit, verifiable offline.** Every decision is one line in an append-only JSONL log, ed25519-signed per line. Kill the daemon mid-write and at most the last line is corrupt; everything prior stays independently verifiable with `gommage audit-verify`.
 - **Out-of-band approval.** `ask` decisions escalate to a human channel (TUI, webhook, push) — never back to the transcript. Keeps the agent and the approver on different wires.
 
 ## Status
