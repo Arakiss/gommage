@@ -3,6 +3,14 @@
 </p>
 <p align="center"><sub><em>The gold dust unmaking the parchment is the gommage. The three pendants below are pictos — signed, single-use grants.</em></sub></p>
 
+<p align="center">
+  <a href="https://github.com/Arakiss/gommage/actions/workflows/ci.yml"><img src="https://github.com/Arakiss/gommage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Arakiss/gommage/releases"><img src="https://img.shields.io/github/v/release/Arakiss/gommage?include_prereleases&sort=semver&color=blue" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="rust-toolchain.toml"><img src="https://img.shields.io/badge/rust-1.90%2B-orange.svg" alt="Rust 1.90+"></a>
+  <a href="tests/determinism/"><img src="https://img.shields.io/badge/determinism-enforced-brightgreen.svg" alt="Determinism enforced"></a>
+</p>
+
 # gommage
 
 > _« ce qui n'a pas lieu d'être, s'efface. »_
