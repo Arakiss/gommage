@@ -51,6 +51,10 @@ Gommage is an **opt-in complement** to whatever permission layer your agent ship
 # Requires cosign for Sigstore release verification.
 curl --proto '=https' --tlsv1.2 -sSf https://gommage.dev/install.sh | sh
 
+# Private repo installs may pass a GitHub token for release downloads.
+curl --proto '=https' --tlsv1.2 -sSf https://gommage.dev/install.sh \
+  | GOMMAGE_GITHUB_TOKEN="$(gh auth token)" sh
+
 # From source (today)
 cargo install --path crates/gommage-cli --force
 cargo install --path crates/gommage-daemon --force

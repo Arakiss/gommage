@@ -24,6 +24,10 @@ The installer verifies both:
 If either check fails, installation stops before extracting or writing any
 binary.
 
+For private repository releases, set `GOMMAGE_GITHUB_TOKEN`, `GH_TOKEN`, or
+`GITHUB_TOKEN`; the installer sends it only as a GitHub `Authorization` header
+for release API and asset downloads.
+
 Manual verification:
 
 ```sh
@@ -37,6 +41,11 @@ cosign verify-blob "$asset" \
 
 shasum -c "$asset.sha256"
 ```
+
+Checksum assets are generated with the archive basename. The installer hashes
+the downloaded archive directly and compares the first field of the `.sha256`
+file, so historical checksum files that include a packaging directory still
+verify the same archive contents.
 
 For `workflow_dispatch`, run the workflow from the same tag ref that will own
 the release. The workflow fails closed if the OIDC identity ref does not match

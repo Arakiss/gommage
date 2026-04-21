@@ -107,8 +107,8 @@ jobs:
           tar czf "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}.tar.gz" \
               gommage gommage-daemon gommage-mcp
           cd "$GITHUB_WORKSPACE"
-          shasum -a 256 "dist/${{ matrix.asset }}.tar.gz" \
-              > "dist/${{ matrix.asset }}.tar.gz.sha256"
+          (cd dist && shasum -a 256 "${{ matrix.asset }}.tar.gz" \
+              > "${{ matrix.asset }}.tar.gz.sha256")
       - name: Sign + verify artifact
         shell: bash
         run: |
