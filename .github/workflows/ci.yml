@@ -50,19 +50,62 @@ jobs:
       - run: cargo test --workspace
 
   determinism:
-    name: determinism sweep (x10)
-    runs-on: ubuntu-latest
+    # Determinism claim lives or dies by this matrix. Run the full forward +
+    # shuffled sweep 10× per combination of (OS, locale). Any divergence is a
+    # contract violation, not a flake.
+    name: determinism sweep (x10) — ${{ matrix.os }} / ${{ matrix.locale }}
+    runs-on: ${{ matrix.os }}
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            locale: C
+          - os: ubuntu-latest
+            locale: en_US.UTF-8
+          - os: ubuntu-latest
+            locale: de_DE.UTF-8
+          - os: macos-latest
+            locale: C
+          - os: macos-latest
+            locale: en_US.UTF-8
+    env:
+      LC_ALL: ${{ matrix.locale }}
+      LANG:   ${{ matrix.locale }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install non-default locale (Linux)
+        if: runner.os == 'Linux' && matrix.locale != 'C'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y locales
+          sudo locale-gen "${{ matrix.locale }}"
       - name: 10× forward + shuffled
         run: |
           for i in $(seq 1 10); do
             echo "--- sweep $i ---"
             cargo test -p gommage-core --test determinism -- --test-threads=1
           done
+
+  # Umbrella job: single required status check that succeeds iff every row of
+  # the determinism matrix above succeeded. Keeps branch protection sane (one
+  # name to list) while the matrix expands or contracts freely.
+  determinism-all:
+    name: determinism sweep (all)
+    runs-on: ubuntu-latest
+    needs: determinism
+    if: always()
+    steps:
+      - name: Roll up matrix result
+        run: |
+          if [[ "${{ needs.determinism.result }}" != "success" ]]; then
+            echo "determinism matrix status: ${{ needs.determinism.result }}"
+            exit 1
+          fi
+          echo "determinism matrix all green"
 
   policy-lint:
     name: policy lint

@@ -11,6 +11,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ## [Unreleased]
 
+### Added
+
+- `docs/input-schema.md` — canonical decision-input contract. Frozen schema for `ToolCall`, explicit list of what the evaluator does NOT read (clock, env, CWD, filesystem state, transcript), path handling rules (opaque UTF-8, no symlink / normalisation / case-folding), and the semver policy that governs future changes to this contract.
+- Cross-platform determinism CI matrix: the 10× sweep now runs across `{ubuntu-latest, macos-latest}` × `{C, en_US.UTF-8, de_DE.UTF-8}` (5 combinations total). An umbrella job `determinism sweep (all)` rolls matrix results into a single required status check on branch protection.
+
 ### Changed
 
 - Threat model rewritten around 10 concrete attacker cases (malicious agent binary, hostile local user, malicious repo, forged pictos, TOCTOU between decision and execution, replayed out-of-band approvals, clock skew, Unicode/case-folding tricks, regex DoS in mapper, YAML deserialization attacks). Each case spells out what Gommage does, what it does not, and what to stack on top.
