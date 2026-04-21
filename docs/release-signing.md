@@ -48,6 +48,14 @@ cosign verify-blob "$asset" \
 shasum -c "$asset.sha256"
 ```
 
+Installer flags:
+
+```sh
+sh scripts/install.sh --help
+sh scripts/install.sh --version gommage-cli-v0.4.0-alpha.1
+sh scripts/install.sh --bin-dir "$HOME/.local/bin"
+```
+
 Checksum assets are generated with the archive basename. The installer hashes
 the downloaded archive directly and compares the first field of the `.sha256`
 file, so historical checksum files that include a packaging directory still

@@ -5,6 +5,8 @@
 #   curl --proto '=https' --tlsv1.2 -sSf \
 #       https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
 #
+#   sh scripts/install.sh --version gommage-cli-v0.4.0-alpha.1 --bin-dir "$HOME/.local/bin"
+#
 # Installs three binaries into $GOMMAGE_BIN (default: $HOME/.local/bin):
 #   - gommage          (cli)
 #   - gommage-daemon   (long-running process)
@@ -33,6 +35,28 @@ GITHUB_TOKEN="${GOMMAGE_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
 say()  { printf 'gommage-install: %s\n' "$*"; }
 die()  { printf 'gommage-install: error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required tool not found: $1"; }
+usage() {
+  cat <<'EOF'
+Gommage installer
+
+Usage:
+  install.sh [--version <tag>] [--bin-dir <path>] [--repo <owner/name>] [--cosign <path>] [--help]
+
+Options:
+  --version <tag>   Release tag to install. Default: latest gommage-cli release.
+  --bin-dir <path>  Install directory. Default: $HOME/.local/bin.
+  --repo <slug>     GitHub repository slug. Default: Arakiss/gommage.
+  --cosign <path>   cosign executable. Default: cosign.
+  -h, --help        Show this help.
+
+Environment:
+  GOMMAGE_VERSION, GOMMAGE_BIN, GOMMAGE_REPO, GOMMAGE_COSIGN
+  GOMMAGE_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN for private release downloads.
+
+The installer verifies the Sigstore bundle and SHA-256 checksum before it
+extracts or writes binaries.
+EOF
+}
 need_cosign() {
   command -v "$COSIGN" >/dev/null 2>&1 || die "required tool not found: $COSIGN (install cosign or set GOMMAGE_COSIGN)"
 }
@@ -113,6 +137,38 @@ fetch_asset() {
     fetch "$base/$name" "$out"
   fi
 }
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version)
+      [ "$#" -ge 2 ] || die "--version requires a value"
+      VERSION="$2"
+      shift 2
+      ;;
+    --bin-dir)
+      [ "$#" -ge 2 ] || die "--bin-dir requires a value"
+      BIN_DIR="$2"
+      shift 2
+      ;;
+    --repo)
+      [ "$#" -ge 2 ] || die "--repo requires a value"
+      REPO="$2"
+      shift 2
+      ;;
+    --cosign)
+      [ "$#" -ge 2 ] || die "--cosign requires a value"
+      COSIGN="$2"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
 
 need curl
 need_cosign
@@ -209,6 +265,6 @@ if ! echo ":$PATH:" | grep -q ":${BIN_DIR}:"; then
 fi
 
 say "installed ${VERSION} to ${BIN_DIR}"
-say "run:  ${BIN_DIR}/gommage quickstart --agent claude"
-say "codex: ${BIN_DIR}/gommage agent install codex"
-say "daemon: ${BIN_DIR}/gommage daemon install"
+say "claude: ${BIN_DIR}/gommage quickstart --agent claude --daemon"
+say "codex:  ${BIN_DIR}/gommage quickstart --agent codex --daemon"
+say "health: ${BIN_DIR}/gommage doctor"

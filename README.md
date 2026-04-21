@@ -40,7 +40,7 @@ Gommage takes the opposite stance:
 
 ## Status
 
-**Current public release channel: alpha (`gommage-cli-v0.3.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on installer polish, policy import fidelity, mapper coverage, and launch-readiness smoke tests. See [ROADMAP](#roadmap).
+**Current public release channel: alpha (`gommage-cli-v0.4.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on installer polish, crates.io publishing readiness, policy import fidelity, mapper coverage, and launch-readiness smoke tests. See [ROADMAP](#roadmap).
 
 ## Positioning
 
@@ -55,6 +55,11 @@ Gommage is an **opt-in complement** to whatever permission layer your agent ship
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
 
+# Pin a specific alpha release or install elsewhere.
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  | sh -s -- --version gommage-cli-v0.4.0-alpha.1 --bin-dir "$HOME/.local/bin"
+
 # Private repo installs may pass a GitHub token for release downloads.
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
@@ -65,6 +70,10 @@ cargo install --path crates/gommage-cli --force
 cargo install --path crates/gommage-daemon --force
 cargo install --path crates/gommage-mcp --force
 ```
+
+`cargo install gommage-cli` is **not supported yet**: the crates are not on
+crates.io while the project is alpha. See
+[`docs/publishing.md`](docs/publishing.md) for the current publish gate.
 
 ## Quickstart
 
@@ -194,7 +203,7 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 
 ## Roadmap
 
-**v0.2 alpha line** — current release line
+**v0.4 alpha line** — current release line
 - Daemon + CLI + PreToolUse hook adapter
 - Supported agents: **Claude Code** (all tool types), **OpenAI Codex CLI** (Bash tool only — limited by Codex's current hook surface)
 - YAML policy + capability mappers for Bash / git / vercel / bun / docker
