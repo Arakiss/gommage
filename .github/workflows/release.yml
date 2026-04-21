@@ -22,24 +22,79 @@ env:
 
 jobs:
   # 1) On push to main: run release-please. Opens / updates the release PR.
-  #    Merging that PR creates per-crate tags; the tag push then drives (2).
+  #    When a CLI release is created, dispatch this workflow from the created
+  #    tag so Sigstore identity remains tied to the release tag ref.
   release-please:
     name: release-please
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
+      actions: write
       contents: write
       pull-requests: write
     steps:
-      - uses: googleapis/release-please-action@v4
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Mark alpha releases as prereleases
+        if: ${{ steps.release.outputs.releases_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_OUTPUTS: ${{ toJson(steps.release.outputs) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tags="$(
+            node <<'NODE'
+          const outputs = JSON.parse(process.env.RELEASE_OUTPUTS);
+          const tags = [...new Set(Object.entries(outputs)
+            .filter(([key, value]) => {
+              return (key === "tag_name" || key.endsWith("--tag_name"))
+                && typeof value === "string"
+                && value.includes("-alpha.");
+            })
+            .map(([, value]) => value))]
+            .sort();
+          for (const tag of tags) {
+            console.log(tag);
+          }
+          NODE
+          )"
+
+          if [[ -z "${tags}" ]]; then
+            echo "No alpha release tags emitted by release-please."
+            exit 0
+          fi
+
+          while IFS= read -r tag; do
+            [[ -n "${tag}" ]] || continue
+            gh release edit "${tag}" --prerelease --latest=false
+          done <<< "${tags}"
+      - name: Trigger CLI binary build
+        if: ${{ steps.release.outputs['crates/gommage-cli--release_created'] == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLI_TAG: ${{ steps.release.outputs['crates/gommage-cli--tag_name'] }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CLI_TAG}" ]]; then
+            echo "::error::Release Please reported a CLI release but did not emit a tag."
+            exit 1
+          fi
+
+          gh workflow run release.yml --ref "${CLI_TAG}" -f "tag=${CLI_TAG}"
 
   # 2) On tag push gommage-cli-v*: build cross-platform binaries, attach to
-  #    that tag's GitHub release. Also runnable manually via workflow_dispatch
-  #    to retroactively build binaries for tags that predated this workflow.
+  #    that tag's GitHub release. release-please dispatches this job explicitly
+  #    because GITHUB_TOKEN-created tag pushes do not recursively start another
+  #    workflow run. It is also runnable manually via workflow_dispatch to
+  #    retroactively build binaries for tags that predated this workflow.
   build-binaries:
     name: build (${{ matrix.target }})
     if: >
