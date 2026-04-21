@@ -16,6 +16,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Signed audit lifecycle events for picto create/confirm/consume/revoke/reject and policy reloads. `audit-verify` and `audit-verify --explain` now verify mixed decision/event JSONL logs.
 - `gommage policy init --stdlib` installs the bundled stdlib policies and capability mappers without requiring manual file copies.
 - `gommage quickstart` and `gommage agent install` bootstrap Claude Code/Codex integrations with config backups, stdlib install, Claude native deny-rule import, and hook installation.
+- `gommage daemon install|status|uninstall` manages user-level launchd/systemd services so long sessions no longer require a foreground daemon process.
 - `gommage doctor` diagnoses the local home, key, policy, capability mapper, audit log, and daemon socket state.
 - Structured `gommage explain <audit-id>` output with exact id matching plus `--json` for the raw verified entry shape.
 - `gommage grant --ttl` now accepts duration suffixes (`s`, `m`, `h`, `d`) as well as raw seconds.

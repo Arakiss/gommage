@@ -229,3 +229,61 @@ fn agent_install_codex_writes_hook_and_enables_feature_flag() {
     assert!(config.contains("codex_hooks = true"));
     assert!(config.contains("foo = true"));
 }
+
+#[test]
+fn daemon_install_launchd_writes_plist_without_starting() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let launchd = temp.path().join("LaunchAgents");
+    let fake_daemon = temp.path().join("bin").join("gommage-daemon");
+    fs::create_dir_all(fake_daemon.parent().unwrap()).unwrap();
+    fs::write(&fake_daemon, "").unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_LAUNCHD_DIR", &launchd)
+        .env("GOMMAGE_DAEMON_BIN", &fake_daemon)
+        .args(["daemon", "install", "--manager", "launchd", "--no-start"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plist = fs::read_to_string(launchd.join("dev.gommage.daemon.plist")).unwrap();
+    assert!(plist.contains("<string>dev.gommage.daemon</string>"));
+    assert!(plist.contains("<string>--foreground</string>"));
+    assert!(plist.contains("<string>--home</string>"));
+    assert!(plist.contains(&home.to_string_lossy().to_string()));
+    assert!(plist.contains(&fake_daemon.to_string_lossy().to_string()));
+}
+
+#[test]
+fn daemon_install_systemd_writes_service_without_starting() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let systemd = temp.path().join("systemd-user");
+    let fake_daemon = temp.path().join("bin").join("gommage-daemon");
+    fs::create_dir_all(fake_daemon.parent().unwrap()).unwrap();
+    fs::write(&fake_daemon, "").unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_SYSTEMD_USER_DIR", &systemd)
+        .env("GOMMAGE_DAEMON_BIN", &fake_daemon)
+        .args(["daemon", "install", "--manager", "systemd", "--no-start"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let service = fs::read_to_string(systemd.join("gommage-daemon.service")).unwrap();
+    assert!(service.contains("Description=Gommage policy daemon"));
+    assert!(service.contains("ExecStart="));
+    assert!(service.contains("--foreground --home"));
+    assert!(service.contains(&home.to_string_lossy().to_string()));
+    assert!(service.contains(&fake_daemon.to_string_lossy().to_string()));
+}

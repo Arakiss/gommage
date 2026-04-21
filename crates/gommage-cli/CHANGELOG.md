@@ -7,6 +7,7 @@
 - `gommage policy init --stdlib`.
 - `gommage quickstart` for one-command home, stdlib, permission-import, and hook setup.
 - `gommage agent install claude|codex` for targeted hook installation.
+- `gommage daemon install|status|uninstall` for user-level launchd/systemd service management.
 - `gommage doctor`.
 - Structured `gommage explain <audit-id>` output plus `--json`.
 - Human TTL suffix parsing for `gommage grant --ttl`.

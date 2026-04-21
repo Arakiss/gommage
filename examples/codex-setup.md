@@ -26,7 +26,7 @@ gommage quickstart --agent codex
 stdlib, writes `~/.codex/hooks.json`, and enables `features.codex_hooks = true`
 in `~/.codex/config.toml` with backups.
 
-## 2. Start the daemon (recommended for long sessions)
+## 2. Install the daemon service (recommended for long sessions)
 
 The `gommage-mcp` adapter falls back to in-process evaluation when the
 daemon socket isn't available, and that fallback still writes signed audit
@@ -35,8 +35,11 @@ policy + mapper rules pre-compiled in memory and centralizes reload/audit
 behavior:
 
 ```sh
-gommage-daemon --foreground
+gommage daemon install
 ```
+
+Use `gommage daemon status` to inspect the service and
+`gommage daemon uninstall` to remove it.
 
 ## 3. Start an expedition and use Codex
 
