@@ -11,6 +11,16 @@ fn gommage(home: &std::path::Path) -> Command {
     cmd
 }
 
+fn doctor_check<'a>(report: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
+    report
+        .get("checks")
+        .and_then(|checks| checks.as_array())
+        .unwrap()
+        .iter()
+        .find(|check| check.get("name").and_then(|value| value.as_str()) == Some(name))
+        .unwrap()
+}
+
 #[test]
 fn grant_rejects_invalid_uses_without_panic() {
     let temp = tempdir().unwrap();
@@ -73,6 +83,93 @@ fn policy_init_stdlib_installs_loadable_defaults() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("rules loaded"));
+}
+
+#[test]
+fn doctor_json_reports_missing_home_as_failure() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home).args(["doctor", "--json"]).output().unwrap();
+
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("fail")
+    );
+    assert!(
+        report
+            .pointer("/summary/failures")
+            .and_then(|value| value.as_u64())
+            .unwrap()
+            >= 1
+    );
+    assert_eq!(
+        doctor_check(&report, "home")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("fail")
+    );
+}
+
+#[test]
+fn doctor_json_reports_initialized_home_with_warnings() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home).args(["doctor", "--json"]).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert_eq!(
+        report
+            .pointer("/summary/failures")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert!(
+        report
+            .pointer("/summary/warnings")
+            .and_then(|value| value.as_u64())
+            .unwrap()
+            >= 1
+    );
+    assert_eq!(
+        doctor_check(&report, "policy")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("ok")
+    );
+    assert!(
+        doctor_check(&report, "policy")
+            .pointer("/details/rules")
+            .and_then(|value| value.as_u64())
+            .unwrap()
+            > 0
+    );
+    assert_eq!(
+        doctor_check(&report, "daemon")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("warn")
+    );
 }
 
 #[test]
