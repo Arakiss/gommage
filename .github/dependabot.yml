@@ -27,7 +27,7 @@ updates:
       - "deps"
       - "cargo"
     commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore"
       include: "scope"
     groups:
       # Determinism-critical pins. Any bump here is a contract-level change
@@ -79,7 +79,7 @@ updates:
       - "deps"
       - "github-actions"
     commit-message:
-      prefix: "chore(ci)"
+      prefix: "ci"
       include: "scope"
     groups:
       actions:
