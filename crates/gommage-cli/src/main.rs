@@ -81,7 +81,14 @@ enum Cmd {
 
     /// Verify the full audit log signature chain.
     #[command(name = "audit-verify")]
-    AuditVerify,
+    AuditVerify {
+        /// Produce a detailed forensic report (JSON) instead of a simple count.
+        /// Includes per-line signature verification, key fingerprint, policy
+        /// version history, expeditions seen, and any anomalies (tamper, bad
+        /// signature, timestamp out of order, mid-log policy change).
+        #[arg(long)]
+        explain: bool,
+    },
 
     /// Evaluate a tool call JSON from stdin. Useful for tests and MCP adapters.
     Decide {
@@ -260,10 +267,19 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             eprintln!("no audit entry with id {id}");
             return Ok(ExitCode::from(1));
         }
-        Cmd::AuditVerify => {
+        Cmd::AuditVerify { explain } => {
             let vk = layout.load_verifying_key()?;
-            let n = verify_log(&layout.audit_log, &vk).context("verifying audit log")?;
-            println!("ok {n} entries verified");
+            if explain {
+                let report = gommage_audit::explain_log(&layout.audit_log, &vk)
+                    .context("explaining audit log")?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                if !report.anomalies.is_empty() {
+                    return Ok(ExitCode::from(1));
+                }
+            } else {
+                let n = verify_log(&layout.audit_log, &vk).context("verifying audit log")?;
+                println!("ok {n} entries verified");
+            }
         }
         Cmd::Decide { pretty } => {
             let mut buf = String::new();
