@@ -29,6 +29,13 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    ignore:
+      # ed25519-dalek 2.2.x exposes key generation through rand_core 0.6
+      # traits. Keep rand_core major upgrades manual until the signing stack
+      # moves together.
+      - dependency-name: "rand_core"
+        update-types:
+          - "version-update:semver-major"
     groups:
       # Determinism-critical pins. Any bump here is a contract-level change
       # and ships with a fresh 10× determinism sweep. Reviewer must verify
