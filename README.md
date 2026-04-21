@@ -4,7 +4,7 @@
 
 **Policy-as-code for AI coding agents. Zero heuristics. No prior accumulation. You own the rules.**
 
-Gommage is an independent permission harness for AI coding agents (Claude Code, Cursor, Continue, Aider). It sits in front of the agent's tool calls and applies a declarative policy — the same way Kubernetes admission controllers or OPA sit in front of a cluster. Same input, same decision, every time. No classifier, no Bayesian prior accumulating over the transcript, no mystery denies halfway through a task.
+Gommage is an independent permission harness for AI coding agents. It supports **Claude Code** and **OpenAI Codex CLI** today via their `PreToolUse` hooks. It sits in front of the agent's tool calls and applies a declarative policy — the same way Kubernetes admission controllers or OPA sit in front of a cluster. Same input, same decision, every time. No classifier, no Bayesian prior accumulating over the transcript, no mystery denies halfway through a task.
 
 ## Why
 
@@ -20,7 +20,7 @@ Gommage takes the opposite stance:
 
 ## Status
 
-**v0.1.0-alpha** — usable in a single-agent setup (Claude Code). Rough edges expected. See [ROADMAP](#roadmap).
+**v0.1.0-alpha** — usable with **Claude Code** (all tool types) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). Rough edges expected. See [ROADMAP](#roadmap).
 
 ## Positioning
 
@@ -43,15 +43,27 @@ cargo install --path crates/gommage-cli
 gommage expedition start "refactor-auth-middleware"
 
 # Run the daemon (dev mode — logs to stderr)
-gommage daemon --foreground
+gommage-daemon --foreground
 
-# Configure Claude Code to use the MCP adapter as a PreToolUse hook:
-# ~/.claude/settings.json
+# Wire the PreToolUse hook in whichever agent(s) you use:
+#
+# Claude Code — ~/.claude/settings.json
 # {
 #   "hooks": {
-#     "PreToolUse": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "gommage mcp" }]}]
+#     "PreToolUse": [
+#       { "matcher": "*", "hooks": [{ "type": "command", "command": "gommage-mcp" }] }
+#     ]
 #   }
 # }
+#
+# OpenAI Codex CLI — ~/.codex/hooks.json
+# {
+#   "PreToolUse": [
+#     { "matcher": "Bash", "hooks": [{ "type": "command", "command": "gommage-mcp" }] }
+#   ]
+# }
+#
+# See examples/claude-code-setup.md and examples/codex-setup.md.
 
 # Check a policy file
 gommage policy lint ~/.gommage/policy.d/10-defaults.yaml
@@ -148,19 +160,25 @@ Gommage ships a regression suite that runs ~10k `{tool, input}` fixtures with an
 ## Roadmap
 
 **v0.1 (MVP)** — this release
-- Daemon + CLI + MCP hook adapter for Claude Code
+- Daemon + CLI + PreToolUse hook adapter
+- Supported agents: **Claude Code** (all tool types), **OpenAI Codex CLI** (Bash tool only — limited by Codex's current hook surface)
 - YAML policy + capability mappers for Bash / git / vercel / bun / docker
 - Pictos (signed, TTL, usage-bounded)
 - Append-only signed audit log
 - Hardcoded hard-stop set
+- Determinism-critical deps pinned with `=x.y.z`, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
 
 **v1.0** — hackable by others
 - Rego policies via `regorus`
 - TUI dashboard (`gommage watch`) with live approvals
-- Multi-agent via generic MCP (Cursor, Continue, Aider)
+- Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)
+- Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
+- Generic MCP server mode for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
 - Webhook out-of-band
 - Signed binary releases + SBOM
+
+**Not planned** — either no hook API or known permission-bypass bugs in the hook layer: Aider, Zed, Continue, Cline. Revisited when upstream matures.
 
 **v1.x** — scale
 - Push approvals (ntfy, Slack native)
