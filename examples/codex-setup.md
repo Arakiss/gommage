@@ -16,15 +16,19 @@ both — Codex just points its hook at it.
 Same binaries as the Claude Code setup — one install, both agents.
 
 ```sh
-cargo install --path crates/gommage-cli
-cargo install --path crates/gommage-daemon
-cargo install --path crates/gommage-mcp
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
 gommage quickstart --agent codex
+gommage doctor --json
 ```
 
 `quickstart` creates `~/.gommage`, installs the bundled policy/capability
 stdlib, writes `~/.codex/hooks.json`, and enables `features.codex_hooks = true`
 in `~/.codex/config.toml` with backups.
+
+`doctor --json` should report top-level `status` as `ok` or `warn`. A warning is
+expected before the first audited decision and when the daemon has not been
+installed. Treat `fail` as a setup error before starting Codex.
 
 ## 2. Install the daemon service (recommended for long sessions)
 
@@ -75,7 +79,7 @@ Sandbox mode enforces OS-level confinement (Seatbelt on macOS, `bwrap +
 seccomp` on Linux); Gommage enforces your declarative policy on top. The
 two layers are complementary.
 
-## 6. Break-glass / picto flow (identical to Claude Code)
+## 5. Break-glass / picto flow (identical to Claude Code)
 
 ```sh
 gommage grant --scope "git.push:main" --uses 1 --ttl 10m --reason "hotfix"
@@ -83,7 +87,7 @@ codex exec --sandbox workspace-write "create a hotfix branch and push to main"
 # First push: picto consumed, allow. Second push: picto spent, ask_picto again.
 ```
 
-## 7. End the expedition
+## 6. End the expedition
 
 ```sh
 gommage expedition end
