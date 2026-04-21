@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "rust",
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "separate-pull-requests": false,
+  "bootstrap-sha": "fcb4dfd520971ba8546d7d972ba55463ec06cfe3",
+  "pull-request-title-pattern": "chore(release): release ${component} ${version}",
+  "changelog-sections": [
+    { "type": "feat",     "section": "Features" },
+    { "type": "fix",      "section": "Bug fixes" },
+    { "type": "perf",     "section": "Performance" },
+    { "type": "security", "section": "Security" },
+    { "type": "refactor", "section": "Refactor", "hidden": false },
+    { "type": "docs",     "section": "Documentation", "hidden": false },
+    { "type": "build",    "section": "Build system", "hidden": true },
+    { "type": "ci",       "section": "CI", "hidden": true },
+    { "type": "chore",    "section": "Chores", "hidden": true },
+    { "type": "test",     "section": "Tests", "hidden": true }
+  ],
+  "packages": {
+    "crates/gommage-core":   { "component": "gommage-core",   "package-name": "gommage-core" },
+    "crates/gommage-audit":  { "component": "gommage-audit",  "package-name": "gommage-audit" },
+    "crates/gommage-cli":    { "component": "gommage-cli",    "package-name": "gommage-cli" },
+    "crates/gommage-daemon": { "component": "gommage-daemon", "package-name": "gommage-daemon" },
+    "crates/gommage-mcp":    { "component": "gommage-mcp",    "package-name": "gommage-mcp" }
+  },
+  "plugins": [
+    { "type": "cargo-workspace", "merge": true }
+  ]
+}

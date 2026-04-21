@@ -2,20 +2,34 @@ name: release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
-      - "v*.*.*-*"
+    branches: [main]
 
 permissions:
   contents: write
+  pull-requests: write
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_PROFILE_RELEASE_LTO: thin
 
 jobs:
-  build:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name:        ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-binaries:
     name: build (${{ matrix.target }})
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,33 +59,22 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           mkdir -p .cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> .cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
+          echo '[target.aarch64-unknown-linux-gnu]'    >  .cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"'      >> .cargo/config.toml
       - run: cargo build --release --target ${{ matrix.target }} --workspace
-      - name: Package
+      - name: Package + checksum
         shell: bash
         run: |
           mkdir -p dist
           cd target/${{ matrix.target }}/release
-          tar czf "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}.tar.gz" gommage gommage-daemon gommage-mcp
+          tar czf "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}.tar.gz" \
+              gommage gommage-daemon gommage-mcp
           cd "$GITHUB_WORKSPACE"
-          shasum -a 256 "dist/${{ matrix.asset }}.tar.gz" > "dist/${{ matrix.asset }}.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+          shasum -a 256 "dist/${{ matrix.asset }}.tar.gz" \
+              > "dist/${{ matrix.asset }}.tar.gz.sha256"
+      - uses: softprops/action-gh-release@v2
         with:
-          name: ${{ matrix.asset }}
-          path: dist/*
-
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-      - name: Flatten
-        run: find dist -mindepth 2 -type f -exec mv -t dist {} +
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          files: |
+            dist/${{ matrix.asset }}.tar.gz
+            dist/${{ matrix.asset }}.tar.gz.sha256

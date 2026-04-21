@@ -1,0 +1,60 @@
+extends:
+  - "@commitlint/config-conventional"
+
+# Project-specific overrides below.
+rules:
+  # Types we accept. Matches the verbs used in the plan (feat / fix / chore
+  # / docs / refactor / perf / test / build / ci / revert / security).
+  type-enum:
+    - 2
+    - always
+    - - feat
+      - fix
+      - chore
+      - docs
+      - refactor
+      - perf
+      - test
+      - build
+      - ci
+      - revert
+      - security
+
+  # Scope is optional but, when present, must be one of the workspace crates,
+  # a known stdlib section, or one of these cross-cutting scopes.
+  scope-enum:
+    - 2
+    - always
+    - - core
+      - audit
+      - cli
+      - daemon
+      - mcp
+      - policies
+      - capabilities
+      - hardstop
+      - picto
+      - runtime
+      - docs
+      - ci
+      - deps
+      - release
+      - security
+      - determinism
+
+  # Subject: imperative, ≤72 chars.
+  subject-case:
+    - 2
+    - never
+    - - "sentence-case"
+      - "start-case"
+      - "pascal-case"
+      - "upper-case"
+  subject-empty: [2, never]
+  subject-full-stop: [2, never, "."]
+  header-max-length: [2, always, 72]
+
+  # Body and footer should be readable diffs — blank line required between
+  # subject and body (conventional default).
+  body-leading-blank: [2, always]
+  footer-leading-blank: [2, always]
