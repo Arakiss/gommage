@@ -1,0 +1,23 @@
+# Package manager policy defaults.
+
+- name: allow-bun-install
+  decision: allow
+  match:
+    any_capability:
+      - "pkg.bun:install"
+  reason: "bun install is a normal operation in this project family"
+
+- name: allow-npm-install
+  decision: allow
+  match:
+    any_capability:
+      - "pkg.npm:install"
+  reason: "npm install is a normal operation"
+
+- name: ask-cargo-install-global
+  decision: ask_picto
+  required_scope: "pkg.cargo:install"
+  match:
+    any_capability:
+      - "pkg.cargo:install"
+  reason: "global cargo install touches ~/.cargo/bin; require picto"

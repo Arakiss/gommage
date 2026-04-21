@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/gommage-stdlib",
     "crates/gommage-core",
     "crates/gommage-audit",
     "crates/gommage-daemon",
@@ -23,6 +24,7 @@ authors = ["Petru Arakiss <petruarakiss@gmail.com>"]
 # when the path is stripped for crates.io consumers.
 gommage-core   = { version = "=0.2.0-alpha.1", path = "crates/gommage-core"   }
 gommage-audit  = { version = "=0.2.0-alpha.1", path = "crates/gommage-audit"  }
+gommage-stdlib = { version = "=0.1.0-alpha.1", path = "crates/gommage-stdlib" }
 
 # --- Plumbing (caret-ranged: stable interfaces, cheap patch bumps) ----------
 serde      = { version = "1", features = ["derive"] }

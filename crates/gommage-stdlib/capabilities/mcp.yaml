@@ -1,0 +1,20 @@
+# Capability mappers for Claude Code MCP tools.
+#
+# Claude names MCP tools as mcp__<server>__<tool>. Rules intentionally keep the
+# actual tool name in the capability payload so policy authors can gate by
+# server, by verb-like prefix, or by exact tool handle.
+
+- name: mcp-write-like
+  tool_pattern: "^mcp__.+__(?:write|edit|create|update|delete|remove|upsert|insert|patch|set|mutate|run|execute|exec|publish|send|post|put|merge|push|deploy).*$"
+  emit:
+    - "mcp.write:${tool}"
+
+- name: mcp-read-like
+  tool_pattern: "^mcp__.+__(?:read|get|list|search|find|fetch|query|describe|show|inspect|stat).*$"
+  emit:
+    - "mcp.read:${tool}"
+
+- name: mcp-generic
+  tool_pattern: "^mcp__.+__.+$"
+  emit:
+    - "mcp.call:${tool}"

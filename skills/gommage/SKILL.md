@@ -54,7 +54,7 @@ cargo install --path crates/gommage-daemon --force
 cargo install --path crates/gommage-mcp --force
 ```
 
-Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gommage-*` crates are not published on crates.io and the manifests intentionally keep `publish = false`.
+Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gommage-*` crates are not published on crates.io and the manifests intentionally keep `publish = false`. The bundled stdlib is packaged in `gommage-stdlib`, but the full publish gate still needs to pass before crates.io becomes a supported install path.
 
 ## Agent Notes
 
@@ -69,7 +69,7 @@ Useful commands:
 ```sh
 gommage expedition start "<task-name>"
 gommage expedition end
-gommage policy-lint
+gommage policy check
 gommage grant --scope "git.push:main" --uses 1 --ttl 10m --reason "<reason>"
 gommage audit-verify
 gommage explain <audit-id>

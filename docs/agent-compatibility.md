@@ -1,6 +1,6 @@
 # Agent compatibility matrix
 
-What Gommage sees, what it does not, and what can bypass it per agent. This page is written against **current upstream state (April 2026)**. If an agent changes its hook surface, this page moves accordingly; the capability mapper in `capabilities/` is agent-agnostic and usually does not need changes.
+What Gommage sees, what it does not, and what can bypass it per agent. This page is written against **current upstream state (April 2026)**. If an agent changes its hook surface, this page moves accordingly; the packaged capability mapper stdlib in `crates/gommage-stdlib/capabilities/` is agent-agnostic and usually does not need code changes. The repository-root `capabilities/` directory is a review-friendly mirror kept in sync by CI.
 
 If an item is listed as "Bypasses Gommage", that is not a vulnerability — it is the boundary of what a PreToolUse-level interception layer can observe. Stack OS-level confinement (AppArmor, SELinux, `seccomp-bpf`, macOS Seatbelt, Codex `--sandbox`) under Gommage for anything you need caught below the agent layer.
 

@@ -1,0 +1,23 @@
+# Policy-level hard-stops.
+#
+# The **hardcoded** hard-stop set lives in code (crates/gommage-core/src/hardstop.rs).
+# This file adds policy-level hard-stops — denials that match your local workflow
+# but aren't universal enough to belong in the compiled-in list.
+#
+# Use `hard_stop: true` here when you want the deny to be un-bypassable by pictos.
+
+- name: no-force-push
+  decision: gommage
+  hard_stop: false  # allow break-glass picto if you know what you're doing
+  match:
+    any_capability:
+      - "git.push.force:*"
+  reason: "force pushes require a picto (dangerous to shared history)"
+
+- name: no-curl-pipe-sh
+  decision: gommage
+  hard_stop: true
+  match:
+    any_capability:
+      - "proc.exec.curl-pipe-sh:*"
+  reason: "curl | sh is never acceptable from an agent — vet the script first"

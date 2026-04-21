@@ -1,0 +1,33 @@
+# Agent-native network and MCP tool policy defaults.
+
+- name: ask-web-fetch
+  decision: ask_picto
+  required_scope: "net.fetch"
+  match:
+    any_capability:
+      - "net.fetch:*"
+  reason: "fetching arbitrary URLs can disclose prompts or pull untrusted content; require picto"
+
+- name: ask-web-search
+  decision: ask_picto
+  required_scope: "net.search"
+  match:
+    any_capability:
+      - "net.search:web"
+  reason: "web search leaves the local trust boundary; require picto"
+
+- name: ask-mcp-write
+  decision: ask_picto
+  required_scope: "mcp.write"
+  match:
+    any_capability:
+      - "mcp.write:*"
+  reason: "MCP write-like tools execute outside Gommage's direct control; require picto"
+
+- name: ask-mcp-generic
+  decision: ask_picto
+  required_scope: "mcp.call"
+  match:
+    any_capability:
+      - "mcp.call:*"
+  reason: "unclassified MCP tools require an explicit picto by default"

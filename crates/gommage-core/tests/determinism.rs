@@ -12,6 +12,7 @@
 //! cause.
 
 use gommage_core::{CapabilityMapper, Decision, EvalResult, ToolCall, evaluate, policy::Policy};
+use gommage_stdlib::StdlibFile;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -70,8 +71,8 @@ fn load_fixtures() -> Vec<(PathBuf, Fixture)> {
 }
 
 fn mapper() -> CapabilityMapper {
-    let dir = repo_root().join("capabilities");
-    CapabilityMapper::load_from_dir(&dir).expect("loading capabilities")
+    let dir = materialize_stdlib(gommage_stdlib::CAPABILITIES);
+    CapabilityMapper::load_from_dir(dir.path()).expect("loading capabilities")
 }
 
 fn policy_for(fixture: &Fixture) -> Policy {
@@ -84,8 +85,17 @@ fn policy_for(fixture: &Fixture) -> Policy {
             .unwrap_or_else(|| "/__no_expedition__".into()),
     );
     env.insert("HOME".into(), "/__no_home__".into());
-    let dir = repo_root().join("policies");
-    Policy::load_from_dir(&dir, &env).expect("loading policies")
+    let dir = materialize_stdlib(gommage_stdlib::POLICIES);
+    Policy::load_from_dir(dir.path(), &env).expect("loading policies")
+}
+
+fn materialize_stdlib(files: &[StdlibFile]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("creating stdlib tempdir");
+    for file in files {
+        fs::write(dir.path().join(file.name), file.contents)
+            .unwrap_or_else(|e| panic!("writing stdlib file {}: {e}", file.name));
+    }
+    dir
 }
 
 fn run_fixture(fixture: &Fixture, mapper: &CapabilityMapper) -> EvalResult {

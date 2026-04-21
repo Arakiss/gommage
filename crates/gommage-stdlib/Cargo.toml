@@ -1,0 +1,13 @@
+[package]
+name = "gommage-stdlib"
+version = "0.1.0-alpha.1"
+publish = false    # flip when the crate is first published to crates.io
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bundled policy and capability mapper stdlib for Gommage."
+
+[lib]
+name = "gommage_stdlib"
+path = "src/lib.rs"

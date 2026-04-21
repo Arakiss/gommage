@@ -21,6 +21,7 @@
     { "type": "test",     "section": "Tests", "hidden": true }
   ],
   "packages": {
+    "crates/gommage-stdlib": { "component": "gommage-stdlib", "package-name": "gommage-stdlib" },
     "crates/gommage-core":   { "component": "gommage-core",   "package-name": "gommage-core" },
     "crates/gommage-audit":  { "component": "gommage-audit",  "package-name": "gommage-audit" },
     "crates/gommage-cli":    { "component": "gommage-cli",    "package-name": "gommage-cli" },

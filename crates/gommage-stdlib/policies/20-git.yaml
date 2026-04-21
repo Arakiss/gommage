@@ -1,0 +1,37 @@
+# Git operations policy.
+
+- name: gate-main-push
+  decision: ask_picto
+  required_scope: "git.push:main"
+  match:
+    any_capability:
+      - "git.push:refs/heads/main"
+      - "git.push:refs/heads/master"
+  reason: "pushes to main/master require a signed picto"
+
+- name: gate-release-push
+  decision: ask_picto
+  required_scope: "git.push:release"
+  match:
+    any_capability:
+      - "git.push:refs/heads/release/*"
+      - "git.push:refs/heads/release-*"
+  reason: "pushes to release branches require a signed picto"
+
+- name: allow-feature-push
+  decision: allow
+  match:
+    any_capability:
+      - "git.push:refs/heads/feature/**"
+      - "git.push:refs/heads/fix/**"
+      - "git.push:refs/heads/chore/**"
+      - "git.push:refs/heads/docs/**"
+  reason: "feature/fix/chore/docs branches are safe"
+
+- name: ask-reset-hard
+  decision: ask_picto
+  required_scope: "git.reset.hard"
+  match:
+    any_capability:
+      - "git.reset.hard:*"
+  reason: "git reset --hard is destructive; require picto"

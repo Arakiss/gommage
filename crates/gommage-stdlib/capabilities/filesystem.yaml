@@ -1,0 +1,68 @@
+# Capability mappers for filesystem-shaped tool calls.
+#
+# Claude Code and Cursor both use Read / Write / Edit with a `file_path` field.
+# Other agents may use slightly different schemas — extend via local overrides
+# in ~/.gommage/capabilities.d/.
+
+- name: fs-read
+  tool: Read
+  emit:
+    - "fs.read:${input.file_path}"
+
+- name: fs-write
+  tool: Write
+  emit:
+    - "fs.write:${input.file_path}"
+
+- name: fs-edit
+  tool: Edit
+  emit:
+    - "fs.write:${input.file_path}"
+
+- name: fs-multi-edit
+  tool: MultiEdit
+  emit:
+    - "fs.write:${input.file_path}"
+
+- name: fs-notebook-edit
+  tool: NotebookEdit
+  emit:
+    - "fs.write:${input.notebook_path}"
+
+- name: fs-glob
+  tool: Glob
+  emit:
+    - "fs.read:${input.pattern}"
+
+- name: fs-glob-resolved-pattern
+  tool: Glob
+  match_input:
+    __gommage_pattern: ".+"
+  emit:
+    - "fs.read:${input.__gommage_pattern}"
+
+- name: fs-grep-resolved-path
+  tool: Grep
+  match_input:
+    __gommage_path: ".+"
+  emit:
+    - "fs.search:${input.__gommage_path}"
+    - "fs.read:${input.__gommage_path}"
+    - "fs.read:${input.__gommage_path}/**"
+
+- name: fs-grep-resolved-glob
+  tool: Grep
+  match_input:
+    __gommage_glob_path: ".+"
+  emit:
+    - "fs.search:${input.__gommage_glob_path}"
+    - "fs.read:${input.__gommage_glob_path}"
+
+- name: fs-grep-raw-path
+  tool: Grep
+  match_input:
+    path: ".+"
+  emit:
+    - "fs.search:${input.path}"
+    - "fs.read:${input.path}"
+    - "fs.read:${input.path}/**"

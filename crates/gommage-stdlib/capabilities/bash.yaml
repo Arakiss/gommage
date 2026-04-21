@@ -1,0 +1,99 @@
+# Capability mappers for the `Bash` tool.
+#
+# Each rule matches the `command` field against a regex. When it fires, the
+# rule emits one or more capability strings. Multiple rules may fire for the
+# same call — that is fine, all their emissions go into the capability set.
+
+# --- Default: every Bash call is proc.exec:<command> ---------------------------
+- name: bash-proc-exec
+  tool: Bash
+  emit:
+    - "proc.exec:${input.command}"
+
+# --- Git --------------------------------------------------------------------
+- name: bash-git-push
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push(?:\\s+[-\\w]+)*\\s+(?P<remote>[\\w.-]+)\\s+(?P<ref>\\S+)"
+  emit:
+    - "git.push:refs/heads/${ref}"
+    - "net.out:github.com"
+
+- name: bash-git-push-current
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push\\s*$"
+  emit:
+    - "git.push:<current-branch>"
+    - "net.out:github.com"
+
+- name: bash-git-force-push
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push[^#]*--force\\b"
+  emit:
+    - "git.push.force:<any>"
+
+- name: bash-git-reset-hard
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+reset\\s+--hard\\b"
+  emit:
+    - "git.reset.hard:<any>"
+
+# --- Package managers -------------------------------------------------------
+- name: bash-bun-install
+  tool: Bash
+  match_input:
+    command: "^\\s*bun\\s+(?:install|add|remove)\\b"
+  emit:
+    - "pkg.bun:install"
+    - "net.out:registry.npmjs.org"
+
+- name: bash-npm-install
+  tool: Bash
+  match_input:
+    command: "^\\s*npm\\s+(?:install|i|add|remove|uninstall)\\b"
+  emit:
+    - "pkg.npm:install"
+    - "net.out:registry.npmjs.org"
+
+- name: bash-cargo-install
+  tool: Bash
+  match_input:
+    command: "^\\s*cargo\\s+install\\b"
+  emit:
+    - "pkg.cargo:install"
+    - "net.out:crates.io"
+
+# --- Cloud / deploy ---------------------------------------------------------
+- name: bash-vercel-deploy
+  tool: Bash
+  match_input:
+    command: "^\\s*vercel\\s+(?:deploy|--prod|deploy\\s+--prod)"
+  emit:
+    - "deploy.vercel:<prod-or-preview>"
+    - "net.out:vercel.com"
+
+- name: bash-docker-push
+  tool: Bash
+  match_input:
+    command: "^\\s*docker\\s+push\\s+(?P<image>\\S+)"
+  emit:
+    - "docker.push:${image}"
+
+# --- Destructive shell patterns (surfaced so policy/hardstop can see them) --
+- name: bash-rm-rf
+  tool: Bash
+  match_input:
+    command: "(?P<full>^.*\\brm\\s+-rf\\b.*)"
+  emit:
+    - "proc.exec:${full}"
+
+- name: bash-curl-pipe-shell
+  tool: Bash
+  match_input:
+    command: "curl\\s+[^|]*\\|\\s*(?:sh|bash|zsh)"
+  emit:
+    - "proc.exec.curl-pipe-sh:<any>"
+    - "net.out:<untrusted>"

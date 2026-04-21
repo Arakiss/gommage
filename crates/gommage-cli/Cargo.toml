@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 gommage-core.workspace  = true
 gommage-audit.workspace = true
+gommage-stdlib.workspace = true
 serde.workspace         = true
 serde_json.workspace    = true
 toml_edit.workspace     = true

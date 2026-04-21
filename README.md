@@ -15,21 +15,50 @@
 
 > _« ce qui n'a pas lieu d'être, s'efface. »_
 
-**Policy-as-code for AI coding agent tool calls. Deterministic decisions. Signed audit. You own the rules.**
+**A deterministic policy and audit layer for AI coding agent tool calls.**
 
 > **Development status: alpha.** Gommage is public, installable, and being tested end-to-end, but it is under intensive development and the operator experience is still changing quickly. Expect breaking CLI/config changes, rough installation edges, and policy/mapping gaps until the project reaches a beta line. Use it first on non-critical repositories, keep your agent's native sandbox/permission layer enabled, and review generated policies before trusting them.
 
-Gommage is a **policy decision and audit harness** for AI coding agents. It supports **Claude Code** and **OpenAI Codex CLI** today via their `PreToolUse` hooks. It sits between the agent and the operation the agent wants to perform, consults a declarative policy written in YAML, and emits `allow` / `deny` / `ask` — the same way Kubernetes admission controllers or OPA sit in front of a cluster.
+Gommage is one component in an **AI agent harness engineering** stack: the layer
+that turns observed tool calls into deterministic, reviewable permission
+decisions. It supports **Claude Code** and **OpenAI Codex CLI** today via their
+`PreToolUse` hooks. It sits between the agent and the operation the agent wants
+to perform, consults declarative YAML policy, and emits `allow` / `deny` /
+`ask`, similar to how Kubernetes admission controllers or OPA sit in front of a
+cluster API.
 
 Gommage is **not a sandbox** and does not mediate execution. It decides, audits, and optionally requires a signed grant (picto) to proceed. For OS-level confinement, stack it under AppArmor / SELinux / `seccomp-bpf` / macOS Seatbelt / Codex's own `--sandbox` modes. See [`THREAT_MODEL.md`](THREAT_MODEL.md) for what that split means in practice.
 
 Within its scope, the decision is **deterministic**: same `(tool_call, policy)` pair → same decision, every time, in forward order, in shuffled order, on every OS. No classifier, no Bayesian prior over the transcript, no mystery denies halfway through a task. CI enforces that property with a determinism regression suite that runs 10 times per build.
 
+## Where it fits
+
+A serious agent harness has multiple layers:
+
+1. **OS confinement**: sandboxing, AppArmor, SELinux, `seccomp-bpf`, macOS
+   Seatbelt, containers, and read/write boundaries.
+2. **Agent-native permissions**: the sandbox and approval controls built into
+   Claude Code, Codex, Cursor, or any other host.
+3. **Policy decision gateway**: the `PreToolUse` interception point where
+   Gommage can make a deterministic decision from the tool call and local
+   policy.
+4. **Break-glass grants**: signed, bounded approvals for exceptional actions.
+5. **Audit and governance**: signed logs, policy hashes, CI, release signing,
+   reviewable policy packs, and reproducible checks.
+
+Gommage owns layer 3 and part of layers 4-5. It does not try to own the whole
+stack. That framing matters: the project is useful because it composes with
+native agent controls and OS confinement instead of pretending a hook is a
+sandbox.
+
 ## Why
 
-Modern coding agents ship their security layer baked into the binary: a heuristic classifier reads the transcript, assigns a risk prior, and silently vetoes tool calls it dislikes. In short sessions this is invisible. In long sessions the prior drifts: the classifier enters "paranoid mode" and starts denying trivial operations that would have passed earlier. You can't audit it, can't tune it, can't disable it. A 30-second task becomes 30 minutes of fighting the tool.
+Agent-native permission layers are valuable, but they are usually difficult to
+review, reproduce, or audit outside the agent. Teams and long-running solo
+operators need permission behavior that can be versioned in a repo, explained
+after the fact, and repeated across machines without hidden transcript state.
 
-Gommage takes the opposite stance:
+Gommage takes a narrow stance:
 
 - **Deterministic, and we define what that means.** The evaluator reads exactly `(capabilities, policy)` and nothing else — no clock, no env, no CWD, no transcript, no filesystem state. Regex matching on tool inputs and glob matching on capability patterns are part of the deterministic transform; they are not heuristics. What Gommage does NOT do: classify, score, infer intent, or accumulate state across decisions. See [`THREAT_MODEL.md` §3](THREAT_MODEL.md#3-canonical-decision-input) for the exact contract.
 - **Declarative.** Policies are YAML in `~/.gommage/policy.d/`. Version them, review them in PRs, `cat` them to understand why something got denied.
@@ -40,11 +69,11 @@ Gommage takes the opposite stance:
 
 ## Status
 
-**Current public release channel: alpha (`gommage-cli-v0.4.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on installer polish, crates.io publishing readiness, policy import fidelity, mapper coverage, and launch-readiness smoke tests. See [ROADMAP](#roadmap).
+**Current public release channel: alpha (`gommage-cli-v0.4.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on launch-readiness smoke tests, crates.io publishing gates, policy import fidelity, mapper coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
 
 ## Positioning
 
-Gommage is an **opt-in complement** to whatever permission layer your agent ships with — not an attack on it. You can run both: the native classifier stays where it is, and Gommage handles the decisions you want to own. You'll probably find that once Gommage is handling the policy, the native layer has nothing to flag.
+Gommage is an **opt-in complement** to whatever permission layer your agent ships with. Run both: keep native sandboxing and approvals enabled, then let Gommage handle the decisions you want to own as code. If the agent's native layer blocks something before the hook fires, Gommage cannot override that; if the hook observes the call, Gommage can make the local policy decision and audit it.
 
 ## Install
 
@@ -222,14 +251,17 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 **v0.4 alpha line** — current release line
 - Daemon + CLI + PreToolUse hook adapter
 - Supported agents: **Claude Code** (all tool types), **OpenAI Codex CLI** (Bash tool only — limited by Codex's current hook surface)
-- YAML policy + capability mappers for Bash / git / vercel / bun / docker
+- YAML policy + capability mappers for Bash, filesystem tools, Grep, WebFetch, WebSearch, MCP tools, git, cloud CLIs, package managers, Vercel, Bun, and Docker
 - Pictos (signed, TTL, usage-bounded)
 - Append-only signed audit log
 - Hardcoded hard-stop set
+- Repository-distributed Codex skill for Gommage setup and operation
+- Packaged `gommage-stdlib` crate assets for future crates.io support
 - Sigstore-signed binary release artifacts + installer verification
 - Determinism-critical deps pinned with `=x.y.z`, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
 
 **v1.0** — hackable by others
+- crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
 - TUI dashboard (`gommage watch`) with live approvals
 - Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)
@@ -248,7 +280,7 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 
 ## Not in scope
 
-Gommage is a permission harness, not a security product:
+Gommage is a permission harness layer, not a complete security product:
 
 - **Not an OS permission system.** AppArmor / SELinux operate below it; they are complementary.
 - **Does not defend the agent binary itself.** If Claude Code is compromised at binary level, Gommage cannot help.
