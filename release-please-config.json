@@ -4,6 +4,8 @@
   "include-component-in-tag": true,
   "include-v-in-tag": true,
   "separate-pull-requests": false,
+  "prerelease": true,
+  "prerelease-type": "alpha",
   "bootstrap-sha": "fcb4dfd520971ba8546d7d972ba55463ec06cfe3",
   "pull-request-title-pattern": "chore(release): release ${component} ${version}",
   "changelog-sections": [

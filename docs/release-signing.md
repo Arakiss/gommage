@@ -53,6 +53,11 @@ the downloaded archive directly and compares the first field of the `.sha256`
 file, so historical checksum files that include a packaging directory still
 verify the same archive contents.
 
-For `workflow_dispatch`, run the workflow from the same tag ref that will own
-the release. The workflow fails closed if the OIDC identity ref does not match
-the release tag.
+When release-please creates a CLI release, the release workflow dispatches its
+binary-build path from the new tag ref instead of relying on a recursive tag
+push. This keeps the Sigstore identity tied to `refs/tags/<tag>` while using
+only the repository `GITHUB_TOKEN`.
+
+For manual `workflow_dispatch` backfills, run the workflow from the same tag ref
+that will own the release. The workflow fails closed if the OIDC identity ref
+does not match the release tag.
