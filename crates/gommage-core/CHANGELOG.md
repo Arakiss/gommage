@@ -11,6 +11,8 @@ enforced by `cargo-semver-checks` in CI.
   verified transactional consumption.
 - Capability mapper stdlib now maps Claude Code `MultiEdit` calls to
   `fs.write:<path>`.
+- Capability mapper stdlib now maps Claude Code `Grep`, `WebFetch`,
+  `WebSearch`, and MCP tool names.
 
 ### Changed
 
@@ -20,6 +22,8 @@ enforced by `cargo-semver-checks` in CI.
   instead of absolute host paths and raw YAML.
 - Invalid picto creation input returns typed errors instead of panicking.
 - Capability mapper regex compilation now uses explicit size and nesting limits.
+- Capability mapper rules can now match dynamic tool names with
+  `tool_pattern` and render the actual tool name with `${tool}`.
 - Policy `${HOME}` substitution is now populated even when no expedition is active.
 
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.1.0-alpha.1...gommage-core-v0.1.1-alpha.1) (2026-04-21)

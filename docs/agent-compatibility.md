@@ -19,12 +19,12 @@ If an item is listed as "Bypasses Gommage", that is not a vulnerability — it i
 | `MultiEdit` | `file_path` | `fs.write:<path>` |
 | `NotebookEdit` | `notebook_path` | `fs.write:<notebook_path>` |
 | `Glob` | `pattern` | `fs.read:<pattern>` |
-| `Grep` | (not currently mapped) | — |
-| `WebFetch` | (not currently mapped) | — |
-| `WebSearch` | (not currently mapped) | — |
-| `mcp__<server>__<tool>` | (not currently mapped) | — |
+| `Grep` | `pattern`, `path`, `glob`; hook `cwd` is copied into reserved `__gommage_*` fields when needed | `fs.search:<path-or-glob>`, `fs.read:<path-or-glob>` |
+| `WebFetch` | `url` | `net.fetch:<host>`, `net.out:<host>` |
+| `WebSearch` | `query` | `net.search:web`, `net.search.query:<query>` |
+| `mcp__<server>__<tool>` | full MCP tool name | `mcp.write:<tool>`, `mcp.read:<tool>`, `mcp.call:<tool>` depending on verb-like prefixes |
 
-To extend coverage, add a mapper rule under `~/.gommage/capabilities.d/` — Claude Code forwards the full `tool_name` + `tool_input` object on every hook call, so the information is there regardless of whether the stdlib pack matches it today.
+To extend coverage, add a mapper rule under `~/.gommage/capabilities.d/` — Claude Code forwards the full `tool_name` + `tool_input` object on every hook call. The stdlib defaults intentionally require pictos for WebFetch, WebSearch, write-like MCP tools, and unclassified MCP calls.
 
 `gommage quickstart --agent claude` installs the hook and imports supported
 `permissions.deny` entries from `~/.claude/settings.json` into

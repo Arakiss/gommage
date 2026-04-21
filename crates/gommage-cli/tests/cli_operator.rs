@@ -173,7 +173,7 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
     assert_eq!(pre_tool_use.len(), 1);
     assert_eq!(
         pre_tool_use[0].get("matcher").and_then(|v| v.as_str()),
-        Some("Bash|Read|MultiEdit")
+        Some("Bash|Read|MultiEdit|WebSearch")
     );
     assert!(
         pre_tool_use[0]

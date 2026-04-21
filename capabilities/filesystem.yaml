@@ -33,3 +33,36 @@
   tool: Glob
   emit:
     - "fs.read:${input.pattern}"
+
+- name: fs-glob-resolved-pattern
+  tool: Glob
+  match_input:
+    __gommage_pattern: ".+"
+  emit:
+    - "fs.read:${input.__gommage_pattern}"
+
+- name: fs-grep-resolved-path
+  tool: Grep
+  match_input:
+    __gommage_path: ".+"
+  emit:
+    - "fs.search:${input.__gommage_path}"
+    - "fs.read:${input.__gommage_path}"
+    - "fs.read:${input.__gommage_path}/**"
+
+- name: fs-grep-resolved-glob
+  tool: Grep
+  match_input:
+    __gommage_glob_path: ".+"
+  emit:
+    - "fs.search:${input.__gommage_glob_path}"
+    - "fs.read:${input.__gommage_glob_path}"
+
+- name: fs-grep-raw-path
+  tool: Grep
+  match_input:
+    path: ".+"
+  emit:
+    - "fs.search:${input.path}"
+    - "fs.read:${input.path}"
+    - "fs.read:${input.path}/**"

@@ -31,6 +31,13 @@ On the wire — which is what agents send over the `PreToolUse` hook or the daem
 
 **Two tool calls with the same canonical JSON produce the same decision.** "Canonical" means: `tool` string equal, `input` value structurally equal under object-key-sort and array-preserve. The `ToolCall::input_hash()` method computes this canonicalisation for audit purposes.
 
+The `gommage-mcp` adapter preserves the agent's `tool_input` and may add
+reserved `__gommage_*` fields before constructing the canonical `ToolCall`.
+Today this is used only to copy Claude Code hook `cwd` into path-bearing
+`Grep`/`Glob` calls so relative searches can be mapped deterministically. Once
+added, those fields are ordinary input fields and are covered by the audit
+input hash.
+
 ---
 
 ## 2. Path handling
@@ -82,8 +89,9 @@ pub fn map(&self, call: &ToolCall) -> Vec<Capability>;
 
 - Input: `&ToolCall`. Rules are tried in load order (lexicographic filenames under `capabilities.d/`, then declaration order within each file).
 - Output: `Vec<Capability>`, deterministic in both content and order.
-- For each rule whose `tool` field equals `call.tool`: every `match_input` regex must fire (on the string extracted from the specified dot-path). If all fire, every `emit` template renders and is pushed into the output.
-- Template substitution: `${capture_name}` → regex capture group, `${input.field.sub}` → JSON dot-path as string. Missing captures or missing input fields render to empty string.
+- Each rule must declare exactly one of `tool` or `tool_pattern`. `tool` is an exact string match. `tool_pattern` is a bounded regex matched against `call.tool`; named captures are available to templates.
+- For each rule whose tool matcher accepts `call.tool`: every `match_input` regex must fire (on the string extracted from the specified dot-path). If all fire, every `emit` template renders and is pushed into the output.
+- Template substitution: `${tool}` → actual tool name, `${capture_name}` → regex capture group from `tool_pattern` or `match_input`, `${input.field.sub}` → JSON dot-path as string. Missing captures or missing input fields render to empty string.
 - `HashMap` iteration order is eliminated by sorting `match_input` by dot-path string at rule compile time.
 
 The capability `Vec` is not deduplicated. A rule that emits two capabilities will show both, in order. Multiple rules that each emit will concatenate in rule-declaration order.

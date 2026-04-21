@@ -1,0 +1,6 @@
+{
+  "name": "grep-inside-expedition-root-is-allowed",
+  "call": { "tool": "Grep", "input": { "pattern": "fn main", "__gommage_path": "/tmp/proj/src", "__gommage_glob_path": "/tmp/proj/src/*.rs" } },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

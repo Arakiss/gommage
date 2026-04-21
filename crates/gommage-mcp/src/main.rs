@@ -15,6 +15,7 @@ use gommage_core::{
     runtime::{HomeLayout, Runtime},
 };
 use serde::Deserialize;
+use serde_json::Value;
 use std::io::{self, Read, Write};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -29,6 +30,8 @@ struct HookInput {
     #[allow(dead_code)]
     #[serde(default)]
     hook_event_name: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
     tool_name: String,
     #[serde(default)]
     tool_input: serde_json::Value,
@@ -41,9 +44,11 @@ async fn main() -> Result<()> {
         .read_to_string(&mut buf)
         .context("reading stdin")?;
     let input: HookInput = serde_json::from_str(&buf).context("parsing hook JSON")?;
+    let tool = input.tool_name;
+    let tool_input = enrich_tool_input(&tool, input.tool_input, input.cwd.as_deref());
     let call = ToolCall {
-        tool: input.tool_name,
-        input: input.tool_input,
+        tool,
+        input: tool_input,
     };
 
     let layout = HomeLayout::default();
@@ -85,6 +90,56 @@ async fn main() -> Result<()> {
     stdout.write_all(s.as_bytes())?;
     stdout.write_all(b"\n")?;
     Ok(())
+}
+
+fn enrich_tool_input(tool: &str, mut input: Value, cwd: Option<&str>) -> Value {
+    let Some(cwd) = cwd else {
+        return input;
+    };
+    let Value::Object(map) = &mut input else {
+        return input;
+    };
+
+    match tool {
+        "Grep" => {
+            let base = map
+                .get("path")
+                .and_then(Value::as_str)
+                .map(|path| resolve_hook_path(cwd, path))
+                .unwrap_or_else(|| cwd.to_string());
+            map.entry("__gommage_path".to_string())
+                .or_insert_with(|| Value::String(base.clone()));
+            if let Some(glob) = map.get("glob").and_then(Value::as_str) {
+                let glob_path = resolve_hook_path(&base, glob);
+                map.entry("__gommage_glob_path".to_string())
+                    .or_insert_with(|| Value::String(glob_path));
+            }
+        }
+        "Glob" => {
+            if let Some(pattern) = map.get("pattern").and_then(Value::as_str) {
+                let pattern_path = resolve_hook_path(cwd, pattern);
+                map.entry("__gommage_pattern".to_string())
+                    .or_insert_with(|| Value::String(pattern_path));
+            }
+        }
+        _ => {}
+    }
+
+    input
+}
+
+fn resolve_hook_path(base: &str, path: &str) -> String {
+    if path.starts_with('/') || path.starts_with('~') {
+        return path.to_string();
+    }
+    if path == "." || path.is_empty() {
+        return base.to_string();
+    }
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        path.trim_start_matches("./")
+    )
 }
 
 async fn forward_to_daemon(
@@ -177,4 +232,41 @@ fn decide_in_process_and_audit(
     }
     writer.append(call, &eval, expedition_name.as_deref())?;
     Ok(eval)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn enriches_grep_with_hook_cwd_when_path_is_implicit() {
+        let input = enrich_tool_input(
+            "Grep",
+            json!({"pattern": "fn main", "glob": "*.rs"}),
+            Some("/tmp/proj"),
+        );
+        assert_eq!(input["__gommage_path"], "/tmp/proj");
+        assert_eq!(input["__gommage_glob_path"], "/tmp/proj/*.rs");
+    }
+
+    #[test]
+    fn enriches_grep_relative_path_against_hook_cwd() {
+        let input = enrich_tool_input(
+            "Grep",
+            json!({"pattern": "todo", "path": "src"}),
+            Some("/tmp/proj"),
+        );
+        assert_eq!(input["__gommage_path"], "/tmp/proj/src");
+    }
+
+    #[test]
+    fn leaves_existing_reserved_fields_untouched() {
+        let input = enrich_tool_input(
+            "Grep",
+            json!({"pattern": "todo", "__gommage_path": "/already"}),
+            Some("/tmp/proj"),
+        );
+        assert_eq!(input["__gommage_path"], "/already");
+    }
 }

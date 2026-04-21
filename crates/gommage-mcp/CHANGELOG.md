@@ -4,6 +4,9 @@
 
 ### Changed
 
+- Claude `Grep` and `Glob` hook inputs are enriched with reserved
+  `__gommage_*` path fields derived from hook `cwd`, allowing relative search
+  tools to map to deterministic filesystem capabilities.
 - Daemon-absent fallback now writes signed audit entries and uses verified
   picto lookup/consume semantics.
 - Fallback is only used when the daemon socket is absent; daemon protocol

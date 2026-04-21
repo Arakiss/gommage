@@ -17,6 +17,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage policy init --stdlib` installs the bundled stdlib policies and capability mappers without requiring manual file copies.
 - `gommage quickstart` and `gommage agent install` bootstrap Claude Code/Codex integrations with config backups, stdlib install, Claude native deny-rule import, and hook installation.
 - `gommage daemon install|status|uninstall` manages user-level launchd/systemd services so long sessions no longer require a foreground daemon process.
+- Stdlib capability coverage for Claude `Grep`, `WebFetch`, `WebSearch`, and MCP tool names (`mcp__<server>__<tool>`), with conservative picto defaults for web/MCP surfaces.
 - `gommage doctor` diagnoses the local home, key, policy, capability mapper, audit log, and daemon socket state.
 - Structured `gommage explain <audit-id>` output with exact id matching plus `--json` for the raw verified entry shape.
 - `gommage grant --ttl` now accepts duration suffixes (`s`, `m`, `h`, `d`) as well as raw seconds.
@@ -37,6 +38,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Policy version hashes now use relative policy file paths plus substituted effective contents, making identical policy trees path-stable across homes while distinguishing different effective canvases.
 - Invalid picto creation input now returns typed CLI errors instead of panicking.
 - Capability mapper regex compilation now uses explicit size and nesting limits.
+- Capability mapper rules can now use `tool_pattern` for dynamic tool names and `${tool}` in capability templates.
 - Policy `${HOME}` substitution is now available even when no expedition is active.
 - Threat model rewritten around 10 concrete attacker cases (malicious agent binary, hostile local user, malicious repo, forged pictos, TOCTOU between decision and execution, replayed out-of-band approvals, clock skew, Unicode/case-folding tricks, regex DoS in mapper, YAML deserialization attacks). Each case spells out what Gommage does, what it does not, and what to stack on top.
 - Canonical decision input now explicitly documented: the evaluator reads only `(capabilities, policy)` — no clock, env, CWD, filesystem state, or transcript. Path strings are treated as opaque UTF-8 with no symlink resolution or normalization.

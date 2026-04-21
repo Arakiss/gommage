@@ -1,0 +1,5 @@
+{
+  "name": "webfetch-url-asks-for-picto",
+  "call": { "tool": "WebFetch", "input": { "url": "https://example.com/docs" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.fetch" }
+}

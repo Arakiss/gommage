@@ -15,16 +15,21 @@ const MAPPER_REGEX_NEST_LIMIT: u32 = 128;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawMapperRule {
     pub name: String,
-    pub tool: String,
+    #[serde(default)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub tool_pattern: Option<String>,
     /// `field_path` → regex that the field's string value must match.
     /// `field_path` supports dot notation for nested JSON: `"options.flag"`.
     ///
-    /// A rule with an empty `match_input` fires for every call of `tool`.
+    /// A rule with an empty `match_input` fires for every call matching
+    /// `tool` or `tool_pattern`.
     #[serde(default)]
     pub match_input: HashMap<String, String>,
     /// Templates to render into capabilities when the rule fires.
     /// Templates support `${capture_name}` (from the regexes above) and
-    /// `${input.field.sub}` (dot-path into the tool call's input JSON).
+    /// `${input.field.sub}` (dot-path into the tool call's input JSON), plus
+    /// `${tool}` for the actual tool name.
     pub emit: Vec<String>,
 }
 
@@ -32,11 +37,17 @@ pub struct RawMapperRule {
 #[allow(dead_code)] // name/source/index are surfaced by `gommage explain` (v0.1 final)
 struct CompiledRule {
     name: String,
-    tool: String,
+    tool_match: ToolMatch,
     match_input: Vec<(String, Regex)>,
     emit: Vec<Template>,
     source: PathBuf,
     index: usize,
+}
+
+#[derive(Debug)]
+enum ToolMatch {
+    Exact(String),
+    Pattern(Regex),
 }
 
 #[derive(Debug)]
@@ -47,6 +58,7 @@ struct Template {
 #[derive(Debug)]
 enum TemplatePart {
     Literal(String),
+    ToolName,
     Capture(String),
     InputPath(Vec<String>),
 }
@@ -114,14 +126,15 @@ impl CapabilityMapper {
     pub fn map(&self, call: &ToolCall) -> Vec<Capability> {
         let mut out: Vec<Capability> = Vec::new();
         for rule in &self.rules {
-            if rule.tool != call.tool {
-                continue;
-            }
-            let Some(captures) = match_all_inputs(rule, &call.input) else {
+            let Some(mut captures) = match_tool(&rule.tool_match, &call.tool) else {
                 continue;
             };
+            let Some(input_captures) = match_all_inputs(rule, &call.input) else {
+                continue;
+            };
+            captures.extend(input_captures);
             for tpl in &rule.emit {
-                let rendered = render(tpl, &captures, &call.input);
+                let rendered = render(tpl, &captures, &call.tool, &call.input);
                 out.push(Capability::new(rendered));
             }
         }
@@ -134,6 +147,7 @@ fn compile(
     source: PathBuf,
     index: usize,
 ) -> Result<CompiledRule, GommageError> {
+    let tool_match = compile_tool_match(&raw)?;
     let match_input = raw
         .match_input
         .into_iter()
@@ -159,12 +173,35 @@ fn compile(
 
     Ok(CompiledRule {
         name: raw.name,
-        tool: raw.tool,
+        tool_match,
         match_input,
         emit,
         source,
         index,
     })
+}
+
+fn compile_tool_match(raw: &RawMapperRule) -> Result<ToolMatch, GommageError> {
+    match (&raw.tool, &raw.tool_pattern) {
+        (Some(tool), None) => Ok(ToolMatch::Exact(tool.clone())),
+        (None, Some(pattern)) => RegexBuilder::new(pattern)
+            .size_limit(MAPPER_REGEX_SIZE_LIMIT_BYTES)
+            .nest_limit(MAPPER_REGEX_NEST_LIMIT)
+            .build()
+            .map(ToolMatch::Pattern)
+            .map_err(|e| GommageError::Regex {
+                pattern: pattern.clone(),
+                source: e,
+            }),
+        (Some(_), Some(_)) => Err(GommageError::Policy(format!(
+            "mapper rule {:?}: use either tool or tool_pattern, not both",
+            raw.name
+        ))),
+        (None, None) => Err(GommageError::Policy(format!(
+            "mapper rule {:?}: missing tool or tool_pattern",
+            raw.name
+        ))),
+    }
 }
 
 fn parse_template(s: String) -> Template {
@@ -180,7 +217,9 @@ fn parse_template(s: String) -> Template {
             let start = i + 2;
             let end = s[start..].find('}').map(|p| start + p).unwrap_or(s.len());
             let token = &s[start..end];
-            if let Some(rest) = token.strip_prefix("input.") {
+            if token == "tool" {
+                parts.push(TemplatePart::ToolName);
+            } else if let Some(rest) = token.strip_prefix("input.") {
                 parts.push(TemplatePart::InputPath(
                     rest.split('.').map(str::to_string).collect(),
                 ));
@@ -197,6 +236,23 @@ fn parse_template(s: String) -> Template {
         parts.push(TemplatePart::Literal(s[literal_start..].to_string()));
     }
     Template { parts }
+}
+
+fn match_tool(tool_match: &ToolMatch, tool: &str) -> Option<HashMap<String, String>> {
+    match tool_match {
+        ToolMatch::Exact(expected) if expected == tool => Some(HashMap::new()),
+        ToolMatch::Exact(_) => None,
+        ToolMatch::Pattern(re) => {
+            let caps = re.captures(tool)?;
+            let mut captures = HashMap::new();
+            for name in re.capture_names().flatten() {
+                if let Some(m) = caps.name(name) {
+                    captures.insert(name.to_string(), m.as_str().to_string());
+                }
+            }
+            Some(captures)
+        }
+    }
 }
 
 fn match_all_inputs(rule: &CompiledRule, input: &Value) -> Option<HashMap<String, String>> {
@@ -226,11 +282,12 @@ fn extract_string(input: &Value, path: &str) -> Option<String> {
     }
 }
 
-fn render(tpl: &Template, captures: &HashMap<String, String>, input: &Value) -> String {
+fn render(tpl: &Template, captures: &HashMap<String, String>, tool: &str, input: &Value) -> String {
     let mut out = String::new();
     for part in &tpl.parts {
         match part {
             TemplatePart::Literal(s) => out.push_str(s),
+            TemplatePart::ToolName => out.push_str(tool),
             TemplatePart::Capture(name) => {
                 if let Some(v) = captures.get(name) {
                     out.push_str(v);
@@ -348,5 +405,37 @@ mod tests {
                 Capability::new("net.out:unknown")
             ]
         );
+    }
+
+    #[test]
+    fn tool_pattern_emits_actual_tool_name_and_captures() {
+        let yaml = r#"
+- name: mcp-read
+  tool_pattern: "^mcp__(?P<server>.+)__read_.*$"
+  emit:
+    - "mcp.read:${tool}"
+    - "mcp.server:${server}"
+"#;
+        let m = CapabilityMapper::from_yaml_string(yaml, "mcp.yaml").unwrap();
+        let call = ToolCall {
+            tool: "mcp__filesystem__read_file".into(),
+            input: json!({"path": "/tmp/x"}),
+        };
+        assert_eq!(
+            m.map(&call),
+            vec![
+                Capability::new("mcp.read:mcp__filesystem__read_file"),
+                Capability::new("mcp.server:filesystem")
+            ]
+        );
+    }
+
+    #[test]
+    fn mapper_rule_requires_one_tool_matcher() {
+        let yaml = r#"
+- name: bad
+  emit: ["x"]
+"#;
+        assert!(CapabilityMapper::from_yaml_string(yaml, "bad.yaml").is_err());
     }
 }

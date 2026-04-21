@@ -1,0 +1,15 @@
+# Capability mappers for Claude Code web tools.
+
+- name: webfetch-url
+  tool: WebFetch
+  match_input:
+    url: "^https?://(?P<host>[^/?#]+)"
+  emit:
+    - "net.fetch:${host}"
+    - "net.out:${host}"
+
+- name: websearch-query
+  tool: WebSearch
+  emit:
+    - "net.search:web"
+    - "net.search.query:${input.query}"
