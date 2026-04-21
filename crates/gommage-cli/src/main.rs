@@ -6,6 +6,7 @@ use gommage_core::{
     Decision, PictoConsume, PictoLookup, Policy, ToolCall, evaluate,
     runtime::{Expedition, HomeLayout, Runtime, default_policy_env},
 };
+use serde::Serialize;
 use std::{
     io::{self, Read},
     path::{Path, PathBuf},
@@ -121,7 +122,11 @@ enum Cmd {
     },
 
     /// Diagnose the local Gommage installation and runtime state.
-    Doctor,
+    Doctor {
+        /// Emit a stable machine-readable diagnostic report.
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Run the MCP / PreToolUse hook adapter (stdin → decision JSON on stdout).
     Mcp,
@@ -406,7 +411,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             };
             println!("{out}");
         }
-        Cmd::Doctor => return cmd_doctor(layout),
+        Cmd::Doctor { json } => return cmd_doctor(layout, json),
         Cmd::Mcp => return run_mcp(layout),
         Cmd::Daemon(sub) => return cmd_daemon(sub, layout),
     }
@@ -1534,95 +1539,292 @@ fn print_event_explain(entry: &AuditEventEntry) -> Result<()> {
     Ok(())
 }
 
-fn cmd_doctor(layout: HomeLayout) -> Result<ExitCode> {
-    let mut failures = 0usize;
-    let mut warnings = 0usize;
+fn cmd_doctor(layout: HomeLayout, json: bool) -> Result<ExitCode> {
+    let report = build_doctor_report(&layout);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_doctor_report(&report);
+    }
+    Ok(report.exit_code())
+}
 
-    doctor_check(layout.root.exists(), &mut failures, "home", || {
-        format!("{} exists", layout.root.display())
-    });
-    doctor_check(
-        layout.policy_dir.exists(),
-        &mut failures,
-        "policy_dir",
-        || format!("{} exists", layout.policy_dir.display()),
-    );
-    doctor_check(
-        layout.capabilities_dir.exists(),
-        &mut failures,
-        "capabilities_dir",
-        || format!("{} exists", layout.capabilities_dir.display()),
-    );
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DoctorStatus {
+    Ok,
+    Warn,
+    Fail,
+}
+
+impl DoctorStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Warn => "warn",
+            Self::Fail => "fail",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    status: DoctorStatus,
+    home: String,
+    summary: DoctorSummary,
+    checks: Vec<DoctorCheck>,
+}
+
+impl DoctorReport {
+    fn new(layout: &HomeLayout) -> Self {
+        Self {
+            status: DoctorStatus::Ok,
+            home: path_display(&layout.root),
+            summary: DoctorSummary::default(),
+            checks: Vec::new(),
+        }
+    }
+
+    fn push(
+        &mut self,
+        name: impl Into<String>,
+        status: DoctorStatus,
+        message: impl Into<String>,
+        details: Option<serde_json::Value>,
+    ) {
+        match status {
+            DoctorStatus::Ok => {}
+            DoctorStatus::Warn => self.summary.warnings += 1,
+            DoctorStatus::Fail => self.summary.failures += 1,
+        }
+        self.checks.push(DoctorCheck {
+            name: name.into(),
+            status,
+            message: message.into(),
+            details,
+        });
+        self.status = if self.summary.failures > 0 {
+            DoctorStatus::Fail
+        } else if self.summary.warnings > 0 {
+            DoctorStatus::Warn
+        } else {
+            DoctorStatus::Ok
+        };
+    }
+
+    fn exit_code(&self) -> ExitCode {
+        if self.summary.failures == 0 {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+struct DoctorSummary {
+    failures: usize,
+    warnings: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorCheck {
+    name: String,
+    status: DoctorStatus,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<serde_json::Value>,
+}
+
+fn build_doctor_report(layout: &HomeLayout) -> DoctorReport {
+    let mut report = DoctorReport::new(layout);
+
+    push_path_check(&mut report, "home", &layout.root);
+    push_path_check(&mut report, "policy_dir", &layout.policy_dir);
+    push_path_check(&mut report, "capabilities_dir", &layout.capabilities_dir);
+
     match layout.load_key() {
-        Ok(_) => println!("ok key: {}", layout.key_file.display()),
-        Err(e) => {
-            failures += 1;
-            println!("fail key: {e}");
-        }
+        Ok(_) => report.push(
+            "key",
+            DoctorStatus::Ok,
+            format!("{} is loadable", layout.key_file.display()),
+            Some(path_details(&layout.key_file)),
+        ),
+        Err(e) => report.push(
+            "key",
+            DoctorStatus::Fail,
+            format!("could not load key: {e}"),
+            Some(path_details(&layout.key_file)),
+        ),
     }
 
-    let env = Expedition::load(&layout.expedition_file)?
-        .map(|e| e.policy_env())
-        .unwrap_or_else(default_policy_env);
+    let env = match Expedition::load(&layout.expedition_file) {
+        Ok(Some(expedition)) => {
+            let details = serde_json::json!({
+                "path": path_display(&layout.expedition_file),
+                "name": expedition.name,
+                "root": path_display(&expedition.root),
+                "started_at": expedition.started_at.to_string(),
+            });
+            let env = expedition.policy_env();
+            report.push(
+                "expedition",
+                DoctorStatus::Ok,
+                "active expedition loaded",
+                Some(details),
+            );
+            env
+        }
+        Ok(None) => {
+            report.push(
+                "expedition",
+                DoctorStatus::Ok,
+                "no active expedition",
+                Some(path_details(&layout.expedition_file)),
+            );
+            default_policy_env()
+        }
+        Err(e) => {
+            report.push(
+                "expedition",
+                DoctorStatus::Fail,
+                format!("could not load expedition state: {e}"),
+                Some(path_details(&layout.expedition_file)),
+            );
+            default_policy_env()
+        }
+    };
+
     match Policy::load_from_dir(&layout.policy_dir, &env) {
-        Ok(policy) => println!(
-            "ok policy: {} rules ({})",
-            policy.rules.len(),
-            policy.version_hash
+        Ok(policy) => report.push(
+            "policy",
+            DoctorStatus::Ok,
+            format!("{} rules ({})", policy.rules.len(), policy.version_hash),
+            Some(serde_json::json!({
+                "path": path_display(&layout.policy_dir),
+                "rules": policy.rules.len(),
+                "version": policy.version_hash,
+            })),
         ),
-        Err(e) => {
-            failures += 1;
-            println!("fail policy: {e}");
-        }
+        Err(e) => report.push(
+            "policy",
+            DoctorStatus::Fail,
+            format!("could not load policy: {e}"),
+            Some(path_details(&layout.policy_dir)),
+        ),
     }
+
     match gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir) {
-        Ok(mapper) => println!("ok capabilities: {} rules", mapper.rule_count()),
-        Err(e) => {
-            failures += 1;
-            println!("fail capabilities: {e}");
-        }
+        Ok(mapper) => report.push(
+            "capabilities",
+            DoctorStatus::Ok,
+            format!("{} rules", mapper.rule_count()),
+            Some(serde_json::json!({
+                "path": path_display(&layout.capabilities_dir),
+                "rules": mapper.rule_count(),
+            })),
+        ),
+        Err(e) => report.push(
+            "capabilities",
+            DoctorStatus::Fail,
+            format!("could not load capabilities: {e}"),
+            Some(path_details(&layout.capabilities_dir)),
+        ),
     }
+
     if layout.audit_log.exists() {
         match layout
             .load_verifying_key()
             .ok()
             .and_then(|vk| verify_log(&layout.audit_log, &vk).ok())
         {
-            Some(count) => println!("ok audit: {count} entries verified"),
-            None => {
-                failures += 1;
-                println!(
-                    "fail audit: could not verify {}",
-                    layout.audit_log.display()
-                );
-            }
+            Some(count) => report.push(
+                "audit",
+                DoctorStatus::Ok,
+                format!("{count} entries verified"),
+                Some(serde_json::json!({
+                    "path": path_display(&layout.audit_log),
+                    "entries": count,
+                })),
+            ),
+            None => report.push(
+                "audit",
+                DoctorStatus::Fail,
+                format!("could not verify {}", layout.audit_log.display()),
+                Some(path_details(&layout.audit_log)),
+            ),
         }
     } else {
-        warnings += 1;
-        println!("warn audit: no audit log yet");
-    }
-    if layout.socket.exists() {
-        println!("ok daemon: socket exists at {}", layout.socket.display());
-    } else {
-        warnings += 1;
-        println!("warn daemon: socket not found; hook adapter will use audited fallback");
+        report.push(
+            "audit",
+            DoctorStatus::Warn,
+            "no audit log yet",
+            Some(path_details(&layout.audit_log)),
+        );
     }
 
-    println!("summary: {failures} failure(s), {warnings} warning(s)");
-    if failures == 0 {
-        Ok(ExitCode::SUCCESS)
+    if layout.socket.exists() {
+        report.push(
+            "daemon",
+            DoctorStatus::Ok,
+            format!("socket exists at {}", layout.socket.display()),
+            Some(serde_json::json!({
+                "socket": path_display(&layout.socket),
+            })),
+        );
     } else {
-        Ok(ExitCode::from(1))
+        report.push(
+            "daemon",
+            DoctorStatus::Warn,
+            "socket not found; hook adapter will use audited fallback",
+            Some(serde_json::json!({
+                "socket": path_display(&layout.socket),
+            })),
+        );
+    }
+
+    report
+}
+
+fn push_path_check(report: &mut DoctorReport, name: &str, path: &Path) {
+    if path.exists() {
+        report.push(
+            name,
+            DoctorStatus::Ok,
+            format!("{} exists", path.display()),
+            Some(path_details(path)),
+        );
+    } else {
+        report.push(
+            name,
+            DoctorStatus::Fail,
+            "missing",
+            Some(path_details(path)),
+        );
     }
 }
 
-fn doctor_check(ok: bool, failures: &mut usize, name: &str, message: impl FnOnce() -> String) {
-    if ok {
-        println!("ok {name}: {}", message());
-    } else {
-        *failures += 1;
-        println!("fail {name}: missing");
+fn print_doctor_report(report: &DoctorReport) {
+    for check in &report.checks {
+        println!(
+            "{} {}: {}",
+            check.status.as_str(),
+            check.name,
+            check.message
+        );
     }
+    println!(
+        "summary: {} failure(s), {} warning(s)",
+        report.summary.failures, report.summary.warnings
+    );
+}
+
+fn path_details(path: &Path) -> serde_json::Value {
+    serde_json::json!({ "path": path_display(path) })
+}
+
+fn path_display(path: &Path) -> String {
+    path.display().to_string()
 }
 
 fn print_log(path: &std::path::Path) -> Result<()> {
