@@ -9,8 +9,9 @@
 //! `gommage-core`.
 
 use anyhow::{Context, Result};
+use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    Decision, ToolCall, evaluate,
+    Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
     runtime::{HomeLayout, Runtime},
 };
 use serde::Deserialize;
@@ -50,7 +51,8 @@ async fn main() -> Result<()> {
 
     let eval = match forward_to_daemon(&layout, &call).await {
         Ok(e) => e,
-        Err(_) => decide_in_process(&layout, &call)?,
+        Err(e) if is_missing_daemon(&e) => decide_in_process_and_audit(&layout, &call)?,
+        Err(e) => return Err(e),
     };
 
     let (decision_str, reason) = match &eval.decision {
@@ -114,17 +116,65 @@ async fn forward_to_daemon(
     }
 }
 
-fn decide_in_process(layout: &HomeLayout, call: &ToolCall) -> Result<gommage_core::EvalResult> {
+fn is_missing_daemon(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<std::io::Error>().is_some_and(|e| {
+        matches!(
+            e.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+        )
+    })
+}
+
+fn decide_in_process_and_audit(
+    layout: &HomeLayout,
+    call: &ToolCall,
+) -> Result<gommage_core::EvalResult> {
+    let sk = layout.load_key()?;
+    let vk = sk.verifying_key();
     let rt = Runtime::open(HomeLayout::at(&layout.root))?;
     let caps = rt.mapper.map(call);
     let mut eval = evaluate(&caps, &rt.policy);
-    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone()
-        && let Some(p) = rt
-            .pictos
-            .find_match(&required_scope, time::OffsetDateTime::now_utc())?
-        && rt.pictos.consume(&p.id)?
-    {
-        eval.decision = Decision::Allow;
+    let mut events = Vec::new();
+    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone() {
+        let now = time::OffsetDateTime::now_utc();
+        match rt.pictos.find_verified_match(&required_scope, now, &vk)? {
+            PictoLookup::None => {}
+            PictoLookup::BadSignature { id, scope } => {
+                events.push(AuditEvent::PictoRejected {
+                    id,
+                    scope,
+                    reason: "bad signature".to_string(),
+                });
+            }
+            PictoLookup::Verified { picto } => {
+                match rt.pictos.consume_verified(&picto.id, now, &vk)? {
+                    PictoConsume::Consumed { picto } => {
+                        events.push(AuditEvent::PictoConsumed {
+                            id: picto.id,
+                            scope: picto.scope,
+                            uses: picto.uses,
+                            max_uses: picto.max_uses,
+                            status: picto.status.as_str().to_string(),
+                        });
+                        eval.decision = Decision::Allow;
+                    }
+                    PictoConsume::NotUsable => {}
+                    PictoConsume::BadSignature { id, scope } => {
+                        events.push(AuditEvent::PictoRejected {
+                            id,
+                            scope,
+                            reason: "bad signature".to_string(),
+                        });
+                    }
+                }
+            }
+        }
     }
+    let expedition_name = rt.expedition.as_ref().map(|e| e.name.clone());
+    let mut writer = AuditWriter::open(&rt.layout.audit_log, sk)?;
+    for event in events {
+        writer.append_event(event)?;
+    }
+    writer.append(call, &eval, expedition_name.as_deref())?;
     Ok(eval)
 }

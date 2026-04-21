@@ -464,6 +464,7 @@ dependencies = [
  "rand_core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "time",
  "tokio",
@@ -522,9 +523,11 @@ name = "gommage-mcp"
 version = "0.1.1-alpha.1"
 dependencies = [
  "anyhow",
+ "gommage-audit",
  "gommage-core",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "time",
  "tokio",

@@ -3,6 +3,22 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [Unreleased]
+
+### Added
+
+- `PictoLookup` and `PictoConsume` result types for verified picto lookup and
+  verified transactional consumption.
+
+### Changed
+
+- Picto lookup/consume paths can now verify ed25519 signatures before granting
+  an otherwise gated action.
+- Policy hashes now use relative file paths plus substituted effective contents
+  instead of absolute host paths and raw YAML.
+- Invalid picto creation input returns typed errors instead of panicking.
+- Capability mapper regex compilation now uses explicit size and nesting limits.
+
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.1.0-alpha.1...gommage-core-v0.1.1-alpha.1) (2026-04-21)
 
 

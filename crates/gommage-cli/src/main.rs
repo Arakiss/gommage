@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use ed25519_dalek::SigningKey;
-use gommage_audit::{AuditWriter, verify_log};
+use gommage_audit::{AuditEntry, AuditEvent, AuditEventEntry, AuditWriter, verify_log};
 use gommage_core::{
-    Decision, Policy, ToolCall, evaluate,
+    Decision, PictoConsume, PictoLookup, Policy, ToolCall, evaluate,
     runtime::{Expedition, HomeLayout, Runtime},
 };
 use std::{
@@ -44,8 +44,8 @@ enum Cmd {
         scope: String,
         #[arg(long, default_value_t = 1)]
         uses: u32,
-        /// TTL in seconds. Max 86400 (24h).
-        #[arg(long, default_value_t = 600)]
+        /// TTL as seconds or duration suffix (s, m, h, d). Max 24h.
+        #[arg(long, default_value = "600", value_parser = parse_ttl_seconds)]
         ttl: i64,
         #[arg(long, default_value = "")]
         reason: String,
@@ -77,7 +77,11 @@ enum Cmd {
     },
 
     /// Explain a past audit entry by id.
-    Explain { id: String },
+    Explain {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Verify the full audit log signature chain.
     #[command(name = "audit-verify")]
@@ -95,6 +99,9 @@ enum Cmd {
         #[arg(long)]
         pretty: bool,
     },
+
+    /// Diagnose the local Gommage installation and runtime state.
+    Doctor,
 
     /// Run the MCP / PreToolUse hook adapter (stdin → decision JSON on stdout).
     Mcp,
@@ -122,6 +129,13 @@ enum ExpeditionCmd {
 
 #[derive(Subcommand)]
 enum PolicyCmd {
+    /// Initialize policy.d/ and capabilities.d/ from the embedded stdlib.
+    Init {
+        #[arg(long)]
+        stdlib: bool,
+        #[arg(long)]
+        force: bool,
+    },
     /// Parse and compile every policy file under policy.d/.
     Check,
     /// Parse a single file.
@@ -170,12 +184,20 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         } => {
             layout.ensure()?;
             let sk = layout.load_key()?;
-            let rt = Runtime::open(layout).context("opening runtime")?;
+            let rt = Runtime::open(layout.clone_layout()).context("opening runtime")?;
             let id = format!("picto_{}", uuid::Uuid::now_v7());
             let picto = rt
                 .pictos
                 .create(&id, &scope, uses, ttl, &reason, &sk, require_confirmation)
                 .context("creating picto")?;
+            let mut writer = AuditWriter::open(&rt.layout.audit_log, sk)?;
+            writer.append_event(AuditEvent::PictoCreated {
+                id: picto.id.clone(),
+                scope: picto.scope.clone(),
+                max_uses: picto.max_uses,
+                ttl_expires_at: picto.ttl_expires_at.to_string(),
+                require_confirmation,
+            })?;
             println!("granted {}", picto.id);
             println!("  scope:   {}", picto.scope);
             println!("  uses:    {}/{}", picto.uses, picto.max_uses);
@@ -204,9 +226,12 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             }
         }
         Cmd::Revoke { id } => {
-            let rt = Runtime::open(layout)?;
+            let sk = layout.load_key()?;
+            let rt = Runtime::open(layout.clone_layout())?;
             let ok = rt.pictos.revoke(&id)?;
             if ok {
+                let mut writer = AuditWriter::open(&rt.layout.audit_log, sk)?;
+                writer.append_event(AuditEvent::PictoRevoked { id: id.clone() })?;
                 println!("revoked {id}");
             } else {
                 println!("no active picto with id {id}");
@@ -214,9 +239,12 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             }
         }
         Cmd::Confirm { id } => {
-            let rt = Runtime::open(layout)?;
+            let sk = layout.load_key()?;
+            let rt = Runtime::open(layout.clone_layout())?;
             let ok = rt.pictos.confirm(&id)?;
             if ok {
+                let mut writer = AuditWriter::open(&rt.layout.audit_log, sk)?;
+                writer.append_event(AuditEvent::PictoConfirmed { id: id.clone() })?;
                 println!("activated {id}");
             } else {
                 println!("no pending-confirmation picto with id {id}");
@@ -253,20 +281,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                 }
             }
         }
-        Cmd::Explain { id } => {
-            use std::io::{BufRead, BufReader};
-            let file = std::fs::File::open(&layout.audit_log).context("opening audit log")?;
-            let reader = BufReader::new(file);
-            for line in reader.lines() {
-                let line = line?;
-                if line.contains(&id) {
-                    println!("{}", line);
-                    return Ok(ExitCode::SUCCESS);
-                }
-            }
-            eprintln!("no audit entry with id {id}");
-            return Ok(ExitCode::from(1));
-        }
+        Cmd::Explain { id, json } => return cmd_explain(layout, &id, json),
         Cmd::AuditVerify { explain } => {
             let vk = layout.load_verifying_key()?;
             if explain {
@@ -286,7 +301,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             io::stdin().read_to_string(&mut buf)?;
             let call: ToolCall = serde_json::from_str(&buf).context("parsing stdin as ToolCall")?;
             let rt = Runtime::open(layout)?;
-            let eval = decide(&rt, &call)?;
+            let eval = evaluate_only(&rt, &call);
             let out = if pretty {
                 serde_json::to_string_pretty(&eval)?
             } else {
@@ -294,6 +309,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             };
             println!("{out}");
         }
+        Cmd::Doctor => return cmd_doctor(layout),
         Cmd::Mcp => return run_mcp(layout),
         Cmd::Daemon { foreground } => {
             if foreground {
@@ -309,19 +325,87 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn decide(rt: &Runtime, call: &ToolCall) -> Result<gommage_core::EvalResult> {
+fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("ttl cannot be empty".to_string());
+    }
+    let (number, multiplier) = match raw.chars().last().unwrap() {
+        's' | 'S' => (&raw[..raw.len() - 1], 1),
+        'm' | 'M' => (&raw[..raw.len() - 1], 60),
+        'h' | 'H' => (&raw[..raw.len() - 1], 3_600),
+        'd' | 'D' => (&raw[..raw.len() - 1], 86_400),
+        c if c.is_ascii_digit() => (raw, 1),
+        other => {
+            return Err(format!(
+                "unsupported ttl suffix {other:?}; use s, m, h, or d"
+            ));
+        }
+    };
+    let value: i64 = number
+        .parse()
+        .map_err(|_| "ttl must start with a positive integer".to_string())?;
+    let seconds = value
+        .checked_mul(multiplier)
+        .ok_or_else(|| "ttl is too large".to_string())?;
+    if !(1..=86_400).contains(&seconds) {
+        return Err("ttl must be between 1 second and 24 hours".to_string());
+    }
+    Ok(seconds)
+}
+
+fn evaluate_only(rt: &Runtime, call: &ToolCall) -> gommage_core::EvalResult {
+    let caps = rt.mapper.map(call);
+    evaluate(&caps, &rt.policy)
+}
+
+fn decide_with_pictos(
+    rt: &Runtime,
+    call: &ToolCall,
+    verifying_key: &ed25519_dalek::VerifyingKey,
+) -> Result<(gommage_core::EvalResult, Vec<AuditEvent>)> {
     let caps = rt.mapper.map(call);
     let mut eval = evaluate(&caps, &rt.policy);
-    // If the decision is AskPicto, check the store for a matching picto.
-    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone()
-        && let Some(p) = rt
+    let mut events = Vec::new();
+    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone() {
+        let now = OffsetDateTime::now_utc();
+        match rt
             .pictos
-            .find_match(&required_scope, OffsetDateTime::now_utc())?
-        && rt.pictos.consume(&p.id)?
-    {
-        eval.decision = Decision::Allow;
+            .find_verified_match(&required_scope, now, verifying_key)?
+        {
+            PictoLookup::None => {}
+            PictoLookup::BadSignature { id, scope } => {
+                events.push(AuditEvent::PictoRejected {
+                    id,
+                    scope,
+                    reason: "bad signature".to_string(),
+                });
+            }
+            PictoLookup::Verified { picto } => {
+                match rt.pictos.consume_verified(&picto.id, now, verifying_key)? {
+                    PictoConsume::Consumed { picto } => {
+                        events.push(AuditEvent::PictoConsumed {
+                            id: picto.id,
+                            scope: picto.scope,
+                            uses: picto.uses,
+                            max_uses: picto.max_uses,
+                            status: picto.status.as_str().to_string(),
+                        });
+                        eval.decision = Decision::Allow;
+                    }
+                    PictoConsume::NotUsable => {}
+                    PictoConsume::BadSignature { id, scope } => {
+                        events.push(AuditEvent::PictoRejected {
+                            id,
+                            scope,
+                            reason: "bad signature".to_string(),
+                        });
+                    }
+                }
+            }
+        }
     }
-    Ok(eval)
+    Ok((eval, events))
 }
 
 fn cmd_expedition(sub: ExpeditionCmd, layout: HomeLayout) -> Result<ExitCode> {
@@ -365,6 +449,16 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
         .map(|e| e.policy_env())
         .unwrap_or_default();
     match sub {
+        PolicyCmd::Init { stdlib, force } => {
+            if !stdlib {
+                anyhow::bail!("policy init currently requires --stdlib");
+            }
+            let installed = install_stdlib(&layout, force)?;
+            println!(
+                "ok stdlib installed: {} policy files, {} capability files",
+                installed.0, installed.1
+            );
+        }
         PolicyCmd::Check => {
             let pol = Policy::load_from_dir(&layout.policy_dir, &env)?;
             println!("ok {} rules loaded", pol.rules.len());
@@ -381,6 +475,214 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+const STDLIB_POLICIES: &[(&str, &str)] = &[
+    (
+        "00-hard-stops.yaml",
+        include_str!("../../../policies/00-hard-stops.yaml"),
+    ),
+    (
+        "10-filesystem.yaml",
+        include_str!("../../../policies/10-filesystem.yaml"),
+    ),
+    ("20-git.yaml", include_str!("../../../policies/20-git.yaml")),
+    (
+        "30-package-managers.yaml",
+        include_str!("../../../policies/30-package-managers.yaml"),
+    ),
+    (
+        "40-cloud.yaml",
+        include_str!("../../../policies/40-cloud.yaml"),
+    ),
+    (
+        "50-cloud-tools.yaml",
+        include_str!("../../../policies/50-cloud-tools.yaml"),
+    ),
+];
+
+const STDLIB_CAPABILITIES: &[(&str, &str)] = &[
+    ("bash.yaml", include_str!("../../../capabilities/bash.yaml")),
+    (
+        "cloud-tools.yaml",
+        include_str!("../../../capabilities/cloud-tools.yaml"),
+    ),
+    (
+        "filesystem.yaml",
+        include_str!("../../../capabilities/filesystem.yaml"),
+    ),
+];
+
+fn install_stdlib(layout: &HomeLayout, force: bool) -> Result<(usize, usize)> {
+    let policies = install_embedded_files(&layout.policy_dir, STDLIB_POLICIES, force)?;
+    let capabilities =
+        install_embedded_files(&layout.capabilities_dir, STDLIB_CAPABILITIES, force)?;
+    Ok((policies, capabilities))
+}
+
+fn install_embedded_files(
+    dir: &std::path::Path,
+    files: &[(&str, &str)],
+    force: bool,
+) -> Result<usize> {
+    std::fs::create_dir_all(dir)?;
+    let mut installed = 0usize;
+    for (name, contents) in files {
+        let path = dir.join(name);
+        if path.exists() && !force {
+            continue;
+        }
+        std::fs::write(path, contents)?;
+        installed += 1;
+    }
+    Ok(installed)
+}
+
+fn cmd_explain(layout: HomeLayout, id: &str, json: bool) -> Result<ExitCode> {
+    use std::io::{BufRead, BufReader};
+    let file = std::fs::File::open(&layout.audit_log).context("opening audit log")?;
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = line?;
+        let value: serde_json::Value = serde_json::from_str(&line)?;
+        if value.get("id").and_then(|v| v.as_str()) != Some(id) {
+            continue;
+        }
+        if json {
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        } else if value.get("kind").and_then(|v| v.as_str()) == Some("event") {
+            let entry: AuditEventEntry = serde_json::from_value(value)?;
+            print_event_explain(&entry)?;
+        } else {
+            let entry: AuditEntry = serde_json::from_value(value)?;
+            print_decision_explain(&entry)?;
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    eprintln!("no audit entry with id {id}");
+    Ok(ExitCode::from(1))
+}
+
+fn print_decision_explain(entry: &AuditEntry) -> Result<()> {
+    println!("audit_id: {}", entry.id);
+    println!("timestamp: {}", entry.ts);
+    println!("kind: decision");
+    println!("tool: {}", entry.tool);
+    println!("input_hash: {}", entry.input_hash);
+    println!("decision: {}", serde_json::to_string(&entry.decision)?);
+    if let Some(rule) = &entry.matched_rule {
+        println!("matched_rule: {} ({}:{})", rule.name, rule.file, rule.index);
+    } else {
+        println!("matched_rule: <none>");
+    }
+    println!("policy_version: {}", entry.policy_version);
+    if let Some(expedition) = &entry.expedition {
+        println!("expedition: {expedition}");
+    }
+    println!("capabilities:");
+    for cap in &entry.capabilities {
+        println!("  - {}", cap.as_str());
+    }
+    Ok(())
+}
+
+fn print_event_explain(entry: &AuditEventEntry) -> Result<()> {
+    println!("audit_id: {}", entry.id);
+    println!("timestamp: {}", entry.ts);
+    println!("kind: event");
+    println!("event: {}", serde_json::to_string(&entry.event)?);
+    Ok(())
+}
+
+fn cmd_doctor(layout: HomeLayout) -> Result<ExitCode> {
+    let mut failures = 0usize;
+    let mut warnings = 0usize;
+
+    doctor_check(layout.root.exists(), &mut failures, "home", || {
+        format!("{} exists", layout.root.display())
+    });
+    doctor_check(
+        layout.policy_dir.exists(),
+        &mut failures,
+        "policy_dir",
+        || format!("{} exists", layout.policy_dir.display()),
+    );
+    doctor_check(
+        layout.capabilities_dir.exists(),
+        &mut failures,
+        "capabilities_dir",
+        || format!("{} exists", layout.capabilities_dir.display()),
+    );
+    match layout.load_key() {
+        Ok(_) => println!("ok key: {}", layout.key_file.display()),
+        Err(e) => {
+            failures += 1;
+            println!("fail key: {e}");
+        }
+    }
+
+    let env = Expedition::load(&layout.expedition_file)?
+        .map(|e| e.policy_env())
+        .unwrap_or_default();
+    match Policy::load_from_dir(&layout.policy_dir, &env) {
+        Ok(policy) => println!(
+            "ok policy: {} rules ({})",
+            policy.rules.len(),
+            policy.version_hash
+        ),
+        Err(e) => {
+            failures += 1;
+            println!("fail policy: {e}");
+        }
+    }
+    match gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir) {
+        Ok(mapper) => println!("ok capabilities: {} rules", mapper.rule_count()),
+        Err(e) => {
+            failures += 1;
+            println!("fail capabilities: {e}");
+        }
+    }
+    if layout.audit_log.exists() {
+        match layout
+            .load_verifying_key()
+            .ok()
+            .and_then(|vk| verify_log(&layout.audit_log, &vk).ok())
+        {
+            Some(count) => println!("ok audit: {count} entries verified"),
+            None => {
+                failures += 1;
+                println!(
+                    "fail audit: could not verify {}",
+                    layout.audit_log.display()
+                );
+            }
+        }
+    } else {
+        warnings += 1;
+        println!("warn audit: no audit log yet");
+    }
+    if layout.socket.exists() {
+        println!("ok daemon: socket exists at {}", layout.socket.display());
+    } else {
+        warnings += 1;
+        println!("warn daemon: socket not found; hook adapter will use audited fallback");
+    }
+
+    println!("summary: {failures} failure(s), {warnings} warning(s)");
+    if failures == 0 {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(1))
+    }
+}
+
+fn doctor_check(ok: bool, failures: &mut usize, name: &str, message: impl FnOnce() -> String) {
+    if ok {
+        println!("ok {name}: {}", message());
+    } else {
+        *failures += 1;
+        println!("fail {name}: missing");
+    }
 }
 
 fn print_log(path: &std::path::Path) -> Result<()> {
@@ -429,13 +731,17 @@ fn run_mcp(layout: HomeLayout) -> Result<ExitCode> {
     };
 
     let sk: SigningKey = layout.load_key()?;
+    let vk = sk.verifying_key();
     let mut rt = Runtime::open(layout.clone_layout())?;
-    let eval = decide(&rt, &call)?;
+    let (eval, events) = decide_with_pictos(&rt, &call, &vk)?;
 
     // Append to audit log (signed).
     let expedition_name = rt.expedition.as_ref().map(|e| e.name.clone());
     let mut writer = AuditWriter::open(&rt.layout.audit_log, sk)?;
-    let _entry = writer.append(&call, &eval, expedition_name.as_deref())?;
+    for event in events {
+        writer.append_event(event)?;
+    }
+    writer.append(&call, &eval, expedition_name.as_deref())?;
 
     // Drop writer so file flushes.
     drop(writer);

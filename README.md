@@ -57,8 +57,15 @@ cargo install --path crates/gommage-cli
 ## Quickstart
 
 ```sh
+# Initialize the local Gommage home
+gommage init
+
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
+
+# Install the bundled stdlib policies + capability mappers
+gommage policy init --stdlib
+gommage policy check
 
 # Run the daemon (dev mode — logs to stderr)
 gommage-daemon --foreground
@@ -83,8 +90,8 @@ gommage-daemon --foreground
 #
 # See examples/claude-code-setup.md and examples/codex-setup.md.
 
-# Check a policy file
-gommage policy lint ~/.gommage/policy.d/10-defaults.yaml
+# Diagnose the local installation
+gommage doctor
 
 # Grant a one-shot picto for pushing to main
 gommage grant \
@@ -173,7 +180,7 @@ Full cookbook in [`docs/policy-cookbook.md`](docs/policy-cookbook.md).
 
 ## Determinism guarantee
 
-Gommage ships a regression suite that runs ~10k `{tool, input}` fixtures with an expected decision oracle, in-order and shuffled. If any decision flips based on ordering, the build fails. See [`tests/determinism/`](tests/determinism/).
+Gommage ships a deterministic fixture corpus with an expected decision oracle, in-order and shuffled. CI runs the sweep repeatedly across OS and locale combinations; if any decision flips based on ordering, the build fails. See [`tests/determinism/`](tests/determinism/).
 
 ## Roadmap
 
@@ -233,4 +240,3 @@ If you have not played _Expedition 33_ yet, stop reading this README and go play
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
-

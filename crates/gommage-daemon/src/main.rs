@@ -10,9 +10,10 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use gommage_audit::AuditWriter;
+use ed25519_dalek::VerifyingKey;
+use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    Decision, ToolCall, evaluate,
+    Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
     runtime::{HomeLayout, Runtime},
 };
 use serde::{Deserialize, Serialize};
@@ -74,6 +75,7 @@ async fn main() -> Result<()> {
     };
     layout.ensure().context("initializing gommage home")?;
     let sk = layout.load_key().context("loading signing key")?;
+    let verifying_key = sk.verifying_key();
 
     let rt = Runtime::open(HomeLayout::at(&layout.root)).context("opening runtime")?;
     let audit_path = layout.audit_log.clone();
@@ -93,6 +95,7 @@ async fn main() -> Result<()> {
     let shared = Arc::new(Mutex::new(State {
         rt,
         writer,
+        verifying_key,
         home_root: layout.root.clone(),
     }));
 
@@ -119,11 +122,24 @@ async fn main() -> Result<()> {
             _ = sighup.recv() => {
                 let mut s = shared.lock().await;
                 match s.rt.reload_policy() {
-                    Ok(()) => tracing::info!(
-                        rules = s.rt.policy.rules.len(),
-                        version = %s.rt.policy.version_hash,
-                        "policy reloaded via SIGHUP"
-                    ),
+                    Ok(()) => {
+                        let rules = s.rt.policy.rules.len();
+                        let mapper_rules = s.rt.mapper.rule_count();
+                        let policy_version = s.rt.policy.version_hash.clone();
+                        if let Err(e) = s.writer.append_event(AuditEvent::PolicyReloaded {
+                            source: "sighup".to_string(),
+                            rules,
+                            mapper_rules,
+                            policy_version: policy_version.clone(),
+                        }) {
+                            tracing::error!(?e, "failed to audit SIGHUP reload");
+                        }
+                        tracing::info!(
+                            rules,
+                            version = %policy_version,
+                            "policy reloaded via SIGHUP"
+                        )
+                    },
                     Err(e) => tracing::error!(?e, "SIGHUP reload failed; keeping previous policy"),
                 }
             }
@@ -143,6 +159,7 @@ async fn main() -> Result<()> {
 struct State {
     rt: Runtime,
     writer: AuditWriter,
+    verifying_key: VerifyingKey,
     home_root: PathBuf,
 }
 
@@ -176,7 +193,20 @@ async fn handle_request(req: Request, shared: &Arc<Mutex<State>>) -> String {
         Request::Reload => {
             let mut s = shared.lock().await;
             match s.rt.reload_policy() {
-                Ok(()) => ok(&format!("reloaded {} rules", s.rt.policy.rules.len())),
+                Ok(()) => {
+                    let rules = s.rt.policy.rules.len();
+                    let mapper_rules = s.rt.mapper.rule_count();
+                    let policy_version = s.rt.policy.version_hash.clone();
+                    match s.writer.append_event(AuditEvent::PolicyReloaded {
+                        source: "ipc".to_string(),
+                        rules,
+                        mapper_rules,
+                        policy_version,
+                    }) {
+                        Ok(_) => ok(&format!("reloaded {rules} rules")),
+                        Err(e) => err(format!("reload audited failed: {e}")),
+                    }
+                }
                 Err(e) => err(format!("reload failed: {e}")),
             }
         }
@@ -194,13 +224,48 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
     let caps = s.rt.mapper.map(call);
     let mut eval = evaluate(&caps, &s.rt.policy);
 
-    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone()
-        && let Some(p) =
-            s.rt.pictos
-                .find_match(&required_scope, OffsetDateTime::now_utc())?
-        && s.rt.pictos.consume(&p.id)?
-    {
-        eval.decision = Decision::Allow;
+    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone() {
+        let now = OffsetDateTime::now_utc();
+        match s
+            .rt
+            .pictos
+            .find_verified_match(&required_scope, now, &s.verifying_key)?
+        {
+            PictoLookup::None => {}
+            PictoLookup::BadSignature { id, scope } => {
+                s.writer.append_event(AuditEvent::PictoRejected {
+                    id,
+                    scope,
+                    reason: "bad signature".to_string(),
+                })?;
+            }
+            PictoLookup::Verified { picto } => {
+                match s
+                    .rt
+                    .pictos
+                    .consume_verified(&picto.id, now, &s.verifying_key)?
+                {
+                    PictoConsume::Consumed { picto } => {
+                        s.writer.append_event(AuditEvent::PictoConsumed {
+                            id: picto.id,
+                            scope: picto.scope,
+                            uses: picto.uses,
+                            max_uses: picto.max_uses,
+                            status: picto.status.as_str().to_string(),
+                        })?;
+                        eval.decision = Decision::Allow;
+                    }
+                    PictoConsume::NotUsable => {}
+                    PictoConsume::BadSignature { id, scope } => {
+                        s.writer.append_event(AuditEvent::PictoRejected {
+                            id,
+                            scope,
+                            reason: "bad signature".to_string(),
+                        })?;
+                    }
+                }
+            }
+        }
     }
 
     let expedition_name = s.rt.expedition.as_ref().map(|e| e.name.clone());

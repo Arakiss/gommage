@@ -19,6 +19,6 @@ pub use error::GommageError;
 pub use evaluator::{Decision, EvalResult, MatchedRule, evaluate};
 pub use hardstop::HardStopHit;
 pub use mapper::CapabilityMapper;
-pub use picto::{Picto, PictoStatus, PictoStore};
+pub use picto::{Picto, PictoConsume, PictoLookup, PictoStatus, PictoStore};
 pub use policy::{Match, Policy, Rule, RuleDecision};
 pub use toolcall::ToolCall;

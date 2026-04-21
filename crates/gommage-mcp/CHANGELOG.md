@@ -1,5 +1,14 @@
 # Changelog — gommage-mcp
 
+## [Unreleased]
+
+### Changed
+
+- Daemon-absent fallback now writes signed audit entries and uses verified
+  picto lookup/consume semantics.
+- Fallback is only used when the daemon socket is absent; daemon protocol
+  errors no longer silently re-run in-process.
+
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.1.0-alpha.1...gommage-mcp-v0.1.1-alpha.1) (2026-04-21)
 
 

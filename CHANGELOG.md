@@ -13,6 +13,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- Signed audit lifecycle events for picto create/confirm/consume/revoke/reject and policy reloads. `audit-verify` and `audit-verify --explain` now verify mixed decision/event JSONL logs.
+- `gommage policy init --stdlib` installs the bundled stdlib policies and capability mappers without requiring manual file copies.
+- `gommage doctor` diagnoses the local home, key, policy, capability mapper, audit log, and daemon socket state.
+- Structured `gommage explain <audit-id>` output with exact id matching plus `--json` for the raw verified entry shape.
+- `gommage grant --ttl` now accepts duration suffixes (`s`, `m`, `h`, `d`) as well as raw seconds.
 - Property-based robustness suite (`crates/gommage-core/tests/proptest_robustness.rs`): 4 properties covering the capability mapper, policy YAML parser, picto signature verifier, and evaluator. 1536 randomised inputs per CI run across all four properties. Asserts: no panic on arbitrary tool-call JSON, no panic on arbitrary YAML (either `Ok(Policy)` or typed error), signature verification rejects random 64-byte blobs, evaluator always returns one of the three decision variants.
 - `docs/agent-compatibility.md` — per-agent matrix of what Gommage sees, what it does NOT see, what bypasses it, and the recommended OS-level stack to layer underneath. Currently covers Claude Code (all mapped tools) and OpenAI Codex CLI (Bash-only per upstream), plus explicit "why not yet" rows for Cursor, Aider, Cline, Continue, Zed. Positions as a credibility artefact: stale rows are a bug.
 - `gommage audit-verify --explain` — forensic report over the entire audit log. Reports entries total vs verified, the signing key's fingerprint (SHA-256[..16] of the verifying key bytes), every anomaly encountered (bad signature, malformed entry, timestamp out of order, mid-log policy version change), the set of policy versions observed, and the set of expeditions seen. Exits 1 when any anomaly fires. Plain `audit-verify` still prints the one-line count and errors on the first bad line.
@@ -25,6 +30,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- Picto lookup and consumption now verify ed25519 signatures before a stored row can convert `ask_picto` into `allow`; tampered rows remain unconsumed and emit `picto_rejected` audit events.
+- `gommage-mcp` daemon-absent fallback now writes signed audit entries instead of silently evaluating without audit.
+- Policy version hashes now use relative policy file paths plus substituted effective contents, making identical policy trees path-stable across homes while distinguishing different effective canvases.
+- Invalid picto creation input now returns typed CLI errors instead of panicking.
+- Capability mapper regex compilation now uses explicit size and nesting limits.
 - Threat model rewritten around 10 concrete attacker cases (malicious agent binary, hostile local user, malicious repo, forged pictos, TOCTOU between decision and execution, replayed out-of-band approvals, clock skew, Unicode/case-folding tricks, regex DoS in mapper, YAML deserialization attacks). Each case spells out what Gommage does, what it does not, and what to stack on top.
 - Canonical decision input now explicitly documented: the evaluator reads only `(capabilities, policy)` — no clock, env, CWD, filesystem state, or transcript. Path strings are treated as opaque UTF-8 with no symlink resolution or normalization.
 - `"zero heuristics"` claim redefined brutally: regex matching and glob matching are deterministic transforms and part of the contract, not heuristics; classifiers, ML scoring, prior accumulation, and intent inference are.

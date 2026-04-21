@@ -10,8 +10,8 @@
 #   - gommage-daemon   (long-running process)
 #   - gommage-mcp      (PreToolUse hook adapter)
 #
-# Downloads signed release artifacts from GitHub Releases and verifies their
-# SHA-256 checksums. Refuses to install if the checksum does not match.
+# Downloads release artifacts from GitHub Releases and verifies their SHA-256
+# checksums. Refuses to install if the checksum does not match.
 #
 # Environment variables:
 #   GOMMAGE_VERSION   — release tag to install (default: latest)

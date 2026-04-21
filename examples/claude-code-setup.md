@@ -17,11 +17,10 @@ gommage init
 # seeds ~/.gommage/ with policy.d/ + capabilities.d/ + key.ed25519
 ```
 
-## 3. Copy stdlib
+## 3. Install stdlib
 
 ```sh
-cp policies/*.yaml      "$HOME/.gommage/policy.d/"
-cp capabilities/*.yaml  "$HOME/.gommage/capabilities.d/"
+gommage policy init --stdlib
 gommage policy check
 ```
 

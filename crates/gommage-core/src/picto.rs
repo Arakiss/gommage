@@ -28,6 +28,12 @@ pub enum PictoStatus {
     Expired,
 }
 
+impl PictoStatus {
+    pub fn as_str(self) -> &'static str {
+        status_str(self)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Picto {
     pub id: String,
@@ -39,6 +45,22 @@ pub struct Picto {
     pub status: PictoStatus,
     pub reason: String,
     pub signature_b64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PictoLookup {
+    None,
+    Verified { picto: Picto },
+    BadSignature { id: String, scope: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PictoConsume {
+    Consumed { picto: Picto },
+    NotUsable,
+    BadSignature { id: String, scope: String },
 }
 
 impl Picto {
@@ -133,11 +155,16 @@ impl PictoStore {
         signing_key: &SigningKey,
         require_confirmation: bool,
     ) -> Result<Picto, GommageError> {
-        assert!(max_uses > 0, "max_uses must be > 0");
-        assert!(
-            ttl_seconds > 0 && ttl_seconds <= 86_400,
-            "ttl must be in (0, 86400] seconds"
-        );
+        if max_uses == 0 {
+            return Err(GommageError::InvalidPicto(
+                "max_uses must be greater than zero".to_string(),
+            ));
+        }
+        if !(1..=86_400).contains(&ttl_seconds) {
+            return Err(GommageError::InvalidPicto(
+                "ttl must be between 1 and 86400 seconds".to_string(),
+            ));
+        }
 
         let now = OffsetDateTime::now_utc();
         let ttl_expires_at = now + time::Duration::seconds(ttl_seconds);
@@ -235,6 +262,39 @@ impl PictoStore {
             .optional()?)
     }
 
+    /// Find the newest usable picto and verify its signature before returning it.
+    /// A bad signature is returned explicitly so callers can audit the rejection
+    /// while preserving the original `ask_picto` decision.
+    pub fn find_verified_match(
+        &self,
+        required_scope: &str,
+        now: OffsetDateTime,
+        verifying_key: &VerifyingKey,
+    ) -> Result<PictoLookup, GommageError> {
+        let mut stmt = self.conn.prepare(
+            r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64
+               FROM pictos
+               WHERE scope = ?1
+                 AND status = 'active'
+                 AND uses < max_uses
+                 AND ttl_expires_at > ?2
+               ORDER BY created_at DESC"#,
+        )?;
+        let mut rows =
+            stmt.query_map(params![required_scope, now.unix_timestamp()], row_to_picto)?;
+        if let Some(row) = rows.next() {
+            let picto = row?;
+            if picto.verify(verifying_key).is_ok() {
+                return Ok(PictoLookup::Verified { picto });
+            }
+            return Ok(PictoLookup::BadSignature {
+                id: picto.id,
+                scope: picto.scope,
+            });
+        }
+        Ok(PictoLookup::None)
+    }
+
     /// Atomically burn one use from the picto. Returns `true` on success,
     /// `false` if the picto vanished / was revoked / exhausted in the meantime.
     pub fn consume(&self, id: &str) -> Result<bool, GommageError> {
@@ -264,6 +324,53 @@ impl PictoStore {
         )?;
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Atomically burn one use after re-checking TTL/status and verifying the
+    /// stored picto signature inside the same transaction.
+    pub fn consume_verified(
+        &self,
+        id: &str,
+        now: OffsetDateTime,
+        verifying_key: &VerifyingKey,
+    ) -> Result<PictoConsume, GommageError> {
+        let tx = self.conn.unchecked_transaction()?;
+        let row = tx
+            .query_row(
+                r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64
+                   FROM pictos
+                   WHERE id = ?1
+                     AND status = 'active'
+                     AND uses < max_uses
+                     AND ttl_expires_at > ?2"#,
+                params![id, now.unix_timestamp()],
+                row_to_picto,
+            )
+            .optional()?;
+        let Some(mut picto) = row else {
+            return Ok(PictoConsume::NotUsable);
+        };
+        if picto.verify(verifying_key).is_err() {
+            return Ok(PictoConsume::BadSignature {
+                id: picto.id,
+                scope: picto.scope,
+            });
+        }
+
+        let new_uses = picto.uses + 1;
+        let new_status = if new_uses >= picto.max_uses {
+            PictoStatus::Spent
+        } else {
+            PictoStatus::Active
+        };
+        tx.execute(
+            "UPDATE pictos SET uses = ?1, status = ?2 WHERE id = ?3",
+            params![new_uses, status_str(new_status), id],
+        )?;
+        tx.commit()?;
+        picto.uses = new_uses;
+        picto.status = new_status;
+        Ok(PictoConsume::Consumed { picto })
     }
 
     /// Mark all expired pictos as expired. Call periodically or on daemon start.
@@ -354,6 +461,77 @@ mod tests {
         // second consume fails — use exhausted
         assert!(!store.consume("p1").unwrap());
         // after exhaustion, no match
+        assert!(
+            store
+                .find_match("git.push:main", OffsetDateTime::now_utc())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn verified_lookup_rejects_tampered_scope() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        store
+            .create("p1", "git.push:feature", 1, 600, "test", &sk, false)
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE pictos SET scope = 'git.push:main' WHERE id = 'p1'",
+                [],
+            )
+            .unwrap();
+
+        let found = store
+            .find_verified_match(
+                "git.push:main",
+                OffsetDateTime::now_utc(),
+                &sk.verifying_key(),
+            )
+            .unwrap();
+        assert!(matches!(found, PictoLookup::BadSignature { .. }));
+    }
+
+    #[test]
+    fn verified_consume_rejects_tampered_scope() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        store
+            .create("p1", "git.push:feature", 1, 600, "test", &sk, false)
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE pictos SET scope = 'git.push:main' WHERE id = 'p1'",
+                [],
+            )
+            .unwrap();
+
+        let consumed = store
+            .consume_verified("p1", OffsetDateTime::now_utc(), &sk.verifying_key())
+            .unwrap();
+        assert!(matches!(consumed, PictoConsume::BadSignature { .. }));
+        assert_eq!(store.get("p1").unwrap().unwrap().uses, 0);
+    }
+
+    #[test]
+    fn verified_consume_updates_uses_and_status() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        store
+            .create("p1", "git.push:main", 1, 600, "test", &sk, false)
+            .unwrap();
+
+        let consumed = store
+            .consume_verified("p1", OffsetDateTime::now_utc(), &sk.verifying_key())
+            .unwrap();
+        let PictoConsume::Consumed { picto } = consumed else {
+            panic!("expected consumed picto");
+        };
+        assert_eq!(picto.uses, 1);
+        assert_eq!(picto.status, PictoStatus::Spent);
         assert!(
             store
                 .find_match("git.push:main", OffsetDateTime::now_utc())

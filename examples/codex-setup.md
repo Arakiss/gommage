@@ -20,8 +20,7 @@ cargo install --path crates/gommage-cli
 cargo install --path crates/gommage-daemon
 cargo install --path crates/gommage-mcp
 gommage init
-cp policies/*.yaml      "$HOME/.gommage/policy.d/"
-cp capabilities/*.yaml  "$HOME/.gommage/capabilities.d/"
+gommage policy init --stdlib
 gommage policy check
 ```
 
@@ -45,12 +44,13 @@ Create (or edit) `~/.codex/hooks.json`:
 Repo-scoped config — if you want Gommage to run only for a given project —
 lives in `.codex/hooks.json` at the repo root with the same shape.
 
-## 3. Start the daemon (optional for hook-only flows)
+## 3. Start the daemon (recommended for long sessions)
 
 The `gommage-mcp` adapter falls back to in-process evaluation when the
-daemon socket isn't available. Running the daemon is recommended for
-longer sessions because it keeps policy + mapper rules pre-compiled in
-memory:
+daemon socket isn't available, and that fallback still writes signed audit
+entries. Running the daemon is recommended for longer sessions because it keeps
+policy + mapper rules pre-compiled in memory and centralizes reload/audit
+behavior:
 
 ```sh
 gommage-daemon --foreground

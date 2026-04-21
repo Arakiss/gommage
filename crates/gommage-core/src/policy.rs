@@ -139,9 +139,8 @@ impl Policy {
 
         for file in &files {
             let raw = fs::read_to_string(file)?;
-            version.update(file.to_string_lossy().as_bytes());
-            version.update(raw.as_bytes());
             let substituted = substitute_env(&raw, env);
+            update_policy_hash(&mut version, dir, file, &substituted);
             let raw_rules: Vec<RawRule> = serde_yaml::from_str(&substituted)?;
             for (index, raw) in raw_rules.into_iter().enumerate() {
                 rules.push(compile_rule(raw, file.clone(), index)?);
@@ -170,13 +169,35 @@ impl Policy {
         }
         use sha2::Digest as _;
         let mut h = sha2::Sha256::new();
+        h.update(b"file\0");
         h.update(source_label.as_bytes());
-        h.update(s.as_bytes());
+        h.update(b"\0content\0");
+        h.update(substituted.as_bytes());
         Ok(Policy {
             rules,
             version_hash: format!("sha256:{}", hex::encode(h.finalize())),
         })
     }
+}
+
+fn update_policy_hash(
+    hash: &mut sha2::Sha256,
+    root: &Path,
+    file: &Path,
+    substituted_contents: &str,
+) {
+    use sha2::Digest as _;
+    let rel = file.strip_prefix(root).unwrap_or(file);
+    let rel = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    hash.update(b"file\0");
+    hash.update(rel.as_bytes());
+    hash.update(b"\0content\0");
+    hash.update(substituted_contents.as_bytes());
+    hash.update(b"\0");
 }
 
 fn compile_rule(raw: RawRule, file: PathBuf, index: usize) -> Result<Rule, GommageError> {
@@ -283,6 +304,42 @@ mod tests {
                 .matches(&[Capability::new("fs.write:/a/node_modules/b.js")])
         );
         assert!(!r.r#match.matches(&[Capability::new("fs.write:/src/a.js")]));
+    }
+
+    #[test]
+    fn policy_hash_is_independent_of_root_path() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let yaml = r#"
+- name: allow-read
+  decision: allow
+  match:
+    any_capability: ["fs.read:/project/**"]
+"#;
+        std::fs::write(a.path().join("10-default.yaml"), yaml).unwrap();
+        std::fs::write(b.path().join("10-default.yaml"), yaml).unwrap();
+
+        let pa = Policy::load_from_dir(a.path(), &HashMap::new()).unwrap();
+        let pb = Policy::load_from_dir(b.path(), &HashMap::new()).unwrap();
+        assert_eq!(pa.version_hash, pb.version_hash);
+    }
+
+    #[test]
+    fn policy_hash_changes_when_substituted_policy_changes() {
+        let yaml = r#"
+- name: allow-root
+  decision: allow
+  match:
+    any_capability: ["fs.read:${EXPEDITION_ROOT}/**"]
+"#;
+        let mut env_a = HashMap::new();
+        env_a.insert("EXPEDITION_ROOT".into(), "/a".into());
+        let mut env_b = HashMap::new();
+        env_b.insert("EXPEDITION_ROOT".into(), "/b".into());
+
+        let pa = Policy::from_yaml_string(yaml, &env_a, "10-default.yaml").unwrap();
+        let pb = Policy::from_yaml_string(yaml, &env_b, "10-default.yaml").unwrap();
+        assert_ne!(pa.version_hash, pb.version_hash);
     }
 
     #[test]

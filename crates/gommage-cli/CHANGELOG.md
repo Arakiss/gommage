@@ -1,5 +1,20 @@
 # Changelog — gommage-cli
 
+## [Unreleased]
+
+### Added
+
+- `gommage policy init --stdlib`.
+- `gommage doctor`.
+- Structured `gommage explain <audit-id>` output plus `--json`.
+- Human TTL suffix parsing for `gommage grant --ttl`.
+
+### Changed
+
+- Picto grant/revoke/confirm actions now emit signed audit lifecycle events.
+- `gommage decide` remains evaluation-only and does not consume pictos.
+- Invalid picto creation input now exits cleanly instead of panicking.
+
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.1.0-alpha.1...gommage-cli-v0.1.1-alpha.1) (2026-04-21)
 
 

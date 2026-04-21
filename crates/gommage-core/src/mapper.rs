@@ -1,5 +1,5 @@
 use crate::{Capability, ToolCall, error::GommageError};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -7,6 +7,9 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+
+const MAPPER_REGEX_SIZE_LIMIT_BYTES: usize = 256 * 1024;
+const MAPPER_REGEX_NEST_LIMIT: u32 = 128;
 
 /// The YAML shape of a capability mapper rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +138,10 @@ fn compile(
         .match_input
         .into_iter()
         .map(|(path, pat)| {
-            Regex::new(&pat)
+            RegexBuilder::new(&pat)
+                .size_limit(MAPPER_REGEX_SIZE_LIMIT_BYTES)
+                .nest_limit(MAPPER_REGEX_NEST_LIMIT)
+                .build()
                 .map(|re| (path, re))
                 .map_err(|e| GommageError::Regex {
                     pattern: pat,
