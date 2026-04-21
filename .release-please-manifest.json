@@ -1,8 +1,8 @@
 {
   ".": "0.1.0-alpha.1",
-  "crates/gommage-core": "0.1.0-alpha.1",
-  "crates/gommage-audit": "0.1.0-alpha.1",
-  "crates/gommage-cli": "0.1.0-alpha.1",
-  "crates/gommage-daemon": "0.1.0-alpha.1",
-  "crates/gommage-mcp": "0.1.0-alpha.1"
+  "crates/gommage-core": "0.1.1-alpha.1",
+  "crates/gommage-audit": "0.1.1-alpha.1",
+  "crates/gommage-cli": "0.1.1-alpha.1",
+  "crates/gommage-daemon": "0.2.0-alpha.1",
+  "crates/gommage-mcp": "0.1.1-alpha.1"
 }
