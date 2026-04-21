@@ -6,11 +6,10 @@
 # upload) and, because `publish_results: true`, in the public OpenSSF API
 # consumed by deps.dev and the scorecard badge.
 #
-# Permissions are intentionally narrow:
-#   - top level: `read-all` (no workflow-wide writes)
-#   - job level: only the specific scopes the action needs
-# This is the canonical OSSF template; deviating here would cost the
-# `Token-Permissions` check points it is supposed to measure.
+# Permissions are intentionally narrow. Private repositories need more than
+# `contents: read` for Scorecard's GraphQL checks (for example ListCommits and
+# SAST detection), but those scopes can stay read-only. The only writes are the
+# SARIF upload and OIDC token used by Scorecard publishing.
 
 name: scorecard
 
@@ -37,8 +36,13 @@ jobs:
       # Required for `publish_results: true` — the action uses OIDC to prove
       # to the OpenSSF publishing service that this run comes from this repo.
       id-token: write
-      # Read-only repo access is all the scorecard checks need.
+      # Read-only repo access for private-repo Scorecard API/GraphQL checks.
+      actions: read
+      checks: read
       contents: read
+      issues: read
+      pull-requests: read
+      statuses: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
