@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.3.0-alpha.1...gommage-cli-v0.4.0-alpha.1) (2026-04-21)
+
+
+### Features
+
+* **cli:** install daemon from quickstart ([24fdb35](https://github.com/Arakiss/gommage/commit/24fdb35ad967702c994b5579c37d44ae8261a1bd))
+
 ## [0.3.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.2.0-alpha.1...gommage-cli-v0.3.0-alpha.1) (2026-04-21)
 
 
