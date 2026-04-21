@@ -49,6 +49,7 @@ Gommage is an **opt-in complement** to whatever permission layer your agent ship
 ```sh
 # macOS / Linux — one-liner (v0.1 onwards)
 # Requires cosign for Sigstore release verification.
+# The installer resolves the latest gommage-cli binary release.
 curl --proto '=https' --tlsv1.2 -sSf https://gommage.dev/install.sh | sh
 
 # Private repo installs may pass a GitHub token for release downloads.

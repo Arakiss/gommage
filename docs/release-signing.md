@@ -28,6 +28,12 @@ For private repository releases, set `GOMMAGE_GITHUB_TOKEN`, `GH_TOKEN`, or
 `GITHUB_TOKEN`; the installer sends it only as a GitHub `Authorization` header
 for release API and asset downloads.
 
+When `GOMMAGE_VERSION=latest` (the default), the installer resolves the newest
+`gommage-cli-v*` release that contains the platform archive it needs. It does
+not rely on GitHub's repository-level "latest release" pointer, because the
+workspace publishes per-crate releases and only `gommage-cli` carries binary
+archives.
+
 Manual verification:
 
 ```sh
