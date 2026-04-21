@@ -21,6 +21,7 @@ use time::OffsetDateTime;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixListener,
+    signal::unix::{SignalKind, signal},
     sync::Mutex,
 };
 
@@ -95,15 +96,48 @@ async fn main() -> Result<()> {
         home_root: layout.root.clone(),
     }));
 
+    // SIGHUP → reload policy + capability mappers. Standard Unix convention
+    // for long-running daemons; no restart required after editing
+    // `~/.gommage/policy.d/*.yaml`.
+    let mut sighup = signal(SignalKind::hangup()).context("installing SIGHUP handler")?;
+    // SIGTERM / SIGINT → graceful shutdown. We don't hold any state that
+    // needs flushing beyond the audit log (which flushes on every append),
+    // so returning from main is enough.
+    let mut sigterm = signal(SignalKind::terminate()).context("installing SIGTERM handler")?;
+
     loop {
-        let (stream, _addr) = listener.accept().await?;
-        let shared = Arc::clone(&shared);
-        tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, shared).await {
-                tracing::warn!(?e, "connection error");
+        tokio::select! {
+            accept = listener.accept() => {
+                let (stream, _addr) = accept?;
+                let shared = Arc::clone(&shared);
+                tokio::spawn(async move {
+                    if let Err(e) = handle_connection(stream, shared).await {
+                        tracing::warn!(?e, "connection error");
+                    }
+                });
             }
-        });
+            _ = sighup.recv() => {
+                let mut s = shared.lock().await;
+                match s.rt.reload_policy() {
+                    Ok(()) => tracing::info!(
+                        rules = s.rt.policy.rules.len(),
+                        version = %s.rt.policy.version_hash,
+                        "policy reloaded via SIGHUP"
+                    ),
+                    Err(e) => tracing::error!(?e, "SIGHUP reload failed; keeping previous policy"),
+                }
+            }
+            _ = sigterm.recv() => {
+                tracing::info!("SIGTERM received, shutting down");
+                break;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("SIGINT received, shutting down");
+                break;
+            }
+        }
     }
+    Ok(())
 }
 
 struct State {
