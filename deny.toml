@@ -15,7 +15,6 @@ ignore = []
 yanked = "deny"
 
 [bans]
-version = 2
 multiple-versions = "warn"
 wildcards = "deny"
 # Deterministic dep graph — duplicate versions are a smell, warn for now.

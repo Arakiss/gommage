@@ -161,7 +161,9 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
     let mut eval = evaluate(&caps, &s.rt.policy);
 
     if let Decision::AskPicto { required_scope, .. } = eval.decision.clone()
-        && let Some(p) = s.rt.pictos.find_match(&required_scope, OffsetDateTime::now_utc())?
+        && let Some(p) =
+            s.rt.pictos
+                .find_match(&required_scope, OffsetDateTime::now_utc())?
         && s.rt.pictos.consume(&p.id)?
     {
         eval.decision = Decision::Allow;

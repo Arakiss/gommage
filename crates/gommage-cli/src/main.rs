@@ -298,7 +298,9 @@ fn decide(rt: &Runtime, call: &ToolCall) -> Result<gommage_core::EvalResult> {
     let mut eval = evaluate(&caps, &rt.policy);
     // If the decision is AskPicto, check the store for a matching picto.
     if let Decision::AskPicto { required_scope, .. } = eval.decision.clone()
-        && let Some(p) = rt.pictos.find_match(&required_scope, OffsetDateTime::now_utc())?
+        && let Some(p) = rt
+            .pictos
+            .find_match(&required_scope, OffsetDateTime::now_utc())?
         && rt.pictos.consume(&p.id)?
     {
         eval.decision = Decision::Allow;

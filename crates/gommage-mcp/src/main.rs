@@ -119,7 +119,9 @@ fn decide_in_process(layout: &HomeLayout, call: &ToolCall) -> Result<gommage_cor
     let caps = rt.mapper.map(call);
     let mut eval = evaluate(&caps, &rt.policy);
     if let Decision::AskPicto { required_scope, .. } = eval.decision.clone()
-        && let Some(p) = rt.pictos.find_match(&required_scope, time::OffsetDateTime::now_utc())?
+        && let Some(p) = rt
+            .pictos
+            .find_match(&required_scope, time::OffsetDateTime::now_utc())?
         && rt.pictos.consume(&p.id)?
     {
         eval.decision = Decision::Allow;
