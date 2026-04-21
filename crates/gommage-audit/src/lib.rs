@@ -55,6 +55,57 @@ pub struct AuditEntry {
     pub sig: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEventEntry {
+    #[serde(rename = "v")]
+    pub version: u32,
+    pub id: String,
+    pub ts: String,
+    pub kind: String,
+    pub event: AuditEvent,
+    /// `ed25519:<base64>` signature over everything above.
+    pub sig: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuditEvent {
+    PictoCreated {
+        id: String,
+        scope: String,
+        max_uses: u32,
+        ttl_expires_at: String,
+        require_confirmation: bool,
+    },
+    PictoConfirmed {
+        id: String,
+    },
+    PictoRevoked {
+        id: String,
+    },
+    PictoConsumed {
+        id: String,
+        scope: String,
+        uses: u32,
+        max_uses: u32,
+        status: String,
+    },
+    PictoRejected {
+        id: String,
+        scope: String,
+        reason: String,
+    },
+    PictosExpired {
+        count: usize,
+    },
+    PolicyReloaded {
+        source: String,
+        rules: usize,
+        mapper_rules: usize,
+        policy_version: String,
+    },
+}
+
 pub struct AuditWriter {
     path: PathBuf,
     file: File,
@@ -109,6 +160,31 @@ impl AuditWriter {
         Ok(entry)
     }
 
+    pub fn append_event(&mut self, event: AuditEvent) -> Result<AuditEventEntry, AuditError> {
+        let ts = OffsetDateTime::now_utc().format(&Rfc3339)?;
+        let id = uuid::Uuid::now_v7().to_string();
+        let mut entry = AuditEventEntry {
+            version: AUDIT_SCHEMA_VERSION,
+            id,
+            ts,
+            kind: "event".to_string(),
+            event,
+            sig: String::new(),
+        };
+        let payload = canonical_event_bytes(&entry);
+        let sig: Signature = self.key.sign(&payload);
+        entry.sig = format!(
+            "ed25519:{}",
+            base64::encode_standard_no_pad(sig.to_bytes().as_slice())
+        );
+
+        let line = serde_json::to_string(&entry)?;
+        self.file.write_all(line.as_bytes())?;
+        self.file.write_all(b"\n")?;
+        self.file.flush()?;
+        Ok(entry)
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -131,6 +207,17 @@ fn canonical_bytes(e: &AuditEntry) -> Vec<u8> {
         "expedition": e.expedition,
     });
     // Sorted key rendering.
+    canonical_render(&obj).into_bytes()
+}
+
+fn canonical_event_bytes(e: &AuditEventEntry) -> Vec<u8> {
+    let obj = serde_json::json!({
+        "v": e.version,
+        "id": e.id,
+        "ts": e.ts,
+        "kind": e.kind,
+        "event": e.event,
+    });
     canonical_render(&obj).into_bytes()
 }
 
@@ -163,6 +250,80 @@ fn canonical_render(v: &serde_json::Value) -> String {
     }
 }
 
+enum ParsedRecord {
+    Decision(AuditEntry),
+    Event(AuditEventEntry),
+}
+
+impl ParsedRecord {
+    fn id(&self) -> &str {
+        match self {
+            ParsedRecord::Decision(e) => &e.id,
+            ParsedRecord::Event(e) => &e.id,
+        }
+    }
+
+    fn ts(&self) -> &str {
+        match self {
+            ParsedRecord::Decision(e) => &e.ts,
+            ParsedRecord::Event(e) => &e.ts,
+        }
+    }
+
+    fn policy_version(&self) -> Option<&str> {
+        match self {
+            ParsedRecord::Decision(e) => Some(&e.policy_version),
+            ParsedRecord::Event(_) => None,
+        }
+    }
+
+    fn expedition(&self) -> Option<&str> {
+        match self {
+            ParsedRecord::Decision(e) => e.expedition.as_deref(),
+            ParsedRecord::Event(_) => None,
+        }
+    }
+
+    fn payload(&self) -> Vec<u8> {
+        match self {
+            ParsedRecord::Decision(e) => canonical_bytes(e),
+            ParsedRecord::Event(e) => canonical_event_bytes(e),
+        }
+    }
+
+    fn sig(&self) -> &str {
+        match self {
+            ParsedRecord::Decision(e) => &e.sig,
+            ParsedRecord::Event(e) => &e.sig,
+        }
+    }
+}
+
+fn parse_record(line: &str) -> Result<ParsedRecord, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(line)?;
+    if value.get("kind").and_then(|v| v.as_str()) == Some("event") {
+        serde_json::from_value(value).map(ParsedRecord::Event)
+    } else {
+        serde_json::from_value(value).map(ParsedRecord::Decision)
+    }
+}
+
+fn verify_record(record: &ParsedRecord, vk: &VerifyingKey, line: usize) -> Result<(), AuditError> {
+    let sig_b64 = record
+        .sig()
+        .strip_prefix("ed25519:")
+        .ok_or(AuditError::BadSignature { line })?;
+    let sig_bytes =
+        base64::decode_standard_no_pad(sig_b64).map_err(|_| AuditError::BadSignature { line })?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| AuditError::BadSignature { line })?;
+    let sig = Signature::from_bytes(&sig_arr);
+    let payload = record.payload();
+    vk.verify(&payload, &sig)
+        .map_err(|_| AuditError::BadSignature { line })
+}
+
 pub fn verify_log(path: &Path, vk: &VerifyingKey) -> Result<usize, AuditError> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
@@ -172,20 +333,8 @@ pub fn verify_log(path: &Path, vk: &VerifyingKey) -> Result<usize, AuditError> {
         if line.trim().is_empty() {
             continue;
         }
-        let entry: AuditEntry = serde_json::from_str(&line)?;
-        let sig_b64 = entry
-            .sig
-            .strip_prefix("ed25519:")
-            .ok_or(AuditError::BadSignature { line: i + 1 })?;
-        let sig_bytes = base64::decode_standard_no_pad(sig_b64)
-            .map_err(|_| AuditError::BadSignature { line: i + 1 })?;
-        let sig_arr: [u8; 64] = sig_bytes
-            .try_into()
-            .map_err(|_| AuditError::BadSignature { line: i + 1 })?;
-        let sig = Signature::from_bytes(&sig_arr);
-        let payload = canonical_bytes(&entry);
-        vk.verify(&payload, &sig)
-            .map_err(|_| AuditError::BadSignature { line: i + 1 })?;
+        let record = parse_record(&line)?;
+        verify_record(&record, vk, i + 1)?;
         count += 1;
     }
     Ok(count)
@@ -260,7 +409,7 @@ pub fn explain_log(path: &Path, vk: &VerifyingKey) -> Result<VerifyReport, Audit
             continue;
         }
         total += 1;
-        let entry: AuditEntry = match serde_json::from_str(&line) {
+        let record = match parse_record(&line) {
             Ok(e) => e,
             Err(e) => {
                 anomalies.push(Anomaly::MalformedEntry {
@@ -272,55 +421,50 @@ pub fn explain_log(path: &Path, vk: &VerifyingKey) -> Result<VerifyReport, Audit
         };
 
         // Signature verification.
-        let sig_ok = (|| -> Result<(), ()> {
-            let sig_b64 = entry.sig.strip_prefix("ed25519:").ok_or(())?;
-            let sig_bytes = base64::decode_standard_no_pad(sig_b64).map_err(|_| ())?;
-            let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| ())?;
-            let sig = Signature::from_bytes(&sig_arr);
-            let payload = canonical_bytes(&entry);
-            vk.verify(&payload, &sig).map_err(|_| ())
-        })()
-        .is_ok();
+        let sig_ok = verify_record(&record, vk, i + 1).is_ok();
         if sig_ok {
             verified += 1;
         } else {
             anomalies.push(Anomaly::BadSignature {
                 line: i + 1,
-                entry_id: entry.id.clone(),
+                entry_id: record.id().to_string(),
             });
         }
 
         // Timestamp ordering.
         if let Some(prev) = &last_ts
-            && entry.ts < *prev
+            && record.ts() < prev.as_str()
         {
             anomalies.push(Anomaly::TimestampOutOfOrder {
                 line: i + 1,
                 previous_ts: prev.clone(),
-                current_ts: entry.ts.clone(),
+                current_ts: record.ts().to_string(),
             });
         }
-        last_ts = Some(entry.ts.clone());
+        last_ts = Some(record.ts().to_string());
 
         // Policy version tracking.
-        if let Some(prev) = &last_policy_version
-            && prev != &entry.policy_version
-        {
-            anomalies.push(Anomaly::PolicyVersionChanged {
-                line: i + 1,
-                from: prev.clone(),
-                to: entry.policy_version.clone(),
-            });
-        }
-        last_policy_version = Some(entry.policy_version.clone());
+        if let Some(policy_version) = record.policy_version() {
+            if let Some(prev) = &last_policy_version
+                && prev != policy_version
+            {
+                anomalies.push(Anomaly::PolicyVersionChanged {
+                    line: i + 1,
+                    from: prev.clone(),
+                    to: policy_version.to_string(),
+                });
+            }
+            last_policy_version = Some(policy_version.to_string());
 
-        if !policy_versions.contains(&entry.policy_version) {
-            policy_versions.push(entry.policy_version.clone());
+            if !policy_versions.iter().any(|v| v == policy_version) {
+                policy_versions.push(policy_version.to_string());
+            }
         }
-        if let Some(ref e) = entry.expedition
-            && !expeditions.contains(e)
+
+        if let Some(e) = record.expedition()
+            && !expeditions.iter().any(|seen| seen == e)
         {
-            expeditions.push(e.clone());
+            expeditions.push(e.to_string());
         }
     }
 
@@ -372,6 +516,48 @@ mod tests {
         w.append(&call, &eval, Some("expedition-x")).unwrap();
         let n = verify_log(&path, &sk.verifying_key()).unwrap();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn append_event_and_verify() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut w = AuditWriter::open(&path, sk.clone()).unwrap();
+        w.append_event(AuditEvent::PictoRevoked { id: "p1".into() })
+            .unwrap();
+        drop(w);
+
+        let n = verify_log(&path, &sk.verifying_key()).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn mixed_decision_and_event_log_verifies() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut w = AuditWriter::open(&path, sk.clone()).unwrap();
+        let call = ToolCall {
+            tool: "Bash".into(),
+            input: json!({"command":"ls"}),
+        };
+        let eval = EvalResult {
+            decision: Decision::Allow,
+            matched_rule: None,
+            capabilities: vec![],
+            policy_version: "sha256:v1".into(),
+        };
+        w.append(&call, &eval, Some("exp")).unwrap();
+        w.append_event(AuditEvent::PictoRevoked { id: "p1".into() })
+            .unwrap();
+        drop(w);
+
+        let report = explain_log(&path, &sk.verifying_key()).unwrap();
+        assert_eq!(report.entries_total, 2);
+        assert_eq!(report.entries_verified, 2);
+        assert_eq!(report.policy_versions_seen, vec!["sha256:v1"]);
+        assert_eq!(report.expeditions_seen, vec!["exp"]);
     }
 
     #[test]

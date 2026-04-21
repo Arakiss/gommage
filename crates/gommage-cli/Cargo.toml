@@ -28,3 +28,6 @@ rand_core.workspace     = true
 dirs.workspace          = true
 time.workspace          = true
 uuid.workspace          = true
+
+[dev-dependencies]
+tempfile = "3"

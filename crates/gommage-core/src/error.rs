@@ -34,6 +34,9 @@ pub enum GommageError {
     #[error("picto {id} is {reason}")]
     PictoUnusable { id: String, reason: &'static str },
 
+    #[error("invalid picto: {0}")]
+    InvalidPicto(String),
+
     #[error("policy error: {0}")]
     Policy(String),
 

@@ -1,5 +1,12 @@
 # Changelog — gommage-daemon
 
+## [Unreleased]
+
+### Changed
+
+- Picto consumption now verifies signatures before allowing gated decisions.
+- Picto consume/reject and policy reload events now write signed audit entries.
+
 ## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.1.0-alpha.1...gommage-daemon-v0.2.0-alpha.1) (2026-04-21)
 
 

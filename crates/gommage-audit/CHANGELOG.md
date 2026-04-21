@@ -1,5 +1,13 @@
 # Changelog — gommage-audit
 
+## [Unreleased]
+
+### Added
+
+- Signed audit event entries for picto lifecycle and policy reload events.
+- Mixed decision/event log verification support in `verify_log` and
+  `explain_log`.
+
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.1.0-alpha.1...gommage-audit-v0.1.1-alpha.1) (2026-04-21)
 
 

@@ -107,7 +107,7 @@ CI re-runs the determinism suite **10 times** per build as an additional defense
 
 ## Policy version hash
 
-Every `Policy` carries a `version_hash` field — a SHA-256 over the concatenation of `(file_path, file_contents)` in lexicographic order. The hash goes into every audit entry so `gommage explain <id>` can report not just which rule fired, but which version of the rule set it was.
+Every `Policy` carries a `version_hash` field — a SHA-256 over the concatenation of `(relative_file_path, substituted_file_contents)` in lexicographic order. Relative paths make the same policy tree hash identically under different `GOMMAGE_HOME` roots; substituted contents make different effective canvases produce different hashes. The hash goes into every audit entry so `gommage explain <id>` can report not just which rule fired, but which version of the rule set it was.
 
 ## Picto scope matching
 

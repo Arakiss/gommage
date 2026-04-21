@@ -35,7 +35,7 @@ A one-shot break-glass grant must not become an ambient capability.
 
 ### 1.4 Audit gaps
 
-Every decision (`allow`, `gommage`, `ask`, picto-consumed, picto-revoked, SIGHUP-reload) produces an append-only JSONL entry signed with the daemon keypair. The signature covers the canonical bytes of the entry minus the `sig` field, so killing the daemon mid-write corrupts at most one line; all prior lines stay independently verifiable.
+Every decision (`allow`, `gommage`, `ask`) and every authorization-state event (`picto-created`, `picto-confirmed`, `picto-consumed`, `picto-revoked`, `picto-rejected`, policy reload) produces an append-only JSONL entry signed with the daemon keypair. The signature covers the canonical bytes of the entry minus the `sig` field, so killing the daemon mid-write corrupts at most one line; all prior lines stay independently verifiable.
 
 `gommage audit-verify` walks the full log and returns a count of verified entries (or the line number of the first failure).
 
@@ -79,10 +79,10 @@ Gommage's input specification (see Section 3) treats paths as **opaque strings**
 
 An attacker with read access to `~/.gommage/pictos.sqlite` who tries to inject a picto row with a stolen signature, or modify an existing picto's scope/TTL:
 
-- **Signature-based rejection**: at consume time, the daemon verifies the picto's `signature_b64` against the daemon's verifying key (`~/.gommage/key.ed25519.pub`). A tampered row fails verification → rejected → audit entry says "bad signature".
+- **Signature-based rejection**: at lookup and consume time, Gommage verifies the picto's `signature_b64` against the verifying key derived from the daemon keypair. A tampered row fails verification → rejected → audit entry says "bad signature".
 - **But**: if the attacker has the private key (local user compromise, Section 2.2), forgery succeeds. See 2.2.
 
-**v0.2 plan**: `gommage audit verify --explain` will re-verify every picto consume in the audit log against the key used at the time, flagging any consume event whose picto signature no longer validates.
+`gommage audit-verify --explain` verifies the signed audit trail itself and surfaces `picto_rejected` lifecycle events for tampered rows.
 
 ### 2.5 TOCTOU between Gommage's decision and the agent's execution
 
@@ -116,8 +116,7 @@ Tool-call inputs are UTF-8 strings. Gommage does **not** Unicode-normalize (no N
 Capability mapper rules compile user-supplied regex (from `capabilities/*.yaml`). A pathological regex could, on the right input, cause catastrophic backtracking.
 
 - Gommage uses the `regex` crate (Rust, RE2-style, linear-time guaranteed). Catastrophic backtracking is **impossible** by the engine's design.
-- A malicious capability rule could still denial-of-service via sheer volume — `regex` has compile-time limits but a rule with thousands of branches is pathologically slow.
-- **v0.2 plan**: the mapper will enforce a compile-time cap on regex complexity (NFA state count) and reject anything beyond it.
+- A malicious capability rule could still denial-of-service via sheer volume. The mapper sets explicit regex compile limits (`size_limit` and `nest_limit`) and rejects patterns beyond them.
 
 ### 2.10 Policy YAML deserialization attacks
 
@@ -125,7 +124,7 @@ Capability mapper rules compile user-supplied regex (from `capabilities/*.yaml`)
 
 - YAML anchors / aliases that expand to megabytes (billion laughs). `serde_yaml_ng` inherits the upstream parser limits; we do not impose a stricter one yet.
 - YAML tags invoking custom types — we deserialize into a closed set of types (`RawRule`, `RawMapperRule`); unknown tags error at parse time.
-- Duplicate keys — YAML spec is ambiguous; we use last-wins (parser default). **v0.2 plan**: detect and reject duplicate keys in policy and mapper files.
+- Duplicate keys — YAML spec is ambiguous, but `serde_yaml_ng` rejects duplicate struct fields in policy and mapper files instead of silently accepting last-wins behavior.
 
 **Today's posture**: users are trusted authors of `~/.gommage/policy.d/*.yaml`. If your policy directory can be written to by an attacker, Gommage is already bypassed (Section 2.2).
 

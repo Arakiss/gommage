@@ -7,8 +7,8 @@ A **picto** is a signed grant that converts an `ask_picto` decision into an `all
 - **Scope.** Exact string match against the `required_scope` of the policy rule. No wildcards.
 - **TTL.** Mandatory. Max 24 h. No ambient, long-lived grants.
 - **`max_uses`.** Mandatory. Consumed atomically; once spent, the picto transitions to `spent` and cannot be revived.
-- **Signature.** ed25519 over `{id, scope, max_uses, ttl, created_at, reason}` using the daemon's keypair. Prevents a hostile agent from forging a picto by writing to the SQLite store via a tool call.
-- **Revocable.** `gommage revoke <id>` purges in O(1). Audit log records the revocation.
+- **Signature.** ed25519 over `{id, scope, max_uses, ttl, created_at, reason}` using the daemon's keypair. Gommage verifies the signature before lookup/consume can turn an `ask_picto` into `allow`, so a tampered SQLite row is rejected and audited.
+- **Revocable.** `gommage revoke <id>` marks the picto revoked in O(1). Audit log records the revocation.
 - **`--require-confirmation`.** Optional. Picto is created in `pending_confirmation`; must be activated via `gommage confirm <id>` (e.g., by a second human) before first use.
 
 ## Lifecycle
@@ -59,4 +59,4 @@ Any secret-equivalent artifact with an unbounded lifetime eventually becomes a s
 
 ## Audit
 
-Every picto-related event (create, confirm, consume, revoke, expire) is one line in the audit log. Signature covers the full entry minus the `sig` field itself.
+Picto lifecycle events that mutate authorization state (create, confirm, consume, revoke, bad-signature rejection) are written as signed audit event lines. TTL expiration is enforced at lookup/consume time; expired rows can be swept separately without being required for a decision.
