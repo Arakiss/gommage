@@ -34,7 +34,7 @@ jobs:
       # triggering release as a downloadable asset.
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
           ref: ${{ github.event.release.tag_name }}
