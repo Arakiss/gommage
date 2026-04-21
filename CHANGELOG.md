@@ -38,6 +38,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage-mcp` daemon-absent fallback now writes signed audit entries instead of silently evaluating without audit.
 - Policy version hashes now use relative policy file paths plus substituted effective contents, making identical policy trees path-stable across homes while distinguishing different effective canvases.
 - Invalid picto creation input now returns typed CLI errors instead of panicking.
+- Release checksums are emitted with archive basenames, and the installer now verifies the downloaded archive hash directly so it tolerates historical checksum path prefixes. Private-release installs can pass `GOMMAGE_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` for authenticated GitHub downloads.
 - Capability mapper regex compilation now uses explicit size and nesting limits.
 - Capability mapper rules can now use `tool_pattern` for dynamic tool names and `${tool}` in capability templates.
 - Policy `${HOME}` substitution is now available even when no expedition is active.
