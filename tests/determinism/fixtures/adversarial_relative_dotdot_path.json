@@ -1,0 +1,6 @@
+{
+  "name": "adversarial-dotdot-path-escape-fail-closed",
+  "call": { "tool": "Write", "input": { "file_path": "/tmp/proj/../../etc/passwd", "content": "x" } },
+  "expected": { "kind": "gommage" },
+  "expedition_root": "/tmp/proj"
+}
