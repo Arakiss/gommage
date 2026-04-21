@@ -72,7 +72,7 @@ jobs:
 
           while IFS= read -r tag; do
             [[ -n "${tag}" ]] || continue
-            gh release edit "${tag}" --prerelease --latest=false
+            gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --prerelease --latest=false
           done <<< "${tags}"
       - name: Trigger CLI binary build
         if: ${{ steps.release.outputs['crates/gommage-cli--release_created'] == 'true' }}
@@ -88,7 +88,7 @@ jobs:
             exit 1
           fi
 
-          gh workflow run release.yml --ref "${CLI_TAG}" -f "tag=${CLI_TAG}"
+          gh workflow run release.yml --repo "${GITHUB_REPOSITORY}" --ref "${CLI_TAG}" -f "tag=${CLI_TAG}"
 
   # 2) On tag push gommage-cli-v*: build cross-platform binaries, attach to
   #    that tag's GitHub release. release-please dispatches this job explicitly
