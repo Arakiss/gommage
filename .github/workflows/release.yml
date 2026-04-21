@@ -15,8 +15,7 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,6 +27,9 @@ jobs:
     name: release-please
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: googleapis/release-please-action@v4
         with:
@@ -44,6 +46,9 @@ jobs:
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gommage-cli-v'))
       || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -65,10 +70,26 @@ jobs:
         with:
           # When workflow_dispatch-triggered, check out the tag provided via input.
           ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: Resolve and validate release tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            upload_tag="${{ github.event.inputs.tag }}"
+          else
+            upload_tag="${GITHUB_REF#refs/tags/}"
+          fi
+          expected_ref="refs/tags/${upload_tag}"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "::error::Release signatures are verified against ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
+            exit 1
+          fi
+          echo "UPLOAD_TAG=${upload_tag}" >> "$GITHUB_ENV"
+          echo "SIGNER_IDENTITY=https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${expected_ref}" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      - uses: sigstore/cosign-installer@v4.0.0
       - name: Install cross-linker (linux-aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -88,18 +109,20 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           shasum -a 256 "dist/${{ matrix.asset }}.tar.gz" \
               > "dist/${{ matrix.asset }}.tar.gz.sha256"
-      - name: Resolve upload tag
-        id: tag
+      - name: Sign + verify artifact
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${GITHUB_REF#refs/tags/}"       >> "$GITHUB_OUTPUT"
-          fi
+          artifact="dist/${{ matrix.asset }}.tar.gz"
+          bundle="${artifact}.sigstore.json"
+          cosign sign-blob --yes "${artifact}" --bundle "${bundle}"
+          cosign verify-blob "${artifact}" \
+            --bundle "${bundle}" \
+            --certificate-identity "${SIGNER_IDENTITY}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.name }}
+          tag_name: ${{ env.UPLOAD_TAG }}
           files: |
             dist/${{ matrix.asset }}.tar.gz
             dist/${{ matrix.asset }}.tar.gz.sha256
+            dist/${{ matrix.asset }}.tar.gz.sigstore.json
