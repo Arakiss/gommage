@@ -47,6 +47,8 @@
 - Picto grant/revoke/confirm actions now emit signed audit lifecycle events.
 - `gommage decide` remains evaluation-only and does not consume pictos.
 - Invalid picto creation input now exits cleanly instead of panicking.
+- Bundled stdlib installation now embeds assets from `gommage-stdlib` instead
+  of repository-root paths.
 
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.1.0-alpha.1...gommage-cli-v0.1.1-alpha.1) (2026-04-21)
 

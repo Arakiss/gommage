@@ -27,6 +27,7 @@ rules:
     - always
     - - core
       - audit
+      - stdlib
       - cli
       - daemon
       - mcp
