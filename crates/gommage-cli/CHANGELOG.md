@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.3.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.2.0-alpha.1...gommage-cli-v0.3.0-alpha.1) (2026-04-21)
+
+
+### Features
+
+* **cli:** emit structured doctor diagnostics ([0be3d2d](https://github.com/Arakiss/gommage/commit/0be3d2dfbc58dcc68fa13a552e914f3b34484095))
+
 ## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.1.1-alpha.1...gommage-cli-v0.2.0-alpha.1) (2026-04-21)
 
 
