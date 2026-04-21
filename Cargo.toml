@@ -36,7 +36,7 @@ tracing    = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 clap       = { version = "4", features = ["derive", "env"] }
 tokio      = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "signal", "sync"] }
-dirs       = "5"
+dirs       = "6"
 
 # --- Determinism-critical (exact pins: any change here can flip a decision) -
 # Touching any of these requires a PR with a green determinism-suite run.
