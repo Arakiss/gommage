@@ -46,10 +46,10 @@ base64        = "=0.22.1"
 time          = { version = "=0.3.47", features = ["serde", "formatting", "parsing", "macros"] }
 uuid          = { version = "=1.23.1", features = ["v7", "serde"] }
 
-# serde_yaml is unmaintained upstream; tracked as tech debt in CHANGELOG
-# under "Known issues". Migration target: serde_yaml_ng or serde_yml, to be
-# evaluated before v0.2.
-serde_yaml = "=0.9.34"
+# serde_yaml migrated to serde_yaml_ng (maintained fork, drop-in API
+# compatible). Aliased so every `use serde_yaml::*` in-tree keeps working
+# without changes. Pinned exactly like other determinism-critical deps.
+serde_yaml = { package = "serde_yaml_ng", version = "=0.10.0" }
 
 [profile.release]
 lto = "thin"
