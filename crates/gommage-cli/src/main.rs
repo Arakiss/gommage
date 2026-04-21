@@ -45,6 +45,18 @@ enum Cmd {
         /// Skip importing native agent permission rules into Gommage policy.
         #[arg(long)]
         no_import_native_permissions: bool,
+        /// Install and start the user-level daemon service as part of quickstart.
+        #[arg(long)]
+        daemon: bool,
+        /// Service manager to use with --daemon. Defaults to launchd on macOS and systemd on Linux.
+        #[arg(long, value_enum)]
+        daemon_manager: Option<ServiceManager>,
+        /// Replace an existing daemon service file when using --daemon.
+        #[arg(long)]
+        daemon_force: bool,
+        /// Write the daemon service file without starting it. Implies --daemon.
+        #[arg(long)]
+        daemon_no_start: bool,
         /// Show planned file edits without writing them.
         #[arg(long)]
         dry_run: bool,
@@ -265,14 +277,24 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             agents,
             replace_hooks,
             no_import_native_permissions,
+            daemon,
+            daemon_manager,
+            daemon_force,
+            daemon_no_start,
             dry_run,
         } => {
             return cmd_quickstart(
                 layout,
-                agents,
-                replace_hooks,
-                !no_import_native_permissions,
-                dry_run,
+                QuickstartOptions {
+                    agents,
+                    replace_hooks,
+                    import_native_permissions: !no_import_native_permissions,
+                    install_daemon: daemon || daemon_no_start,
+                    daemon_manager,
+                    daemon_force,
+                    daemon_no_start,
+                    dry_run,
+                },
             );
         }
         Cmd::Agent(sub) => return cmd_agent(sub, layout),
@@ -416,6 +438,17 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Daemon(sub) => return cmd_daemon(sub, layout),
     }
     Ok(ExitCode::SUCCESS)
+}
+
+struct QuickstartOptions {
+    agents: Vec<AgentKind>,
+    replace_hooks: bool,
+    import_native_permissions: bool,
+    install_daemon: bool,
+    daemon_manager: Option<ServiceManager>,
+    daemon_force: bool,
+    daemon_no_start: bool,
+    dry_run: bool,
 }
 
 fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
@@ -854,13 +887,18 @@ fn systemd_quote(raw: &str) -> String {
     format!("\"{}\"", raw.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-fn cmd_quickstart(
-    layout: HomeLayout,
-    agents: Vec<AgentKind>,
-    replace_hooks: bool,
-    import_native_permissions: bool,
-    dry_run: bool,
-) -> Result<ExitCode> {
+fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> Result<ExitCode> {
+    let QuickstartOptions {
+        agents,
+        replace_hooks,
+        import_native_permissions,
+        install_daemon,
+        daemon_manager,
+        daemon_force,
+        daemon_no_start,
+        dry_run,
+    } = options;
+
     if dry_run {
         println!("dry-run: no files will be written");
     }
@@ -908,6 +946,16 @@ fn cmd_quickstart(
         )?;
     }
 
+    if install_daemon {
+        daemon_install(
+            HomeLayout::at(&layout.root),
+            resolve_service_manager(daemon_manager)?,
+            daemon_force,
+            daemon_no_start,
+            dry_run,
+        )?;
+    }
+
     if !dry_run {
         let env = Expedition::load(&layout.expedition_file)?
             .map(|e| e.policy_env())
@@ -922,7 +970,11 @@ fn cmd_quickstart(
 
     println!("ok quickstart complete");
     println!("next: start an expedition with `gommage expedition start <name>`");
-    println!("optional: run `gommage daemon install` for long sessions");
+    if install_daemon {
+        println!("next: inspect runtime health with `gommage doctor`");
+    } else {
+        println!("optional: run `gommage daemon install` for long sessions");
+    }
     Ok(ExitCode::SUCCESS)
 }
 

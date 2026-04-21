@@ -283,6 +283,62 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
 }
 
 #[test]
+fn quickstart_can_install_daemon_service_without_starting() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    let systemd = temp.path().join("systemd-user");
+    let fake_daemon = temp.path().join("bin").join("gommage-daemon");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::create_dir_all(fake_daemon.parent().unwrap()).unwrap();
+    fs::write(&settings, "{}").unwrap();
+    fs::write(&fake_daemon, "").unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .env("GOMMAGE_SYSTEMD_USER_DIR", &systemd)
+        .env("GOMMAGE_DAEMON_BIN", &fake_daemon)
+        .args([
+            "quickstart",
+            "--agent",
+            "claude",
+            "--daemon-no-start",
+            "--daemon-manager",
+            "systemd",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("ok daemon: service installed but not started"));
+    assert!(stdout.contains("ok quickstart complete"));
+
+    let service = fs::read_to_string(systemd.join("gommage-daemon.service")).unwrap();
+    assert!(service.contains("ExecStart="));
+    assert!(service.contains("--foreground --home"));
+    assert!(service.contains(&home.to_string_lossy().to_string()));
+    assert!(service.contains(&fake_daemon.to_string_lossy().to_string()));
+
+    let settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    assert!(
+        settings
+            .pointer("/hooks/PreToolUse")
+            .and_then(|v| v.as_array())
+            .unwrap()
+            .iter()
+            .any(|entry| entry.get("matcher").and_then(|v| v.as_str()) == Some(
+                "Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep|WebFetch|WebSearch|mcp__.*"
+            ))
+    );
+}
+
+#[test]
 fn agent_install_codex_writes_hook_and_enables_feature_flag() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
