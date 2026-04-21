@@ -76,6 +76,10 @@ cargo install --path crates/gommage-mcp --force
 # - installs the Claude PreToolUse hook with backups
 gommage quickstart --agent claude
 
+# Scriptable verification. `warn` is expected before the first audit entry
+# and when the daemon is not installed; `fail` means setup needs attention.
+gommage doctor --json
+
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
 
@@ -104,6 +108,16 @@ gommage explain <audit-id>
 # Close the expedition (resets the canvas)
 gommage expedition end
 ```
+
+## Diagnostics
+
+Use `gommage doctor` for human-readable checks and `gommage doctor --json` for installers, skills, CI smoke tests, and agent setup scripts. The JSON report has a top-level `status`:
+
+- `ok`: all checks passed.
+- `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.
+- `fail`: non-zero exit; missing home, missing key, broken policy/capability mapper, unreadable expedition state, or unverifiable audit log.
+
+Details are documented in [`docs/diagnostics.md`](docs/diagnostics.md).
 
 ## Architecture
 

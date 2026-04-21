@@ -4,6 +4,8 @@ What Gommage sees, what it does not, and what can bypass it per agent. This page
 
 If an item is listed as "Bypasses Gommage", that is not a vulnerability — it is the boundary of what a PreToolUse-level interception layer can observe. Stack OS-level confinement (AppArmor, SELinux, `seccomp-bpf`, macOS Seatbelt, Codex `--sandbox`) under Gommage for anything you need caught below the agent layer.
 
+After installing an integration, run `gommage doctor --json` to verify the operator path. A top-level `warn` is still an operable install when the only warnings are the missing first audit log or missing daemon socket. A top-level `fail` means the hook should not be trusted yet. See [`diagnostics.md`](diagnostics.md).
+
 ---
 
 ## Claude Code (Anthropic)
