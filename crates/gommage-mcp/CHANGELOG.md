@@ -1,5 +1,17 @@
 # Changelog — gommage-mcp
 
+## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.1.1-alpha.1...gommage-mcp-v0.2.0-alpha.1) (2026-04-21)
+
+
+### Features
+
+* map agent web and mcp tools ([c3601c6](https://github.com/Arakiss/gommage/commit/c3601c6502a35c6e0b7c735998011a892b3ca7d6))
+
+
+### Bug fixes
+
+* enforce auditable trust guarantees ([fef1098](https://github.com/Arakiss/gommage/commit/fef1098ea15b3796c578d9a5a55b20e472d532de))
+
 ## [Unreleased]
 
 ### Changed

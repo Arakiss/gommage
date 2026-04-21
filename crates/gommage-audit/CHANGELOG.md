@@ -1,5 +1,17 @@
 # Changelog — gommage-audit
 
+## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.1.1-alpha.1...gommage-audit-v0.2.0-alpha.1) (2026-04-21)
+
+
+### Features
+
+* **audit:** audit-verify --explain with anomaly report ([#10](https://github.com/Arakiss/gommage/issues/10)) ([d2c8450](https://github.com/Arakiss/gommage/commit/d2c84506523faa3ffcbc867eb6806cde7f55c1f5))
+
+
+### Bug fixes
+
+* enforce auditable trust guarantees ([fef1098](https://github.com/Arakiss/gommage/commit/fef1098ea15b3796c578d9a5a55b20e472d532de))
+
 ## [Unreleased]
 
 ### Added

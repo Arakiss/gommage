@@ -3,6 +3,21 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.1.1-alpha.1...gommage-core-v0.2.0-alpha.1) (2026-04-21)
+
+
+### Features
+
+* add agent quickstart setup ([8f84fc0](https://github.com/Arakiss/gommage/commit/8f84fc0c61ffa7f463e14920d487c457bd63932b))
+* **core:** proptest robustness suite; drop empty fuzz.yml stub ([#12](https://github.com/Arakiss/gommage/issues/12)) ([755af07](https://github.com/Arakiss/gommage/commit/755af07ae07e929fa93b8b0e2a807230098caf57))
+* **hardstop:** adversarial corpus and wrapper-evasion patterns ([#8](https://github.com/Arakiss/gommage/issues/8)) ([8132865](https://github.com/Arakiss/gommage/commit/813286502135dbccd506f61b9642099c3faa19f5))
+* map agent web and mcp tools ([c3601c6](https://github.com/Arakiss/gommage/commit/c3601c6502a35c6e0b7c735998011a892b3ca7d6))
+
+
+### Bug fixes
+
+* enforce auditable trust guarantees ([fef1098](https://github.com/Arakiss/gommage/commit/fef1098ea15b3796c578d9a5a55b20e472d532de))
+
 ## [Unreleased]
 
 ### Added

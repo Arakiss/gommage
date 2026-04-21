@@ -1,5 +1,20 @@
 # Changelog — gommage-cli
 
+## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.1.1-alpha.1...gommage-cli-v0.2.0-alpha.1) (2026-04-21)
+
+
+### Features
+
+* add agent quickstart setup ([8f84fc0](https://github.com/Arakiss/gommage/commit/8f84fc0c61ffa7f463e14920d487c457bd63932b))
+* **audit:** audit-verify --explain with anomaly report ([#10](https://github.com/Arakiss/gommage/issues/10)) ([d2c8450](https://github.com/Arakiss/gommage/commit/d2c84506523faa3ffcbc867eb6806cde7f55c1f5))
+* install daemon as user service ([61735ce](https://github.com/Arakiss/gommage/commit/61735cecc6cc52eb0b82414c092a94113312eafa))
+* map agent web and mcp tools ([c3601c6](https://github.com/Arakiss/gommage/commit/c3601c6502a35c6e0b7c735998011a892b3ca7d6))
+
+
+### Bug fixes
+
+* enforce auditable trust guarantees ([fef1098](https://github.com/Arakiss/gommage/commit/fef1098ea15b3796c578d9a5a55b20e472d532de))
+
 ## [Unreleased]
 
 ### Added
