@@ -1,0 +1,5 @@
+{
+  "name": "aws-ec2-describe-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "aws ec2 describe-instances" } },
+  "expected": { "kind": "allow" }
+}

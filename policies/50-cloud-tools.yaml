@@ -1,0 +1,149 @@
+# Cloud-ops policy defaults.
+#
+# Conservative by design: any action that writes to a cluster, infra, or
+# a shared GitHub surface requires a picto. Read-only variants pass.
+
+# --- kubectl --------------------------------------------------------------
+- name: allow-kubectl-readonly
+  decision: allow
+  match:
+    any_capability:
+      - "k8s.read:<any>"
+  reason: "kubectl read-only commands are safe"
+
+- name: allow-kubectl-exec-port-forward
+  decision: allow
+  match:
+    any_capability:
+      - "k8s.exec:<pod>"
+      - "k8s.port-forward:<resource>"
+  reason: "debug-level kubectl ops are typically needed in-session"
+
+- name: gate-kubectl-apply
+  decision: ask_picto
+  required_scope: "k8s.apply"
+  match:
+    any_capability:
+      - "k8s.apply:<manifest>"
+  reason: "kubectl apply mutates cluster state"
+
+- name: gate-kubectl-delete
+  decision: ask_picto
+  required_scope: "k8s.delete"
+  match:
+    any_capability:
+      - "k8s.delete:*"
+  reason: "kubectl delete needs a picto"
+
+- name: gate-kubectl-rollout-restart
+  decision: ask_picto
+  required_scope: "k8s.rollout"
+  match:
+    any_capability:
+      - "k8s.rollout:restart"
+  reason: "rollout restart causes downtime — picto required"
+
+- name: gate-kubectl-scale
+  decision: ask_picto
+  required_scope: "k8s.scale"
+  match:
+    any_capability:
+      - "k8s.scale:<resource>"
+  reason: "scaling mutates cluster capacity — picto required"
+
+# --- terraform ------------------------------------------------------------
+- name: allow-terraform-readonly
+  decision: allow
+  match:
+    any_capability:
+      - "terraform.read:<any>"
+  reason: "terraform plan/init/validate/fmt/output are non-destructive"
+
+- name: gate-terraform-apply
+  decision: ask_picto
+  required_scope: "terraform.apply"
+  match:
+    any_capability:
+      - "terraform.apply:<plan>"
+  reason: "terraform apply mutates infrastructure"
+
+- name: gate-terraform-destroy
+  decision: ask_picto
+  required_scope: "terraform.destroy"
+  match:
+    any_capability:
+      - "terraform.destroy:<any>"
+  reason: "terraform destroy tears down infrastructure — picto required"
+
+# --- aws ------------------------------------------------------------------
+- name: allow-aws-readonly
+  decision: allow
+  match:
+    any_capability:
+      - "aws.read:<any>"
+  reason: "aws describe-/list-/get- are read-only"
+
+- name: gate-aws-s3-rm
+  decision: ask_picto
+  required_scope: "aws.s3.rm"
+  match:
+    any_capability:
+      - "aws.s3.rm:**"
+  reason: "aws s3 rm deletes objects — picto required"
+
+- name: gate-aws-s3-rb
+  decision: ask_picto
+  required_scope: "aws.s3.rb"
+  match:
+    any_capability:
+      - "aws.s3.rb:**"
+  reason: "aws s3 rb deletes a bucket — picto required"
+
+- name: gate-aws-iam
+  decision: ask_picto
+  required_scope: "aws.iam"
+  match:
+    any_capability:
+      - "aws.iam:*"
+  reason: "aws iam write actions need a picto"
+
+- name: gate-aws-ec2-terminate
+  decision: ask_picto
+  required_scope: "aws.ec2.terminate"
+  match:
+    any_capability:
+      - "aws.ec2.terminate:<instance>"
+  reason: "ec2 terminate destroys compute — picto required"
+
+# --- gh (GitHub CLI) ------------------------------------------------------
+- name: gate-gh-pr-merge
+  decision: ask_picto
+  required_scope: "gh.pr.merge"
+  match:
+    any_capability:
+      - "gh.pr.merge:<pr>"
+  reason: "merging a PR is shared-history action"
+
+- name: gate-gh-release-create
+  decision: ask_picto
+  required_scope: "gh.release.create"
+  match:
+    any_capability:
+      - "gh.release.create:*"
+  reason: "release cuts a tag; irreversible in the registry sense"
+
+- name: gate-gh-workflow-run
+  decision: ask_picto
+  required_scope: "gh.workflow.run"
+  match:
+    any_capability:
+      - "gh.workflow.run:*"
+  reason: "triggering a workflow costs CI minutes and may deploy"
+
+- name: gate-gh-repo-delete
+  decision: gommage
+  hard_stop: true
+  match:
+    any_capability:
+      - "gh.repo.delete:<any>"
+  reason: "deleting a repo is policy-level hard-stop; edit this file to override"

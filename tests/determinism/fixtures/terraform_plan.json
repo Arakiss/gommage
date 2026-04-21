@@ -1,0 +1,5 @@
+{
+  "name": "terraform-plan-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "terraform plan -out=tf.plan" } },
+  "expected": { "kind": "allow" }
+}

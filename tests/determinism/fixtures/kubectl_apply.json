@@ -1,0 +1,5 @@
+{
+  "name": "kubectl-apply-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "kubectl apply -f ./manifest.yaml" } },
+  "expected": { "kind": "ask_picto", "required_scope": "k8s.apply" }
+}

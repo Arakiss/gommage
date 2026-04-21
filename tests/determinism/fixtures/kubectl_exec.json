@@ -1,0 +1,5 @@
+{
+  "name": "kubectl-exec-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "kubectl exec -it pod/backend-1 -- sh" } },
+  "expected": { "kind": "allow" }
+}

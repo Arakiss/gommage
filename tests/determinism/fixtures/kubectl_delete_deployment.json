@@ -1,0 +1,5 @@
+{
+  "name": "kubectl-delete-deployment-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "kubectl delete deployment frontend" } },
+  "expected": { "kind": "ask_picto", "required_scope": "k8s.delete" }
+}
