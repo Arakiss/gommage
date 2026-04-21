@@ -10,25 +10,32 @@
 #   - gommage-daemon   (long-running process)
 #   - gommage-mcp      (PreToolUse hook adapter)
 #
-# Downloads release artifacts from GitHub Releases and verifies their SHA-256
-# checksums. Refuses to install if the checksum does not match.
+# Downloads release artifacts from GitHub Releases and verifies their Sigstore
+# signature bundle plus SHA-256 checksum. Refuses to install if either check
+# fails. Requires `cosign` on PATH.
 #
 # Environment variables:
 #   GOMMAGE_VERSION   — release tag to install (default: latest)
 #   GOMMAGE_BIN       — install dir (default: $HOME/.local/bin)
 #   GOMMAGE_REPO      — github repo slug (default: Arakiss/gommage)
+#   GOMMAGE_COSIGN    — cosign binary path/name (default: cosign)
 
 set -eu
 
 REPO="${GOMMAGE_REPO:-Arakiss/gommage}"
 VERSION="${GOMMAGE_VERSION:-latest}"
 BIN_DIR="${GOMMAGE_BIN:-${HOME}/.local/bin}"
+COSIGN="${GOMMAGE_COSIGN:-cosign}"
 
 say()  { printf 'gommage-install: %s\n' "$*"; }
 die()  { printf 'gommage-install: error: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required tool not found: $1"; }
+need_cosign() {
+  command -v "$COSIGN" >/dev/null 2>&1 || die "required tool not found: $COSIGN (install cosign or set GOMMAGE_COSIGN)"
+}
 
 need curl
+need_cosign
 need tar
 need uname
 need mkdir
@@ -71,10 +78,23 @@ trap 'rm -rf "$tmp"' EXIT
 
 tarball="${asset}.tar.gz"
 checksum="${asset}.tar.gz.sha256"
+bundle="${asset}.tar.gz.sigstore.json"
 
 say "downloading ${tarball}"
 curl --proto '=https' --tlsv1.2 -sSfL -o "${tmp}/${tarball}"  "${base}/${tarball}"
 curl --proto '=https' --tlsv1.2 -sSfL -o "${tmp}/${checksum}" "${base}/${checksum}"
+curl --proto '=https' --tlsv1.2 -sSfL -o "${tmp}/${bundle}"   "${base}/${bundle}"
+
+# --- Verify Sigstore signature ---------------------------------------------
+identity="https://github.com/${REPO}/.github/workflows/release.yml@refs/tags/${VERSION}"
+issuer="https://token.actions.githubusercontent.com"
+
+say "verifying Sigstore signature"
+"$COSIGN" verify-blob "${tmp}/${tarball}" \
+  --bundle "${tmp}/${bundle}" \
+  --certificate-identity "${identity}" \
+  --certificate-oidc-issuer "${issuer}" \
+  >/dev/null || die "signature verification failed — refusing to install"
 
 # --- Verify checksum --------------------------------------------------------
 say "verifying checksum"

@@ -3,13 +3,15 @@
 # Produces a third-party signal about the repo's supply-chain posture:
 # branch protection, token permissions, pinned deps, signed releases, SAST,
 # dangerous workflows, and so on. Results land in the Security tab (SARIF
-# upload) and, because `publish_results: true`, in the public OpenSSF API
-# consumed by deps.dev and the scorecard badge.
+# upload) and, for public repos, in the public OpenSSF API consumed by deps.dev
+# and the scorecard badge.
 #
 # Permissions are intentionally narrow. Private repositories need more than
 # `contents: read` for Scorecard's GraphQL checks (for example ListCommits and
-# SAST detection), but those scopes can stay read-only. The only writes are the
-# SARIF upload and OIDC token used by Scorecard publishing.
+# SAST detection), but those scopes can stay read-only. Private repos skip
+# public result publishing and SARIF upload because code scanning may be
+# disabled; keeping those public-only avoids a red default branch for a missing
+# GitHub feature flag.
 
 name: scorecard
 
@@ -56,12 +58,13 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
-          # Publishes results to the public OpenSSF API. Requires
-          # `id-token: write` above. Disabling this makes the scorecard
-          # badge go dark.
-          publish_results: true
+          # Publishes results to the public OpenSSF API for public repos.
+          # Private repos keep the local analysis but avoid leaking or failing
+          # on public-only publication paths.
+          publish_results: ${{ github.event.repository.private == false }}
 
       - name: Upload SARIF to code scanning
+        if: ${{ github.event.repository.private == false }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif

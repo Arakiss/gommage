@@ -48,6 +48,7 @@ Gommage is an **opt-in complement** to whatever permission layer your agent ship
 
 ```sh
 # macOS / Linux — one-liner (v0.1 onwards)
+# Requires cosign for Sigstore release verification.
 curl --proto '=https' --tlsv1.2 -sSf https://gommage.dev/install.sh | sh
 
 # From source (today)
@@ -176,6 +177,7 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 - Pictos (signed, TTL, usage-bounded)
 - Append-only signed audit log
 - Hardcoded hard-stop set
+- Sigstore-signed binary release artifacts + installer verification
 - Determinism-critical deps pinned with `=x.y.z`, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
 
 **v1.0** — hackable by others
@@ -186,7 +188,6 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 - Generic MCP server mode for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
 - Webhook out-of-band
-- Signed binary releases + SBOM
 
 **Not planned** — either no hook API or known permission-bypass bugs in the hook layer: Aider, Zed, Continue, Cline. Revisited when upstream matures.
 
