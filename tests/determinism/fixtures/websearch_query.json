@@ -1,0 +1,5 @@
+{
+  "name": "websearch-query-asks-for-picto",
+  "call": { "tool": "WebSearch", "input": { "query": "gommage policy harness" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.search" }
+}

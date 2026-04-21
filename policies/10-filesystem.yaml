@@ -15,6 +15,7 @@
   match:
     any_capability:
       - "fs.read:**/../**"
+      - "fs.search:**/../**"
       - "fs.write:**/../**"
   reason: "path contains '..'; canonicalise in the agent, do not rely on string prefixes"
 
@@ -47,6 +48,13 @@
     all_capability:
       - "fs.read:${EXPEDITION_ROOT}/**"
   reason: "reads within the current expedition's root are allowed"
+
+- name: allow-project-searches
+  decision: allow
+  match:
+    all_capability:
+      - "fs.search:${EXPEDITION_ROOT}/**"
+  reason: "searches within the current expedition's root are allowed"
 
 - name: allow-project-writes
   decision: allow

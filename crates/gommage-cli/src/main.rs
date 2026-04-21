@@ -1137,6 +1137,7 @@ fn translate_claude_permission_deny(raw: &str) -> Option<String> {
     let value = value.strip_suffix(')')?;
     let capability = match tool {
         "Read" | "Glob" => format!("fs.read:{}", normalize_native_path_pattern(value)),
+        "Grep" => format!("fs.search:{}", normalize_native_path_pattern(value)),
         "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
             format!("fs.write:{}", normalize_native_path_pattern(value))
         }
@@ -1173,26 +1174,33 @@ fn claude_gommage_matcher(settings: &serde_json::Value) -> String {
         "MultiEdit",
         "NotebookEdit",
         "Glob",
+        "Grep",
+        "WebFetch",
+        "WebSearch",
+        "mcp__.*",
     ];
     let allow = settings
         .pointer("/permissions/allow")
         .and_then(|v| v.as_array());
     let mut tools = Vec::new();
     for tool in MAPPED {
-        let allowed = allow.is_none_or(|rules| {
-            rules.iter().filter_map(|v| v.as_str()).any(|rule| {
-                rule == "*"
-                    || rule == *tool
-                    || rule
-                        .strip_prefix(*tool)
-                        .is_some_and(|rest| rest.starts_with('('))
-            })
-        });
+        let allowed = allow.is_none_or(|rules| claude_allow_covers_tool(rules, tool));
         if allowed {
             tools.push(*tool);
         }
     }
     tools.join("|")
+}
+
+fn claude_allow_covers_tool(rules: &[serde_json::Value], tool: &str) -> bool {
+    rules.iter().filter_map(|v| v.as_str()).any(|rule| {
+        rule == "*"
+            || rule == tool
+            || rule
+                .strip_prefix(tool)
+                .is_some_and(|rest| rest.starts_with('('))
+            || (tool == "mcp__.*" && rule.starts_with("mcp__"))
+    })
 }
 
 fn install_json_hook_group(
@@ -1412,6 +1420,10 @@ const STDLIB_POLICIES: &[(&str, &str)] = &[
         "10-filesystem.yaml",
         include_str!("../../../policies/10-filesystem.yaml"),
     ),
+    (
+        "15-agent-tools.yaml",
+        include_str!("../../../policies/15-agent-tools.yaml"),
+    ),
     ("20-git.yaml", include_str!("../../../policies/20-git.yaml")),
     (
         "30-package-managers.yaml",
@@ -1437,6 +1449,8 @@ const STDLIB_CAPABILITIES: &[(&str, &str)] = &[
         "filesystem.yaml",
         include_str!("../../../capabilities/filesystem.yaml"),
     ),
+    ("mcp.yaml", include_str!("../../../capabilities/mcp.yaml")),
+    ("web.yaml", include_str!("../../../capabilities/web.yaml")),
 ];
 
 fn install_stdlib(layout: &HomeLayout, force: bool) -> Result<(usize, usize)> {
@@ -1651,9 +1665,10 @@ fn run_mcp(layout: HomeLayout) -> Result<ExitCode> {
         .get("tool_input")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
+    let cwd = input.get("cwd").and_then(|v| v.as_str());
     let call = ToolCall {
         tool: tool_name.to_string(),
-        input: tool_input,
+        input: enrich_hook_tool_input(tool_name, tool_input, cwd),
     };
 
     let sk: SigningKey = layout.load_key()?;
@@ -1700,6 +1715,60 @@ fn run_mcp(layout: HomeLayout) -> Result<ExitCode> {
     });
     println!("{}", serde_json::to_string(&out)?);
     Ok(ExitCode::SUCCESS)
+}
+
+fn enrich_hook_tool_input(
+    tool: &str,
+    mut input: serde_json::Value,
+    cwd: Option<&str>,
+) -> serde_json::Value {
+    let Some(cwd) = cwd else {
+        return input;
+    };
+    let serde_json::Value::Object(map) = &mut input else {
+        return input;
+    };
+
+    match tool {
+        "Grep" => {
+            let base = map
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(|path| resolve_hook_path(cwd, path))
+                .unwrap_or_else(|| cwd.to_string());
+            map.entry("__gommage_path".to_string())
+                .or_insert_with(|| serde_json::Value::String(base.clone()));
+            if let Some(glob) = map.get("glob").and_then(|v| v.as_str()) {
+                let glob_path = resolve_hook_path(&base, glob);
+                map.entry("__gommage_glob_path".to_string())
+                    .or_insert_with(|| serde_json::Value::String(glob_path));
+            }
+        }
+        "Glob" => {
+            if let Some(pattern) = map.get("pattern").and_then(|v| v.as_str()) {
+                let pattern_path = resolve_hook_path(cwd, pattern);
+                map.entry("__gommage_pattern".to_string())
+                    .or_insert_with(|| serde_json::Value::String(pattern_path));
+            }
+        }
+        _ => {}
+    }
+
+    input
+}
+
+fn resolve_hook_path(base: &str, path: &str) -> String {
+    if path.starts_with('/') || path.starts_with('~') {
+        return path.to_string();
+    }
+    if path == "." || path.is_empty() {
+        return base.to_string();
+    }
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        path.trim_start_matches("./")
+    )
 }
 
 // Tiny shim to avoid moving `layout` twice in `run_mcp`.

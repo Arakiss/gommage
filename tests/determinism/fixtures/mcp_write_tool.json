@@ -1,0 +1,5 @@
+{
+  "name": "mcp-write-like-tool-asks-for-picto",
+  "call": { "tool": "mcp__filesystem__write_file", "input": { "path": "/tmp/proj/out.txt", "content": "x" } },
+  "expected": { "kind": "ask_picto", "required_scope": "mcp.write" }
+}
