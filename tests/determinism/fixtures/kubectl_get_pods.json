@@ -1,0 +1,5 @@
+{
+  "name": "kubectl-get-pods-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "kubectl get pods -A" } },
+  "expected": { "kind": "allow" }
+}

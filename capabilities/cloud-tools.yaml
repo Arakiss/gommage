@@ -1,0 +1,144 @@
+# Capability mappers for cloud-ops tools the agent is likely to reach for.
+#
+# Namespaces:
+#   k8s.*        — kubectl actions (apply/delete/exec/rollout/scale/port-forward)
+#   terraform.*  — terraform lifecycle (init/plan/apply/destroy)
+#   aws.*        — AWS CLI, scoped by service (s3/iam/ec2)
+#   gh.*         — GitHub CLI (pr merge, release create, workflow run)
+
+# --- kubectl ---------------------------------------------------------------
+- name: bash-kubectl-apply
+  tool: Bash
+  match_input:
+    command: "^\\s*kubectl\\s+apply\\b"
+  emit:
+    - "k8s.apply:<manifest>"
+
+- name: bash-kubectl-delete
+  tool: Bash
+  match_input:
+    command: "^\\s*kubectl\\s+delete\\s+(?P<kind>\\S+)(?:\\s+(?P<name>\\S+))?"
+  emit:
+    - "k8s.delete:${kind}"
+
+- name: bash-kubectl-exec
+  tool: Bash
+  match_input:
+    command: "^\\s*kubectl\\s+exec\\b"
+  emit:
+    - "k8s.exec:<pod>"
+
+- name: bash-kubectl-rollout-restart
+  tool: Bash
+  match_input:
+    command: "^\\s*kubectl\\s+rollout\\s+restart\\b"
+  emit:
+    - "k8s.rollout:restart"
+
+- name: bash-kubectl-scale
+  tool: Bash
+  match_input:
+    command: "^\\s*kubectl\\s+scale\\b"
+  emit:
+    - "k8s.scale:<resource>"
+
+- name: bash-kubectl-port-forward
+  tool: Bash
+  match_input:
+    command: "^\\s*kubectl\\s+port-forward\\b"
+  emit:
+    - "k8s.port-forward:<resource>"
+
+- name: bash-kubectl-readonly
+  tool: Bash
+  match_input:
+    command: "^\\s*kubectl\\s+(?:get|describe|logs|explain|top|config\\s+view|cluster-info|version|api-resources|api-versions)\\b"
+  emit:
+    - "k8s.read:<any>"
+
+# --- terraform -------------------------------------------------------------
+- name: bash-terraform-apply
+  tool: Bash
+  match_input:
+    command: "^\\s*terraform\\s+apply\\b"
+  emit:
+    - "terraform.apply:<plan>"
+
+- name: bash-terraform-destroy
+  tool: Bash
+  match_input:
+    command: "^\\s*terraform\\s+destroy\\b"
+  emit:
+    - "terraform.destroy:<any>"
+
+- name: bash-terraform-readonly
+  tool: Bash
+  match_input:
+    command: "^\\s*terraform\\s+(?:init|plan|validate|fmt|show|state\\s+list|output|providers|version)\\b"
+  emit:
+    - "terraform.read:<any>"
+
+# --- aws -------------------------------------------------------------------
+- name: bash-aws-s3-rm
+  tool: Bash
+  match_input:
+    command: "^\\s*aws\\s+s3\\s+rm\\s+s3://(?P<bucket>[^/\\s]+)"
+  emit:
+    - "aws.s3.rm:${bucket}"
+
+- name: bash-aws-s3-rb
+  tool: Bash
+  match_input:
+    command: "^\\s*aws\\s+s3\\s+rb\\s+s3://(?P<bucket>\\S+)"
+  emit:
+    - "aws.s3.rb:${bucket}"
+
+- name: bash-aws-iam-modify
+  tool: Bash
+  match_input:
+    command: "^\\s*aws\\s+iam\\s+(?P<action>create|delete|put|attach|detach|update)"
+  emit:
+    - "aws.iam:${action}"
+
+- name: bash-aws-ec2-terminate
+  tool: Bash
+  match_input:
+    command: "^\\s*aws\\s+ec2\\s+terminate-instances\\b"
+  emit:
+    - "aws.ec2.terminate:<instance>"
+
+- name: bash-aws-readonly
+  tool: Bash
+  match_input:
+    command: "^\\s*aws\\s+\\S+\\s+(?:describe-|list-|get-|help\\b)"
+  emit:
+    - "aws.read:<any>"
+
+# --- gh (GitHub CLI) -------------------------------------------------------
+- name: bash-gh-pr-merge
+  tool: Bash
+  match_input:
+    command: "^\\s*gh\\s+pr\\s+merge\\b"
+  emit:
+    - "gh.pr.merge:<pr>"
+
+- name: bash-gh-release-create
+  tool: Bash
+  match_input:
+    command: "^\\s*gh\\s+release\\s+create\\s+(?P<tag>\\S+)"
+  emit:
+    - "gh.release.create:${tag}"
+
+- name: bash-gh-workflow-run
+  tool: Bash
+  match_input:
+    command: "^\\s*gh\\s+workflow\\s+run\\s+(?P<name>\\S+)"
+  emit:
+    - "gh.workflow.run:${name}"
+
+- name: bash-gh-repo-delete
+  tool: Bash
+  match_input:
+    command: "^\\s*gh\\s+repo\\s+delete\\b"
+  emit:
+    - "gh.repo.delete:<any>"

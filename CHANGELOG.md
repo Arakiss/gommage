@@ -13,6 +13,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- Cloud-tools capability pack (`capabilities/cloud-tools.yaml`) mapping `kubectl` (apply, delete, exec, rollout, scale, port-forward, read-only variants), `terraform` (apply, destroy, read-only variants), `aws` (s3 rm/rb, iam write actions, ec2 terminate, read-only variants), and `gh` (pr merge, release create, workflow run, repo delete) into the capability vocabulary.
+- Stdlib policy pack `policies/50-cloud-tools.yaml` with conservative defaults: read-only variants pass; every state-mutating action requires a picto except `gh repo delete`, which is policy-level hard-stopped.
+- 12 new determinism fixtures covering the cloud tools above (forward + shuffled sweep both green).
 - `scripts/install.sh`: one-liner installer that downloads the platform tarball from GitHub Releases, verifies the SHA-256 checksum, and drops the three binaries into `$GOMMAGE_BIN` (default `~/.local/bin`). Refuses to install on checksum mismatch.
 - Daemon reloads its policy + capability mappers on `SIGHUP` without restarting — standard Unix convention for long-running daemons. `SIGTERM` and `SIGINT` now trigger graceful shutdown.
 

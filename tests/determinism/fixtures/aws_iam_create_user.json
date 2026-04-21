@@ -1,0 +1,5 @@
+{
+  "name": "aws-iam-create-user-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "aws iam create-user --user-name deploy-bot" } },
+  "expected": { "kind": "ask_picto", "required_scope": "aws.iam" }
+}

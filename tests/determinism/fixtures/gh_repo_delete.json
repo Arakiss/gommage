@@ -1,0 +1,5 @@
+{
+  "name": "gh-repo-delete-is-hard-stopped",
+  "call": { "tool": "Bash", "input": { "command": "gh repo delete Arakiss/something --yes" } },
+  "expected": { "kind": "gommage", "hard_stop": true }
+}

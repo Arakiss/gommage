@@ -1,0 +1,5 @@
+{
+  "name": "gh-release-create-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "gh release create v1.0.0 --generate-notes" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gh.release.create" }
+}

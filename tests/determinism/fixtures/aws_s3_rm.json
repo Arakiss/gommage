@@ -1,0 +1,5 @@
+{
+  "name": "aws-s3-rm-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "aws s3 rm s3://prod-data/x --recursive" } },
+  "expected": { "kind": "ask_picto", "required_scope": "aws.s3.rm" }
+}
