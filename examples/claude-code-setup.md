@@ -3,17 +3,15 @@
 ## 1. Install
 
 ```sh
-cargo install --path crates/gommage-cli
-cargo install --path crates/gommage-daemon
-cargo install --path crates/gommage-mcp
-# Or, once binaries are published:
-#   curl --proto '=https' --tlsv1.2 -sSf https://gommage.dev/install.sh | sh
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
 ```
 
 ## 2. Quickstart
 
 ```sh
 gommage quickstart --agent claude
+gommage doctor --json
 ```
 
 That command:
@@ -25,6 +23,10 @@ That command:
 - installs the Claude `PreToolUse` hook, preserving existing hooks unless you
   pass `--replace-hooks`;
 - backs up changed config files before writing.
+
+`doctor --json` should report top-level `status` as `ok` or `warn`. A warning is
+expected before the first audited decision and when the daemon has not been
+installed. Treat `fail` as a setup error before starting Claude Code.
 
 Use this when migrating from an older hook stack and you want Gommage to own the
 Claude `PreToolUse` surface:
