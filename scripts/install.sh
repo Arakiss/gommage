@@ -104,4 +104,5 @@ if ! echo ":$PATH:" | grep -q ":${BIN_DIR}:"; then
 fi
 
 say "installed ${VERSION} to ${BIN_DIR}"
-say "run:  ${BIN_DIR}/gommage init  # then wire the PreToolUse hook (see README)"
+say "run:  ${BIN_DIR}/gommage quickstart --agent claude"
+say "codex: ${BIN_DIR}/gommage agent install codex"

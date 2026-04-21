@@ -10,21 +10,30 @@ cargo install --path crates/gommage-mcp
 #   curl --proto '=https' --tlsv1.2 -sSf https://gommage.dev/install.sh | sh
 ```
 
-## 2. Initialise the home
+## 2. Quickstart
 
 ```sh
-gommage init
-# seeds ~/.gommage/ with policy.d/ + capabilities.d/ + key.ed25519
+gommage quickstart --agent claude
 ```
 
-## 3. Install stdlib
+That command:
+
+- creates `~/.gommage`;
+- installs bundled policies and capability mappers;
+- imports supported `permissions.deny` entries from `~/.claude/settings.json`
+  into `~/.gommage/policy.d/05-claude-import.yaml`;
+- installs the Claude `PreToolUse` hook, preserving existing hooks unless you
+  pass `--replace-hooks`;
+- backs up changed config files before writing.
+
+Use this when migrating from an older hook stack and you want Gommage to own the
+Claude `PreToolUse` surface:
 
 ```sh
-gommage policy init --stdlib
-gommage policy check
+gommage quickstart --agent claude --replace-hooks
 ```
 
-## 4. Start the daemon (dev mode)
+## 3. Start the daemon (optional for long sessions)
 
 Open a new terminal pane:
 
@@ -32,35 +41,17 @@ Open a new terminal pane:
 gommage-daemon --foreground
 ```
 
-Leave it running.
+Leave it running. If you skip this, `gommage-mcp` still uses the audited
+in-process fallback.
 
-## 5. Wire the PreToolUse hook
-
-Edit `~/.claude/settings.json`:
-
-```jsonc
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          { "type": "command", "command": "gommage-mcp" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## 6. Start an expedition
+## 4. Start an expedition
 
 ```sh
 cd /path/to/your/project
 gommage expedition start "feature-auth"
 ```
 
-## 7. Use Claude Code normally
+## 5. Use Claude Code normally
 
 The hook runs on every tool call. Decisions go to the audit log:
 
@@ -68,7 +59,7 @@ The hook runs on every tool call. Decisions go to the audit log:
 gommage tail -f
 ```
 
-## 8. Break-glass when you need to push to main
+## 6. Break-glass when you need to push to main
 
 ```sh
 gommage grant --scope "git.push:main" --uses 1 --ttl 5m --reason "incident"
@@ -76,7 +67,7 @@ gommage grant --scope "git.push:main" --uses 1 --ttl 5m --reason "incident"
 
 The next `git push origin main` goes through; the picto is consumed; subsequent pushes again require a fresh grant.
 
-## 9. End the expedition
+## 7. End the expedition
 
 ```sh
 gommage expedition end

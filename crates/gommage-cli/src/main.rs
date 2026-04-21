@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use gommage_audit::{AuditEntry, AuditEvent, AuditEventEntry, AuditWriter, verify_log};
 use gommage_core::{
     Decision, PictoConsume, PictoLookup, Policy, ToolCall, evaluate,
-    runtime::{Expedition, HomeLayout, Runtime},
+    runtime::{Expedition, HomeLayout, Runtime, default_policy_env},
 };
 use std::{
     io::{self, Read},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::ExitCode,
 };
 use time::OffsetDateTime;
@@ -32,6 +32,26 @@ struct Cli {
 enum Cmd {
     /// Initialize ~/.gommage (create layout, generate keypair).
     Init,
+
+    /// One-command local setup: home, stdlib, native permission import, hooks.
+    Quickstart {
+        /// Agent integration to install. Defaults to claude.
+        #[arg(long = "agent", value_enum)]
+        agents: Vec<AgentKind>,
+        /// Replace existing PreToolUse hook groups instead of preserving them.
+        #[arg(long)]
+        replace_hooks: bool,
+        /// Skip importing native agent permission rules into Gommage policy.
+        #[arg(long)]
+        no_import_native_permissions: bool,
+        /// Show planned file edits without writing them.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Install or inspect host-agent integrations.
+    #[command(subcommand)]
+    Agent(AgentCmd),
 
     /// Start a new expedition (task context).
     #[command(subcommand)]
@@ -144,6 +164,30 @@ enum PolicyCmd {
     Hash,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum AgentKind {
+    Claude,
+    Codex,
+}
+
+#[derive(Subcommand)]
+enum AgentCmd {
+    /// Install a PreToolUse hook for a supported agent.
+    Install {
+        #[arg(value_enum)]
+        agent: AgentKind,
+        /// Replace existing PreToolUse hook groups instead of preserving them.
+        #[arg(long)]
+        replace_hooks: bool,
+        /// Skip importing native agent permission rules into Gommage policy.
+        #[arg(long)]
+        no_import_native_permissions: bool,
+        /// Show planned file edits without writing them.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -174,6 +218,21 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             layout.ensure().context("initializing home")?;
             println!("ok ~/.gommage initialized at {}", layout.root.display());
         }
+        Cmd::Quickstart {
+            agents,
+            replace_hooks,
+            no_import_native_permissions,
+            dry_run,
+        } => {
+            return cmd_quickstart(
+                layout,
+                agents,
+                replace_hooks,
+                !no_import_native_permissions,
+                dry_run,
+            );
+        }
+        Cmd::Agent(sub) => return cmd_agent(sub, layout),
         Cmd::Expedition(sub) => return cmd_expedition(sub, layout),
         Cmd::Grant {
             scope,
@@ -408,6 +467,491 @@ fn decide_with_pictos(
     Ok((eval, events))
 }
 
+fn cmd_quickstart(
+    layout: HomeLayout,
+    agents: Vec<AgentKind>,
+    replace_hooks: bool,
+    import_native_permissions: bool,
+    dry_run: bool,
+) -> Result<ExitCode> {
+    if dry_run {
+        println!("dry-run: no files will be written");
+    }
+    if !dry_run {
+        layout.ensure().context("initializing home")?;
+    } else {
+        println!("plan home: ensure {}", layout.root.display());
+    }
+
+    let installed = if dry_run {
+        (0, 0)
+    } else {
+        install_stdlib(&layout, false)?
+    };
+    if dry_run {
+        println!("plan stdlib: install bundled policy and capability defaults if missing");
+    } else {
+        println!(
+            "ok stdlib: {} policy files, {} capability files installed",
+            installed.0, installed.1
+        );
+        let env = Expedition::load(&layout.expedition_file)?
+            .map(|e| e.policy_env())
+            .unwrap_or_else(default_policy_env);
+        let policy = Policy::load_from_dir(&layout.policy_dir, &env)?;
+        println!(
+            "ok policy: {} rules ({})",
+            policy.rules.len(),
+            policy.version_hash
+        );
+    }
+
+    let agents = if agents.is_empty() {
+        vec![AgentKind::Claude]
+    } else {
+        agents
+    };
+    for agent in agents {
+        install_agent(
+            agent,
+            &layout,
+            replace_hooks,
+            import_native_permissions,
+            dry_run,
+        )?;
+    }
+
+    if !dry_run {
+        let env = Expedition::load(&layout.expedition_file)?
+            .map(|e| e.policy_env())
+            .unwrap_or_else(default_policy_env);
+        let policy = Policy::load_from_dir(&layout.policy_dir, &env)?;
+        println!(
+            "ok final policy: {} rules ({})",
+            policy.rules.len(),
+            policy.version_hash
+        );
+    }
+
+    println!("ok quickstart complete");
+    println!("next: start an expedition with `gommage expedition start <name>`");
+    println!("optional: run `gommage-daemon --foreground` for long sessions");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn cmd_agent(sub: AgentCmd, layout: HomeLayout) -> Result<ExitCode> {
+    match sub {
+        AgentCmd::Install {
+            agent,
+            replace_hooks,
+            no_import_native_permissions,
+            dry_run,
+        } => {
+            install_agent(
+                agent,
+                &layout,
+                replace_hooks,
+                !no_import_native_permissions,
+                dry_run,
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+fn install_agent(
+    agent: AgentKind,
+    layout: &HomeLayout,
+    replace_hooks: bool,
+    import_native_permissions: bool,
+    dry_run: bool,
+) -> Result<()> {
+    if !dry_run {
+        layout.ensure().context("initializing home")?;
+    }
+    match agent {
+        AgentKind::Claude => {
+            let path = env_path_or_home("GOMMAGE_CLAUDE_SETTINGS", &[".claude", "settings.json"]);
+            install_claude(
+                &path,
+                layout,
+                replace_hooks,
+                import_native_permissions,
+                dry_run,
+            )
+        }
+        AgentKind::Codex => {
+            let hooks_path = env_path_or_home("GOMMAGE_CODEX_HOOKS", &[".codex", "hooks.json"]);
+            let config_path = env_path_or_home("GOMMAGE_CODEX_CONFIG", &[".codex", "config.toml"]);
+            install_codex(&hooks_path, &config_path, replace_hooks, dry_run)
+        }
+    }
+}
+
+fn install_claude(
+    settings_path: &Path,
+    layout: &HomeLayout,
+    replace_hooks: bool,
+    import_native_permissions: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let mut settings = read_json_object(settings_path)?;
+    if import_native_permissions {
+        import_claude_permissions(&settings, layout, replace_hooks, dry_run)?;
+    }
+
+    let matcher = claude_gommage_matcher(&settings);
+    if matcher.is_empty() {
+        println!("warn claude: no currently allowed Claude tools have Gommage capability mappers");
+        return Ok(());
+    }
+
+    let group = serde_json::json!({
+        "matcher": matcher,
+        "hooks": [
+            {
+                "type": "command",
+                "command": "gommage-mcp",
+                "timeout": 10
+            }
+        ]
+    });
+    install_json_hook_group(
+        &mut settings,
+        &["hooks", "PreToolUse"],
+        group,
+        replace_hooks,
+        "claude",
+    )?;
+
+    write_json(settings_path, &settings, dry_run)?;
+    println!(
+        "ok claude: PreToolUse hook installed at {}",
+        settings_path.display()
+    );
+    Ok(())
+}
+
+fn install_codex(
+    hooks_path: &Path,
+    config_path: &Path,
+    replace_hooks: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let mut hooks = read_json_object(hooks_path)?;
+    let group = serde_json::json!({
+        "matcher": "Bash",
+        "hooks": [
+            {
+                "type": "command",
+                "command": "gommage-mcp"
+            }
+        ]
+    });
+    install_json_hook_group(&mut hooks, &["PreToolUse"], group, replace_hooks, "codex")?;
+    write_json(hooks_path, &hooks, dry_run)?;
+    println!(
+        "ok codex: PreToolUse hook installed at {}",
+        hooks_path.display()
+    );
+
+    let mut config = read_toml_document(config_path)?;
+    let sandbox_mode = config
+        .get("sandbox_mode")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    config["features"]["codex_hooks"] = toml_edit::value(true);
+    write_text(config_path, &config.to_string(), dry_run)?;
+    println!(
+        "ok codex: features.codex_hooks enabled at {}",
+        config_path.display()
+    );
+    if sandbox_mode.as_deref() == Some("danger-full-access") {
+        println!(
+            "warn codex: sandbox_mode is danger-full-access; Gommage can govern Bash, but Codex file/MCP tools are still outside Gommage's hook coverage"
+        );
+    }
+    println!(
+        "warn codex: native sandbox/approval config remains authoritative and is not converted to Gommage YAML"
+    );
+    Ok(())
+}
+
+fn import_claude_permissions(
+    settings: &serde_json::Value,
+    layout: &HomeLayout,
+    force: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let import_path = layout.policy_dir.join("05-claude-import.yaml");
+    let deny_rules = settings
+        .pointer("/permissions/deny")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut translated = Vec::new();
+    let mut skipped = Vec::new();
+    for raw in deny_rules {
+        let Some(raw) = raw.as_str() else {
+            continue;
+        };
+        match translate_claude_permission_deny(raw) {
+            Some(capability) => translated.push((raw.to_string(), capability)),
+            None => skipped.push(raw.to_string()),
+        }
+    }
+
+    if translated.is_empty() {
+        println!("warn claude: no importable native deny rules found");
+        return Ok(());
+    }
+
+    let mut yaml = String::new();
+    yaml.push_str("# Generated by `gommage quickstart` from Claude Code permissions.deny.\n");
+    yaml.push_str("# Review before sharing; native permission syntax is broader than Gommage capabilities.\n\n");
+    for (index, (raw, capability)) in translated.iter().enumerate() {
+        yaml.push_str(&format!("- name: claude-import-deny-{:02}\n", index + 1));
+        yaml.push_str("  decision: gommage\n");
+        yaml.push_str("  match:\n");
+        yaml.push_str("    any_capability:\n");
+        yaml.push_str(&format!("      - {}\n", serde_json::to_string(capability)?));
+        yaml.push_str(&format!(
+            "  reason: {}\n\n",
+            serde_json::to_string(&format!("imported from Claude permission deny: {raw}"))?
+        ));
+    }
+
+    if import_path.exists() && !force {
+        let current = std::fs::read_to_string(&import_path)?;
+        if current == yaml {
+            println!("ok claude: native permission import already current");
+        } else {
+            println!(
+                "warn claude: {} exists; use --replace-hooks to refresh imported native permissions",
+                import_path.display()
+            );
+        }
+    } else {
+        write_text(&import_path, &yaml, dry_run)?;
+        println!(
+            "ok claude: imported {} native deny rule(s) into {}",
+            translated.len(),
+            import_path.display()
+        );
+    }
+
+    if !skipped.is_empty() {
+        println!(
+            "warn claude: skipped {} native permission rule(s) that need manual policy review",
+            skipped.len()
+        );
+    }
+    Ok(())
+}
+
+fn translate_claude_permission_deny(raw: &str) -> Option<String> {
+    let (tool, value) = raw.split_once('(')?;
+    let value = value.strip_suffix(')')?;
+    let capability = match tool {
+        "Read" | "Glob" => format!("fs.read:{}", normalize_native_path_pattern(value)),
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
+            format!("fs.write:{}", normalize_native_path_pattern(value))
+        }
+        "Bash" => format!("proc.exec:{}", normalize_bash_permission_pattern(value)),
+        _ => return None,
+    };
+    Some(capability)
+}
+
+fn normalize_native_path_pattern(raw: &str) -> String {
+    if raw == "~" {
+        "${HOME}".to_string()
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        format!("${{HOME}}/{rest}")
+    } else if raw == "." || raw == "./" {
+        "${EXPEDITION_ROOT}/**".to_string()
+    } else if let Some(rest) = raw.strip_prefix("./") {
+        format!("${{EXPEDITION_ROOT}}/{rest}")
+    } else {
+        raw.to_string()
+    }
+}
+
+fn normalize_bash_permission_pattern(raw: &str) -> String {
+    raw.replace(":*", "*")
+}
+
+fn claude_gommage_matcher(settings: &serde_json::Value) -> String {
+    const MAPPED: &[&str] = &[
+        "Bash",
+        "Read",
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "Glob",
+    ];
+    let allow = settings
+        .pointer("/permissions/allow")
+        .and_then(|v| v.as_array());
+    let mut tools = Vec::new();
+    for tool in MAPPED {
+        let allowed = allow.is_none_or(|rules| {
+            rules.iter().filter_map(|v| v.as_str()).any(|rule| {
+                rule == "*"
+                    || rule == *tool
+                    || rule
+                        .strip_prefix(*tool)
+                        .is_some_and(|rest| rest.starts_with('('))
+            })
+        });
+        if allowed {
+            tools.push(*tool);
+        }
+    }
+    tools.join("|")
+}
+
+fn install_json_hook_group(
+    root: &mut serde_json::Value,
+    path: &[&str],
+    group: serde_json::Value,
+    replace_hooks: bool,
+    agent_name: &str,
+) -> Result<()> {
+    let pre_tool_use = ensure_array_path(root, path)?;
+    if replace_hooks {
+        pre_tool_use.clear();
+    } else {
+        pre_tool_use.retain(|entry| !json_hook_entry_contains_command(entry, "gommage-mcp"));
+        if !pre_tool_use.is_empty() {
+            println!(
+                "warn {agent_name}: preserving existing PreToolUse hook group(s); use --replace-hooks to let Gommage own the hook surface"
+            );
+        }
+    }
+    pre_tool_use.push(group);
+    Ok(())
+}
+
+fn ensure_array_path<'a>(
+    root: &'a mut serde_json::Value,
+    path: &[&str],
+) -> Result<&'a mut Vec<serde_json::Value>> {
+    let mut current = root;
+    for key in &path[..path.len() - 1] {
+        if !current.is_object() {
+            anyhow::bail!("expected JSON object while creating {key}");
+        }
+        let object = current.as_object_mut().expect("checked object");
+        current = object
+            .entry((*key).to_string())
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    }
+    let key = path[path.len() - 1];
+    if !current.is_object() {
+        anyhow::bail!("expected JSON object while creating {key}");
+    }
+    let value = current
+        .as_object_mut()
+        .expect("checked object")
+        .entry(key.to_string())
+        .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    if !value.is_array() {
+        anyhow::bail!("{key} exists but is not an array");
+    }
+    Ok(value.as_array_mut().expect("checked array"))
+}
+
+fn json_hook_entry_contains_command(entry: &serde_json::Value, needle: &str) -> bool {
+    entry
+        .get("hooks")
+        .and_then(|v| v.as_array())
+        .is_some_and(|hooks| {
+            hooks.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|command| command.contains(needle))
+            })
+        })
+}
+
+fn read_json_object(path: &Path) -> Result<serde_json::Value> {
+    if !path.exists() {
+        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+    }
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    if raw.trim().is_empty() {
+        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
+    if !value.is_object() {
+        anyhow::bail!("{} must contain a JSON object", path.display());
+    }
+    Ok(value)
+}
+
+fn read_toml_document(path: &Path) -> Result<toml_edit::DocumentMut> {
+    if !path.exists() {
+        return Ok(toml_edit::DocumentMut::new());
+    }
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    raw.parse::<toml_edit::DocumentMut>()
+        .with_context(|| format!("parsing {}", path.display()))
+}
+
+fn write_json(path: &Path, value: &serde_json::Value, dry_run: bool) -> Result<()> {
+    let mut raw = serde_json::to_string_pretty(value)?;
+    raw.push('\n');
+    write_text(path, &raw, dry_run)
+}
+
+fn write_text(path: &Path, contents: &str, dry_run: bool) -> Result<()> {
+    if path.exists() && std::fs::read_to_string(path)? == contents {
+        println!("ok unchanged: {}", path.display());
+        return Ok(());
+    }
+    if dry_run {
+        println!("plan write: {}", path.display());
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if path.exists() {
+        let backup = backup_path(path);
+        std::fs::copy(path, &backup)?;
+        println!("ok backup: {} -> {}", path.display(), backup.display());
+    }
+    std::fs::write(path, contents)?;
+    println!("ok wrote: {}", path.display());
+    Ok(())
+}
+
+fn backup_path(path: &Path) -> PathBuf {
+    let ts = OffsetDateTime::now_utc().unix_timestamp();
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("config");
+    path.with_file_name(format!("{file_name}.gommage-bak-{ts}"))
+}
+
+fn env_path_or_home(env_var: &str, components: &[&str]) -> PathBuf {
+    if let Ok(path) = std::env::var(env_var) {
+        return PathBuf::from(path);
+    }
+    let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    for component in components {
+        path.push(component);
+    }
+    path
+}
+
 fn cmd_expedition(sub: ExpeditionCmd, layout: HomeLayout) -> Result<ExitCode> {
     layout.ensure()?;
     match sub {
@@ -447,7 +991,7 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
     layout.ensure()?;
     let env = Expedition::load(&layout.expedition_file)?
         .map(|e| e.policy_env())
-        .unwrap_or_default();
+        .unwrap_or_else(default_policy_env);
     match sub {
         PolicyCmd::Init { stdlib, force } => {
             if !stdlib {
@@ -623,7 +1167,7 @@ fn cmd_doctor(layout: HomeLayout) -> Result<ExitCode> {
 
     let env = Expedition::load(&layout.expedition_file)?
         .map(|e| e.policy_env())
-        .unwrap_or_default();
+        .unwrap_or_else(default_policy_env);
     match Policy::load_from_dir(&layout.policy_dir, &env) {
         Ok(policy) => println!(
             "ok policy: {} rules ({})",

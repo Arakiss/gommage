@@ -25,6 +25,16 @@ pub fn home_dir() -> PathBuf {
         .join(".gommage")
 }
 
+/// Base environment used for policy `${VAR}` substitution even when no
+/// expedition is active.
+pub fn default_policy_env() -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    if let Ok(home) = std::env::var("HOME") {
+        env.insert("HOME".into(), home);
+    }
+    env
+}
+
 pub struct HomeLayout {
     pub root: PathBuf,
     pub policy_dir: PathBuf,
@@ -133,15 +143,12 @@ impl Expedition {
 
     /// The env map used for ${VAR} substitution at policy load time.
     pub fn policy_env(&self) -> HashMap<String, String> {
-        let mut env = HashMap::new();
+        let mut env = default_policy_env();
         env.insert("EXPEDITION_NAME".into(), self.name.clone());
         env.insert(
             "EXPEDITION_ROOT".into(),
             self.root.to_string_lossy().to_string(),
         );
-        if let Ok(home) = std::env::var("HOME") {
-            env.insert("HOME".into(), home);
-        }
         env
     }
 }
@@ -164,7 +171,7 @@ impl Runtime {
         let env = expedition
             .as_ref()
             .map(Expedition::policy_env)
-            .unwrap_or_default();
+            .unwrap_or_else(default_policy_env);
         let mapper = CapabilityMapper::load_from_dir(&layout.capabilities_dir)?;
         let policy = Policy::load_from_dir(&layout.policy_dir, &env)?;
         let pictos = PictoStore::open(&layout.pictos_db)?;
@@ -183,7 +190,7 @@ impl Runtime {
             .expedition
             .as_ref()
             .map(Expedition::policy_env)
-            .unwrap_or_default();
+            .unwrap_or_else(default_policy_env);
         self.mapper = CapabilityMapper::load_from_dir(&self.layout.capabilities_dir)?;
         self.policy = Policy::load_from_dir(&self.layout.policy_dir, &env)?;
         Ok(())

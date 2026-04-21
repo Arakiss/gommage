@@ -29,6 +29,7 @@ gommage-audit  = { path = "crates/gommage-audit"  }
 # --- Plumbing (caret-ranged: stable interfaces, cheap patch bumps) ----------
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml_edit = "0.25"
 thiserror  = "2"
 anyhow     = "1"
 tracing    = "0.1"

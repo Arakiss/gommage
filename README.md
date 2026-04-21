@@ -51,44 +51,29 @@ Gommage is an **opt-in complement** to whatever permission layer your agent ship
 curl --proto '=https' --tlsv1.2 -sSf https://gommage.dev/install.sh | sh
 
 # From source (today)
-cargo install --path crates/gommage-cli
+cargo install --path crates/gommage-cli --force
+cargo install --path crates/gommage-daemon --force
+cargo install --path crates/gommage-mcp --force
 ```
 
 ## Quickstart
 
 ```sh
-# Initialize the local Gommage home
-gommage init
+# One-command setup for Claude Code:
+# - initializes ~/.gommage
+# - installs bundled policies + capability mappers
+# - imports supported Claude permissions.deny entries into policy.d/
+# - installs the Claude PreToolUse hook with backups
+gommage quickstart --agent claude
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
 
-# Install the bundled stdlib policies + capability mappers
-gommage policy init --stdlib
-gommage policy check
-
-# Run the daemon (dev mode — logs to stderr)
+# Optional for long sessions. The hook has an audited fallback if no daemon is running.
 gommage-daemon --foreground
 
-# Wire the PreToolUse hook in whichever agent(s) you use:
-#
-# Claude Code — ~/.claude/settings.json
-# {
-#   "hooks": {
-#     "PreToolUse": [
-#       { "matcher": "*", "hooks": [{ "type": "command", "command": "gommage-mcp" }] }
-#     ]
-#   }
-# }
-#
-# OpenAI Codex CLI — ~/.codex/hooks.json
-# {
-#   "PreToolUse": [
-#     { "matcher": "Bash", "hooks": [{ "type": "command", "command": "gommage-mcp" }] }
-#   ]
-# }
-#
-# See examples/claude-code-setup.md and examples/codex-setup.md.
+# Add Codex too. Codex hooks are Bash-scoped, so keep Codex sandbox enabled.
+gommage agent install codex
 
 # Diagnose the local installation
 gommage doctor

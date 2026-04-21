@@ -116,3 +116,116 @@ fn explain_prints_structured_decision_for_exact_audit_id() {
     assert!(stdout.contains("policy_version:"));
     assert!(stdout.contains("capabilities:"));
 }
+
+#[test]
+fn quickstart_installs_claude_hook_and_imports_native_denies() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{
+  "permissions": {
+    "allow": ["Bash", "Read", "MultiEdit", "WebSearch"],
+    "deny": [
+      "Read(./secrets/**)",
+      "Read(~/.ssh/id_*)",
+      "Bash(sudo rm -rf:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/tmp/old-break-glass.sh" }
+        ]
+      }
+    ]
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["quickstart", "--agent", "claude", "--replace-hooks"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let imported = fs::read_to_string(home.join("policy.d/05-claude-import.yaml")).unwrap();
+    assert!(imported.contains("fs.read:${EXPEDITION_ROOT}/secrets/**"));
+    assert!(imported.contains("fs.read:${HOME}/.ssh/id_*"));
+    assert!(imported.contains("proc.exec:sudo rm -rf*"));
+
+    let settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    let pre_tool_use = settings
+        .pointer("/hooks/PreToolUse")
+        .and_then(|v| v.as_array())
+        .unwrap();
+    assert_eq!(pre_tool_use.len(), 1);
+    assert_eq!(
+        pre_tool_use[0].get("matcher").and_then(|v| v.as_str()),
+        Some("Bash|Read|MultiEdit")
+    );
+    assert!(
+        pre_tool_use[0]
+            .get("hooks")
+            .and_then(|v| v.as_array())
+            .unwrap()
+            .iter()
+            .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp"))
+    );
+}
+
+#[test]
+fn agent_install_codex_writes_hook_and_enables_feature_flag() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\nfoo = true\n",
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["agent", "install", "codex"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let hooks: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&hooks).unwrap()).unwrap();
+    assert!(
+        hooks
+            .pointer("/PreToolUse")
+            .and_then(|v| v.as_array())
+            .unwrap()
+            .iter()
+            .any(|entry| entry
+                .get("hooks")
+                .and_then(|v| v.as_array())
+                .unwrap()
+                .iter()
+                .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp")))
+    );
+    let config = fs::read_to_string(config).unwrap();
+    assert!(config.contains("codex_hooks = true"));
+    assert!(config.contains("foo = true"));
+}
