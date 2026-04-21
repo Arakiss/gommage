@@ -56,5 +56,11 @@ rules:
 
   # Body and footer should be readable diffs — blank line required between
   # subject and body (conventional default).
+  #
+  # Dependabot release-note bodies include long generated URLs and package
+  # metadata lines. Keep structure checks, but do not reject generated update
+  # commits on body/footer wrapping alone.
   body-leading-blank: [2, always]
   footer-leading-blank: [2, always]
+  body-max-line-length: [0]
+  footer-max-line-length: [0]
