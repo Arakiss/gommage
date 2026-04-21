@@ -71,11 +71,32 @@ Gommage takes a narrow stance:
 
 **Current public release channel: alpha (`gommage-cli-v0.4.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on launch-readiness smoke tests, crates.io publishing gates, policy import fidelity, mapper coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
 
+The alpha distribution has two install surfaces:
+
+- **Runtime binaries**: `gommage`, `gommage-daemon`, and `gommage-mcp`, installed through the verified GitHub Release installer.
+- **Codex skill**: [`skills/gommage`](skills/gommage), installed into Codex so future Codex sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
+
 ## Positioning
 
 Gommage is an **opt-in complement** to whatever permission layer your agent ships with. Run both: keep native sandboxing and approvals enabled, then let Gommage handle the decisions you want to own as code. If the agent's native layer blocks something before the hook fires, Gommage cannot override that; if the hook observes the call, Gommage can make the local policy decision and audit it.
 
+## Versioning and changelog
+
+Gommage follows **Semantic Versioning**, with pre-1.0 rules applied strictly:
+
+- Breaking changes to `gommage-core` public API, audit log schema, daemon IPC, CLI flags, policy input schema, or bundled stdlib decision behavior require a **minor** bump while the project is alpha.
+- Compatible fixes and internal hardening use **patch** bumps.
+- Release notes are generated through **release-please** from Conventional Commits; do not tag releases manually.
+- Repo-level changes are tracked in [`CHANGELOG.md`](CHANGELOG.md); crate-level changes live in `crates/*/CHANGELOG.md`.
+
+The beta bar is not "more features". It is stable install, stable hook wiring,
+stable docs, crates.io publishing, healthy changelogs, and a green determinism
+matrix with no known red workflows.
+
 ## Install
+
+Install the binaries first, then install the Codex skill if you want Codex to
+manage Gommage-aware setup and troubleshooting in future sessions.
 
 ```sh
 # macOS / Linux — alpha one-liner
@@ -106,9 +127,10 @@ crates.io while the project is alpha. See
 
 ## Codex skill
 
-This repository also ships a Codex skill at [`skills/gommage`](skills/gommage)
-so future Codex sessions can install, verify, and operate Gommage without
-rediscovering the project-specific flow.
+This repository ships a Codex skill at [`skills/gommage`](skills/gommage). This
+is part of the product surface: it teaches Codex the correct Gommage install
+path, alpha caveats, daemon setup, `doctor` checks, policy operations,
+publishing caveats, and release verification flow.
 
 Local install from a checkout:
 

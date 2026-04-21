@@ -40,6 +40,8 @@ enforced by `cargo-semver-checks` in CI.
 - Capability mapper rules can now match dynamic tool names with
   `tool_pattern` and render the actual tool name with `${tool}`.
 - Policy `${HOME}` substitution is now populated even when no expedition is active.
+- The determinism regression suite now loads packaged `gommage-stdlib` assets
+  instead of repository-root policy and capability mapper files.
 
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.1.0-alpha.1...gommage-core-v0.1.1-alpha.1) (2026-04-21)
 

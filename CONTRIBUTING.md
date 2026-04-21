@@ -17,7 +17,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/). CI runs `co
 
 **Types** (required): `feat`, `fix`, `chore`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`, `security`.
 
-**Scope** (optional, but when present must be one of): `core`, `audit`, `cli`, `daemon`, `mcp`, `policies`, `capabilities`, `hardstop`, `picto`, `runtime`, `docs`, `ci`, `deps`, `release`, `security`, `determinism`.
+**Scope** (optional, but when present must be one of): `core`, `audit`, `stdlib`, `cli`, `daemon`, `mcp`, `policies`, `capabilities`, `hardstop`, `picto`, `runtime`, `docs`, `ci`, `deps`, `release`, `security`, `determinism`.
 
 Examples:
 
@@ -35,6 +35,9 @@ chore(deps): bump rusqlite to =0.34.0 — determinism suite green
 - `gommage-core` has a strict public-API contract. `cargo-semver-checks` runs in CI on every PR; any breaking change to the public API surface requires a minor (pre-1.0) or major (1.0+) bump.
 - `gommage-audit` follows the same contract — the audit log schema is a public API (downstream compliance tools parse it).
 - CLI flags and daemon IPC are likewise versioned: breaking changes bump minor (pre-1.0) or major (1.0+), with the migration path documented in the release PR.
+- `gommage-stdlib` is user-visible because its YAML can change decisions. A
+  stdlib rule or mapper change that changes default behavior requires a
+  changelog note and a minor bump while the project is pre-1.0.
 
 ## Releases
 

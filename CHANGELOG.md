@@ -31,6 +31,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Policy default `deny-dotdot-escape` in `10-filesystem.yaml`: any `fs.read` / `fs.write` capability whose path contains `..` is denied before `allow-project-*` can match.
 - `docs/input-schema.md` — canonical decision-input contract. Frozen schema for `ToolCall`, explicit list of what the evaluator does NOT read (clock, env, CWD, filesystem state, transcript), path handling rules (opaque UTF-8, no symlink / normalisation / case-folding), and the semver policy that governs future changes to this contract.
 - Cross-platform determinism CI matrix: the 10× sweep now runs across `{ubuntu-latest, macos-latest}` × `{C, en_US.UTF-8, de_DE.UTF-8}` (5 combinations total). An umbrella job `determinism sweep (all)` rolls matrix results into a single required status check on branch protection.
+- Repository-distributed Codex skill at `skills/gommage` so Codex sessions can
+  install, verify, troubleshoot, and operate Gommage without rediscovering the
+  project-specific flow.
+- `gommage-stdlib` crate with packaged policy and capability mapper YAML for
+  future crates.io publishing and package-local CLI embedding.
 
 ### Changed
 
@@ -46,6 +51,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Canonical decision input now explicitly documented: the evaluator reads only `(capabilities, policy)` — no clock, env, CWD, filesystem state, or transcript. Path strings are treated as opaque UTF-8 with no symlink resolution or normalization.
 - `"zero heuristics"` claim redefined brutally: regex matching and glob matching are deterministic transforms and part of the contract, not heuristics; classifiers, ML scoring, prior accumulation, and intent inference are.
 - README repositioned from "permission harness" to **"policy decision and audit harness"** — Gommage does not mediate execution and is not a sandbox. Users are pointed at OS-level confinement (AppArmor, SELinux, seccomp, macOS Seatbelt, Codex `--sandbox`) as the complementary layer.
+- README now frames Gommage as one layer in a broader AI agent harness
+  engineering stack and documents the Codex skill as part of the install
+  surface.
+- `gommage-cli` now embeds bundled defaults through `gommage-stdlib` instead of
+  repository-root asset paths.
 
 ### Added
 
