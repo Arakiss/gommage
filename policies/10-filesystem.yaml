@@ -4,6 +4,20 @@
 # root directory (set by `gommage expedition start`). If unset, nothing under
 # the project matches and these rules deny by fail-closed at the end.
 
+# --- Fail-safe: deny traversal escapes early ----------------------------------
+# Gommage treats paths as opaque strings (see docs/input-schema.md) — it does
+# NOT collapse `..`. This rule covers the common attacker shape "root + ../.."
+# so an agent that emits `${EXPEDITION_ROOT}/../../etc/passwd` gets gommaged
+# even though the string has the EXPEDITION_ROOT prefix. Users who genuinely
+# need `..` in a path must canonicalise in the agent before tool invocation.
+- name: deny-dotdot-escape
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.read:**/../**"
+      - "fs.write:**/../**"
+  reason: "path contains '..'; canonicalise in the agent, do not rely on string prefixes"
+
 - name: no-writes-to-build-artifacts
   decision: gommage
   match:

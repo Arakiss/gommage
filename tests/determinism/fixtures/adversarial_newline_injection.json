@@ -1,0 +1,6 @@
+{
+  "name": "adversarial-newline-in-command-treated-as-literal",
+  "note": "Newlines in tool-call input are not interpreted as command separators. The literal string, newline included, is the capability.",
+  "call": { "tool": "Bash", "input": { "command": "echo ok\nrm -rf /" } },
+  "expected": { "kind": "gommage", "hard_stop": true }
+}

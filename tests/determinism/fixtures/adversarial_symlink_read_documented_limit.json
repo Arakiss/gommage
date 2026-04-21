@@ -1,0 +1,7 @@
+{
+  "name": "adversarial-symlink-inside-expedition-root-allowed-per-spec",
+  "note": "Gommage treats paths as opaque strings. A symlink under EXPEDITION_ROOT whose target is outside is NOT resolved — the literal path inside the root matches allow-project-reads. Users who need symlink resolution must canonicalize in the agent before tool invocation (see docs/input-schema.md section 2).",
+  "call": { "tool": "Read", "input": { "file_path": "/tmp/proj/link-to-secret" } },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

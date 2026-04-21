@@ -1,0 +1,5 @@
+{
+  "name": "adversarial-xargs-pipes-rm-rf-still-hardstopped",
+  "call": { "tool": "Bash", "input": { "command": "find / -type f | xargs rm -rf --no-preserve-root" } },
+  "expected": { "kind": "gommage", "hard_stop": true }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "adversarial-sh-c-wraps-rm-rf-home-still-hardstopped",
+  "call": { "tool": "Bash", "input": { "command": "sh -c \"rm -rf /home/deleteme\"" } },
+  "expected": { "kind": "gommage", "hard_stop": true }
+}

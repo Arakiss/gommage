@@ -13,6 +13,7 @@ use std::sync::OnceLock;
 /// target `proc.exec:<command>` which is a flat command string, not a path —
 /// `*` should match `/` freely here.
 pub const HARD_STOPS: &[(&str, &str)] = &[
+    // --- Direct destructive invocations ---
     ("hs.rm-rf-root", "proc.exec:rm -rf /*"),
     ("hs.rm-rf-root-strict", "proc.exec:rm -rf /"),
     ("hs.sudo-rm-rf", "proc.exec:sudo rm -rf *"),
@@ -21,6 +22,27 @@ pub const HARD_STOPS: &[(&str, &str)] = &[
     ("hs.fork-bomb", "proc.exec:*:|:&*"),
     ("hs.wipe-disk", "proc.exec:shred /dev/*"),
     ("hs.chmod-system", "proc.exec:chmod -R * /"),
+    // --- Shell-wrapper evasion variants ---
+    // Cover the shape `<wrapper> -c '<destructive>'`. The trailing `*` accepts
+    // the closing quote of the wrapped command. Over-reach is accepted: a
+    // command that legitimately needs `bash -c "rm -rf /<path>"` has better
+    // options (call `rm -rf /<path>` directly, no wrap).
+    ("hs.bash-c-rm-rf-root", "proc.exec:bash -c *rm -rf /*"),
+    ("hs.sh-c-rm-rf-root", "proc.exec:sh -c *rm -rf /*"),
+    ("hs.zsh-c-rm-rf-root", "proc.exec:zsh -c *rm -rf /*"),
+    ("hs.env-rm-rf-root", "proc.exec:env *rm -rf /*"),
+    ("hs.sudo-bash-c-rm-rf", "proc.exec:sudo bash -c *rm -rf /*"),
+    ("hs.sudo-sh-c-rm-rf", "proc.exec:sudo sh -c *rm -rf /*"),
+    ("hs.xargs-rm-rf", "proc.exec:*xargs rm -rf*"),
+    // --- Substring catch-all for newline / compound-command evasion ---
+    // `echo ok; rm -rf /` or `echo ok\n rm -rf /` both surface here as a
+    // capability whose string contains `rm -rf /` anywhere. Same for
+    // `dd if=* of=/dev/*` when prefixed by benign-looking wrappers.
+    // Over-reach: an echo command whose argument literally contains
+    // `rm -rf /` gets caught. Acceptable: agents that want to discuss the
+    // string have better ways (print it character-by-character, encode it).
+    ("hs.rm-rf-root-anywhere", "proc.exec:*rm -rf /*"),
+    ("hs.dd-device-anywhere", "proc.exec:*dd if=* of=/dev/*"),
 ];
 
 fn compiled() -> &'static [(&'static str, GlobMatcher)] {
@@ -97,5 +119,51 @@ mod tests {
     fn fork_bomb_caught() {
         let caps = vec![Capability::new("proc.exec::(){ :|:& };:")];
         assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn bash_c_wrapper_rm_rf_root_caught() {
+        let caps = vec![Capability::new("proc.exec:bash -c 'rm -rf /'")];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn sh_c_wrapper_rm_rf_root_caught() {
+        let caps = vec![Capability::new("proc.exec:sh -c \"rm -rf /home\"")];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn env_prefix_rm_rf_caught() {
+        let caps = vec![Capability::new("proc.exec:env DEBUG=1 rm -rf /var")];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn sudo_wrapper_rm_rf_caught() {
+        let caps = vec![Capability::new("proc.exec:sudo bash -c 'rm -rf /var/log'")];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn xargs_rm_rf_caught() {
+        let caps = vec![Capability::new("proc.exec:xargs rm -rf --no-preserve-root")];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn relative_rm_rf_is_not_hardstopped() {
+        // Relative paths (no leading `/`) are out of hardstop scope —
+        // they're covered by policy rules at the project layer.
+        let caps = vec![Capability::new("proc.exec:rm -rf ./build")];
+        assert!(check(&caps).is_none());
+    }
+
+    #[test]
+    fn bash_c_legitimate_non_rm_passes() {
+        // bash -c wrapping a non-destructive command must not be
+        // caught by the wrapper hardstops.
+        let caps = vec![Capability::new("proc.exec:bash -c 'ls -la /tmp'")];
+        assert!(check(&caps).is_none());
     }
 }

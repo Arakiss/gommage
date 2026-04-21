@@ -1,0 +1,5 @@
+{
+  "name": "adversarial-sudo-bash-c-wrap-rm-rf-still-hardstopped",
+  "call": { "tool": "Bash", "input": { "command": "sudo bash -c 'rm -rf /etc'" } },
+  "expected": { "kind": "gommage", "hard_stop": true }
+}

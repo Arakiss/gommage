@@ -1,0 +1,5 @@
+{
+  "name": "adversarial-unicode-lookalike-branch-not-gate-main-fail-closed",
+  "call": { "tool": "Bash", "input": { "command": "git push origin mаin" } },
+  "expected": { "kind": "gommage" }
+}

@@ -13,6 +13,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- Adversarial security regression corpus (`tests/determinism/fixtures/adversarial_*.json`): 10 fixtures covering bypass attempts — shell wrappers (`bash -c`, `sh -c`, `zsh -c`), env-prefix evasion, sudo-wrapped destructive commands, xargs pipelines, newline-injected compound commands, relative-path escapes, Unicode lookalike branch names, `..`-path traversals, documented-limitation symlink-inside-expedition reads. Each fixture asserts the decision Gommage produces today and carries a `note` when the assertion documents a known limitation.
+- 9 new hardstop patterns extending compiled-in set: `bash -c *rm -rf /*`, `sh -c *rm -rf /*`, `zsh -c *rm -rf /*`, `env *rm -rf /*`, `sudo bash -c *rm -rf /*`, `sudo sh -c *rm -rf /*`, `*xargs rm -rf*`, plus substring catch-alls `*rm -rf /*` and `*dd if=* of=/dev/*` to cover newline / compound-command evasion.
+- Policy default `deny-dotdot-escape` in `10-filesystem.yaml`: any `fs.read` / `fs.write` capability whose path contains `..` is denied before `allow-project-*` can match.
 - `docs/input-schema.md` — canonical decision-input contract. Frozen schema for `ToolCall`, explicit list of what the evaluator does NOT read (clock, env, CWD, filesystem state, transcript), path handling rules (opaque UTF-8, no symlink / normalisation / case-folding), and the semver policy that governs future changes to this contract.
 - Cross-platform determinism CI matrix: the 10× sweep now runs across `{ubuntu-latest, macos-latest}` × `{C, en_US.UTF-8, de_DE.UTF-8}` (5 combinations total). An umbrella job `determinism sweep (all)` rolls matrix results into a single required status check on branch protection.
 
