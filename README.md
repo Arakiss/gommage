@@ -40,7 +40,7 @@ Gommage takes the opposite stance:
 
 ## Status
 
-**Current public release channel: alpha (`gommage-cli-v0.2.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on installer polish, policy import fidelity, mapper coverage, and launch-readiness smoke tests. See [ROADMAP](#roadmap).
+**Current public release channel: alpha (`gommage-cli-v0.3.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on installer polish, policy import fidelity, mapper coverage, and launch-readiness smoke tests. See [ROADMAP](#roadmap).
 
 ## Positioning
 
@@ -74,17 +74,18 @@ cargo install --path crates/gommage-mcp --force
 # - installs bundled policies + capability mappers
 # - imports supported Claude permissions.deny entries into policy.d/
 # - installs the Claude PreToolUse hook with backups
-gommage quickstart --agent claude
+# - installs and starts the user-level daemon service
+gommage quickstart --agent claude --daemon
 
 # Scriptable verification. `warn` is expected before the first audit entry
-# and when the daemon is not installed; `fail` means setup needs attention.
+# and `fail` means setup needs attention.
 gommage doctor --json
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
 
-# Optional for long sessions. The hook has an audited fallback if no daemon is running.
-gommage daemon install
+# CI or image builds can generate service files without starting them.
+gommage quickstart --agent claude --daemon-no-start
 
 # Add Codex too. Codex hooks are Bash-scoped, so keep Codex sandbox enabled.
 gommage agent install codex

@@ -60,7 +60,7 @@ Every check has:
 
 ## Fresh install expectation
 
-After `gommage quickstart --agent claude` or `gommage quickstart --agent codex`, this is healthy:
+After `gommage quickstart --agent claude --daemon` or `gommage quickstart --agent codex --daemon`, this is healthy:
 
 ```sh
 gommage doctor --json

@@ -10,7 +10,7 @@ curl --proto '=https' --tlsv1.2 -sSf \
 ## 2. Quickstart
 
 ```sh
-gommage quickstart --agent claude
+gommage quickstart --agent claude --daemon
 gommage doctor --json
 ```
 
@@ -22,36 +22,39 @@ That command:
   into `~/.gommage/policy.d/05-claude-import.yaml`;
 - installs the Claude `PreToolUse` hook, preserving existing hooks unless you
   pass `--replace-hooks`;
+- installs and starts the user-level daemon service;
 - backs up changed config files before writing.
 
 `doctor --json` should report top-level `status` as `ok` or `warn`. A warning is
-expected before the first audited decision and when the daemon has not been
-installed. Treat `fail` as a setup error before starting Claude Code.
+expected before the first audited decision. Treat `fail` as a setup error
+before starting Claude Code.
 
 Use this when migrating from an older hook stack and you want Gommage to own the
 Claude `PreToolUse` surface:
 
 ```sh
-gommage quickstart --agent claude --replace-hooks
+gommage quickstart --agent claude --daemon --replace-hooks
 ```
 
-## 3. Install the daemon service (optional for long sessions)
+## 3. Daemon service controls
 
-Install a user-level service:
+For CI images, dotfile bootstrap, or dry host preparation, write the service
+file without starting it:
 
 ```sh
-gommage daemon install
+gommage quickstart --agent claude --daemon-no-start
 ```
 
 On macOS this writes `~/Library/LaunchAgents/dev.gommage.daemon.plist` and
 loads it with launchd. On Linux this writes
 `~/.config/systemd/user/gommage-daemon.service` and enables it with
-`systemctl --user`. If you skip this, `gommage-mcp` still uses the audited
-in-process fallback.
+`systemctl --user`. If you skip daemon installation, `gommage-mcp` still uses
+the audited in-process fallback.
 
 Useful service commands:
 
 ```sh
+gommage daemon install
 gommage daemon status
 gommage daemon uninstall
 ```

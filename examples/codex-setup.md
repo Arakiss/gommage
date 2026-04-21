@@ -18,17 +18,18 @@ Same binaries as the Claude Code setup — one install, both agents.
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
-gommage quickstart --agent codex
+gommage quickstart --agent codex --daemon
 gommage doctor --json
 ```
 
 `quickstart` creates `~/.gommage`, installs the bundled policy/capability
 stdlib, writes `~/.codex/hooks.json`, and enables `features.codex_hooks = true`
-in `~/.codex/config.toml` with backups.
+in `~/.codex/config.toml` with backups. `--daemon` also installs and starts the
+user-level service.
 
 `doctor --json` should report top-level `status` as `ok` or `warn`. A warning is
-expected before the first audited decision and when the daemon has not been
-installed. Treat `fail` as a setup error before starting Codex.
+expected before the first audited decision. Treat `fail` as a setup error before
+starting Codex.
 
 ## 2. Install the daemon service (recommended for long sessions)
 
@@ -40,6 +41,8 @@ behavior:
 
 ```sh
 gommage daemon install
+# or, during image/bootstrap preparation:
+gommage quickstart --agent codex --daemon-no-start
 ```
 
 Use `gommage daemon status` to inspect the service and
