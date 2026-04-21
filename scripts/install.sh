@@ -106,3 +106,4 @@ fi
 say "installed ${VERSION} to ${BIN_DIR}"
 say "run:  ${BIN_DIR}/gommage quickstart --agent claude"
 say "codex: ${BIN_DIR}/gommage agent install codex"
+say "daemon: ${BIN_DIR}/gommage daemon install"

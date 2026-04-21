@@ -70,7 +70,7 @@ gommage quickstart --agent claude
 gommage expedition start "refactor-auth-middleware"
 
 # Optional for long sessions. The hook has an audited fallback if no daemon is running.
-gommage-daemon --foreground
+gommage daemon install
 
 # Add Codex too. Codex hooks are Bash-scoped, so keep Codex sandbox enabled.
 gommage agent install codex

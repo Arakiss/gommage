@@ -33,16 +33,26 @@ Claude `PreToolUse` surface:
 gommage quickstart --agent claude --replace-hooks
 ```
 
-## 3. Start the daemon (optional for long sessions)
+## 3. Install the daemon service (optional for long sessions)
 
-Open a new terminal pane:
+Install a user-level service:
 
 ```sh
-gommage-daemon --foreground
+gommage daemon install
 ```
 
-Leave it running. If you skip this, `gommage-mcp` still uses the audited
+On macOS this writes `~/Library/LaunchAgents/dev.gommage.daemon.plist` and
+loads it with launchd. On Linux this writes
+`~/.config/systemd/user/gommage-daemon.service` and enables it with
+`systemctl --user`. If you skip this, `gommage-mcp` still uses the audited
 in-process fallback.
+
+Useful service commands:
+
+```sh
+gommage daemon status
+gommage daemon uninstall
+```
 
 ## 4. Start an expedition
 
