@@ -92,17 +92,26 @@ jobs:
   semver-checks:
     name: cargo-semver-checks (gommage-core)
     runs-on: ubuntu-latest
-    # Only run on PRs against main — baseline is the current main tip.
+    # Only run on PRs against main — baseline is the target branch tip.
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # full history so baseline-rev can check out main
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           package: gommage-core
-          # Fails the check if an unjustified breaking change is introduced
-          # to the public API without the minor/major bump to match.
+          # `gommage-core` is not on crates.io yet, so the default baseline
+          # (latest published version) doesn't exist. Compare against the PR
+          # target branch instead: any breaking API change vs that tip fails
+          # the check. When we publish to crates.io, this line can go away
+          # and the action reverts to the published-version baseline.
+          #
+          # Use the fully-qualified remote ref so the rev resolves without
+          # needing a local branch (fetch-depth: 0 only brings remotes).
+          baseline-rev: origin/${{ github.base_ref }}
 
   commitlint:
     name: commitlint
