@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="gommage — policy-as-code for AI coding agents" width="100%" />
+</p>
+
 # gommage
 
 > _« ce qui n'a pas lieu d'être, s'efface. »_
