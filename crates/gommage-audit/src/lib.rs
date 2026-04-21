@@ -191,6 +191,149 @@ pub fn verify_log(path: &Path, vk: &VerifyingKey) -> Result<usize, AuditError> {
     Ok(count)
 }
 
+/// Diagnostic-level report for `gommage audit-verify --explain`. Walks every
+/// entry, attempts per-line signature verification, records anomalies without
+/// aborting on the first problem. Useful for forensic audits where you want
+/// the full picture instead of "failed at line N".
+#[derive(Debug, Clone, Serialize)]
+pub struct VerifyReport {
+    pub entries_total: usize,
+    pub entries_verified: usize,
+    pub key_fingerprint: String,
+    pub anomalies: Vec<Anomaly>,
+    pub policy_versions_seen: Vec<String>,
+    pub expeditions_seen: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Anomaly {
+    /// Line did not parse as a well-formed `AuditEntry`.
+    MalformedEntry { line: usize, error: String },
+    /// Entry parsed, but signature verification failed under the given key.
+    /// This is the classic tamper / key-rotation flag.
+    BadSignature { line: usize, entry_id: String },
+    /// Timestamps should be monotonically non-decreasing. A reversal is either
+    /// tampering or a clock rollback — both worth surfacing.
+    TimestampOutOfOrder {
+        line: usize,
+        previous_ts: String,
+        current_ts: String,
+    },
+    /// Policy version hash changed mid-log. Not an anomaly per se (reloads
+    /// happen), but forensically useful to flag. First occurrence only.
+    PolicyVersionChanged {
+        line: usize,
+        from: String,
+        to: String,
+    },
+}
+
+/// The ed25519 verifying key fingerprint is the hex SHA-256 of its raw 32
+/// bytes, truncated to 16 chars. Stable, short, printable.
+pub fn key_fingerprint(vk: &VerifyingKey) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(vk.to_bytes());
+    let digest = hex::encode(h.finalize());
+    digest[..16].to_string()
+}
+
+/// Walk the log and produce a `VerifyReport`. Does NOT abort on the first
+/// failure — continues recording anomalies. Returns `Ok(report)` as long as
+/// the file can be opened and read; individual line errors are anomalies.
+pub fn explain_log(path: &Path, vk: &VerifyingKey) -> Result<VerifyReport, AuditError> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+
+    let mut total = 0usize;
+    let mut verified = 0usize;
+    let mut anomalies: Vec<Anomaly> = Vec::new();
+    let mut last_ts: Option<String> = None;
+    let mut last_policy_version: Option<String> = None;
+    let mut policy_versions: Vec<String> = Vec::new();
+    let mut expeditions: Vec<String> = Vec::new();
+
+    for (i, line) in reader.lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        total += 1;
+        let entry: AuditEntry = match serde_json::from_str(&line) {
+            Ok(e) => e,
+            Err(e) => {
+                anomalies.push(Anomaly::MalformedEntry {
+                    line: i + 1,
+                    error: e.to_string(),
+                });
+                continue;
+            }
+        };
+
+        // Signature verification.
+        let sig_ok = (|| -> Result<(), ()> {
+            let sig_b64 = entry.sig.strip_prefix("ed25519:").ok_or(())?;
+            let sig_bytes = base64::decode_standard_no_pad(sig_b64).map_err(|_| ())?;
+            let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| ())?;
+            let sig = Signature::from_bytes(&sig_arr);
+            let payload = canonical_bytes(&entry);
+            vk.verify(&payload, &sig).map_err(|_| ())
+        })()
+        .is_ok();
+        if sig_ok {
+            verified += 1;
+        } else {
+            anomalies.push(Anomaly::BadSignature {
+                line: i + 1,
+                entry_id: entry.id.clone(),
+            });
+        }
+
+        // Timestamp ordering.
+        if let Some(prev) = &last_ts
+            && entry.ts < *prev
+        {
+            anomalies.push(Anomaly::TimestampOutOfOrder {
+                line: i + 1,
+                previous_ts: prev.clone(),
+                current_ts: entry.ts.clone(),
+            });
+        }
+        last_ts = Some(entry.ts.clone());
+
+        // Policy version tracking.
+        if let Some(prev) = &last_policy_version
+            && prev != &entry.policy_version
+        {
+            anomalies.push(Anomaly::PolicyVersionChanged {
+                line: i + 1,
+                from: prev.clone(),
+                to: entry.policy_version.clone(),
+            });
+        }
+        last_policy_version = Some(entry.policy_version.clone());
+
+        if !policy_versions.contains(&entry.policy_version) {
+            policy_versions.push(entry.policy_version.clone());
+        }
+        if let Some(ref e) = entry.expedition
+            && !expeditions.contains(e)
+        {
+            expeditions.push(e.clone());
+        }
+    }
+
+    Ok(VerifyReport {
+        entries_total: total,
+        entries_verified: verified,
+        key_fingerprint: key_fingerprint(vk),
+        anomalies,
+        policy_versions_seen: policy_versions,
+        expeditions_seen: expeditions,
+    })
+}
+
 mod base64 {
     use base64::{Engine as _, engine::general_purpose};
     pub fn encode_standard_no_pad(bytes: &[u8]) -> String {
@@ -229,6 +372,109 @@ mod tests {
         w.append(&call, &eval, Some("expedition-x")).unwrap();
         let n = verify_log(&path, &sk.verifying_key()).unwrap();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn explain_reports_total_verified_and_no_anomalies_on_clean_log() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut w = AuditWriter::open(&path, sk.clone()).unwrap();
+        let call = ToolCall {
+            tool: "Bash".into(),
+            input: json!({"command":"ls"}),
+        };
+        let eval = EvalResult {
+            decision: Decision::Allow,
+            matched_rule: None,
+            capabilities: vec![],
+            policy_version: "sha256:v1".into(),
+        };
+        for _ in 0..3 {
+            w.append(&call, &eval, Some("exp")).unwrap();
+        }
+        drop(w);
+
+        let report = explain_log(&path, &sk.verifying_key()).unwrap();
+        assert_eq!(report.entries_total, 3);
+        assert_eq!(report.entries_verified, 3);
+        assert_eq!(report.key_fingerprint.len(), 16);
+        assert!(report.anomalies.is_empty());
+        assert_eq!(report.policy_versions_seen, vec!["sha256:v1"]);
+        assert_eq!(report.expeditions_seen, vec!["exp"]);
+    }
+
+    #[test]
+    fn explain_flags_policy_version_change() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut w = AuditWriter::open(&path, sk.clone()).unwrap();
+        let call = ToolCall {
+            tool: "Bash".into(),
+            input: json!({"command":"ls"}),
+        };
+        let eval_a = EvalResult {
+            decision: Decision::Allow,
+            matched_rule: None,
+            capabilities: vec![],
+            policy_version: "sha256:v1".into(),
+        };
+        let eval_b = EvalResult {
+            decision: Decision::Allow,
+            matched_rule: None,
+            capabilities: vec![],
+            policy_version: "sha256:v2".into(),
+        };
+        w.append(&call, &eval_a, None).unwrap();
+        w.append(&call, &eval_b, None).unwrap();
+        drop(w);
+
+        let report = explain_log(&path, &sk.verifying_key()).unwrap();
+        assert_eq!(report.entries_verified, 2);
+        assert_eq!(report.policy_versions_seen.len(), 2);
+        assert!(
+            report
+                .anomalies
+                .iter()
+                .any(|a| matches!(a, Anomaly::PolicyVersionChanged { .. }))
+        );
+    }
+
+    #[test]
+    fn explain_flags_bad_signature_but_keeps_walking() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut w = AuditWriter::open(&path, sk.clone()).unwrap();
+        let call = ToolCall {
+            tool: "Bash".into(),
+            input: json!({"command":"ls"}),
+        };
+        let eval = EvalResult {
+            decision: Decision::Allow,
+            matched_rule: None,
+            capabilities: vec![],
+            policy_version: "sha256:v1".into(),
+        };
+        w.append(&call, &eval, None).unwrap();
+        w.append(&call, &eval, None).unwrap();
+        drop(w);
+
+        // Tamper one line in the middle.
+        let content = std::fs::read_to_string(&path).unwrap();
+        let corrupted = content.replacen("\"Bash\"", "\"Bashh\"", 1);
+        std::fs::write(&path, corrupted).unwrap();
+
+        let report = explain_log(&path, &sk.verifying_key()).unwrap();
+        assert_eq!(report.entries_total, 2);
+        assert_eq!(report.entries_verified, 1);
+        assert!(
+            report
+                .anomalies
+                .iter()
+                .any(|a| matches!(a, Anomaly::BadSignature { .. }))
+        );
     }
 
     #[test]
