@@ -59,6 +59,26 @@ fetch_stdout() {
     curl --proto '=https' --tlsv1.2 -sSfL "$url"
   fi
 }
+resolve_latest_cli_release() {
+  wanted_asset="$1"
+  fetch_stdout "https://api.github.com/repos/${REPO}/releases?per_page=100" \
+    | awk -v wanted_asset="$wanted_asset" '
+      /"tag_name": "/ {
+        tag = $0
+        sub(/.*"tag_name": "/, "", tag)
+        sub(/".*/, "", tag)
+      }
+      /"name": "/ {
+        name = $0
+        sub(/.*"name": "/, "", name)
+        sub(/".*/, "", name)
+        if (found == "" && tag ~ /^gommage-cli-v/ && name == wanted_asset) {
+          found = tag
+        }
+      }
+      END { if (found != "") print found }
+    '
+}
 asset_api_url() {
   wanted="$1"
   fetch_stdout "https://api.github.com/repos/${REPO}/releases/tags/${VERSION}" \
@@ -71,11 +91,11 @@ asset_api_url() {
         name = $0
         sub(/.*"name": "/, "", name)
         sub(/".*/, "", name)
-        if (name == wanted && url != "") {
-          print url
-          exit
+        if (found == "" && name == wanted && url != "") {
+          found = url
         }
       }
+      END { if (found != "") print found }
     '
 }
 fetch_asset() {
@@ -118,16 +138,15 @@ case "$arch" in
 esac
 
 asset="gommage-${arch}-${os}"
+tarball="${asset}.tar.gz"
+checksum="${asset}.tar.gz.sha256"
+bundle="${asset}.tar.gz.sigstore.json"
 
 # --- Resolve version --------------------------------------------------------
 if [ "$VERSION" = "latest" ]; then
-  say "resolving latest release from github.com/${REPO}"
-  VERSION="$(
-    fetch_stdout "https://api.github.com/repos/${REPO}/releases/latest" \
-      | grep -E '"tag_name":' | head -n1 \
-      | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/'
-  )"
-  [ -n "$VERSION" ] || die "could not resolve latest release (is the repo public? any releases?)"
+  say "resolving latest cli release from github.com/${REPO}"
+  VERSION="$(resolve_latest_cli_release "$tarball")"
+  [ -n "$VERSION" ] || die "could not resolve latest cli release with ${tarball}"
 fi
 say "installing ${VERSION} for ${arch}-${os}"
 
@@ -135,10 +154,6 @@ say "installing ${VERSION} for ${arch}-${os}"
 base="https://github.com/${REPO}/releases/download/${VERSION}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-
-tarball="${asset}.tar.gz"
-checksum="${asset}.tar.gz.sha256"
-bundle="${asset}.tar.gz.sigstore.json"
 
 say "downloading ${tarball}"
 fetch_asset "${tarball}"  "${tmp}/${tarball}"
