@@ -1,4 +1,4 @@
 interface:
   display_name: "Gommage"
-  short_description: "Install and operate the Gommage permission harness."
-  default_prompt: "Use Gommage to install, verify, or operate the agent permission harness."
+  short_description: "Install and operate the Gommage policy decision and audit harness."
+  default_prompt: "Use Gommage to install, verify, or operate the agent policy decision and audit harness."

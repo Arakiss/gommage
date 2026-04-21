@@ -74,7 +74,7 @@ Gommage takes a narrow stance:
 The alpha distribution has two install surfaces:
 
 - **Runtime binaries**: `gommage`, `gommage-daemon`, and `gommage-mcp`, installed through the verified GitHub Release installer.
-- **Codex skill**: [`skills/gommage`](skills/gommage), installed into Codex so future Codex sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
+- **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
 
 ## Positioning
 
@@ -95,15 +95,27 @@ matrix with no known red workflows.
 
 ## Install
 
-Install the binaries first, then install the Codex skill if you want Codex to
-manage Gommage-aware setup and troubleshooting in future sessions.
+Install the binaries first. Add `--with-skill` when you want the installer to
+also install the Gommage agent skill for Codex, Claude Code, or both.
 
 ```sh
 # macOS / Linux — alpha one-liner
 # Requires cosign for Sigstore release verification.
 # The installer resolves the latest gommage-cli binary release.
+# Interactive terminals may be prompted for agent-skill installation.
+# Use --no-prompt for scripted installs that must never ask questions.
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
+
+# Install binaries plus the agent skill for Codex and Claude Code.
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  | sh -s -- --with-skill --skill-agent codex --skill-agent claude
+
+# Update only the agent skill, without reinstalling binaries.
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  | sh -s -- --skill-only --skill-agent codex --skill-agent claude
 
 # Pin a specific alpha release or install elsewhere.
 curl --proto '=https' --tlsv1.2 -sSf \
@@ -125,22 +137,33 @@ cargo install --path crates/gommage-mcp --force
 crates.io while the project is alpha. See
 [`docs/publishing.md`](docs/publishing.md) for the current publish gate.
 
-## Codex skill
+## Agent skill
 
-This repository ships a Codex skill at [`skills/gommage`](skills/gommage). This
-is part of the product surface: it teaches Codex the correct Gommage install
-path, alpha caveats, daemon setup, `doctor` checks, policy operations,
-publishing caveats, and release verification flow.
+This repository ships an Agent Skills-compatible skill at
+[`skills/gommage`](skills/gommage). This is part of the product surface: it
+teaches agents the correct Gommage install path, alpha caveats, daemon setup,
+`doctor` checks, policy operations, publishing caveats, and release
+verification flow.
+
+Installer-managed skill targets:
+
+- Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
+- Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
 
 Local install from a checkout:
 
 ```sh
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -R skills/gommage "${CODEX_HOME:-$HOME/.codex}/skills/gommage"
+sh scripts/install.sh --skill-only --skill-agent codex --skill-agent claude
 ```
 
-Or ask Codex to install the skill from GitHub repo `Arakiss/gommage`, path
-`skills/gommage`, then restart Codex so it picks up the new skill.
+Restart Codex or Claude Code after installing a new skill so the host discovers
+it. Agent-facing quick install command:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  | sh -s -- --skill-only --skill-agent codex --skill-agent claude --no-prompt
+```
 
 ## Quickstart
 
@@ -277,7 +300,7 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 - Pictos (signed, TTL, usage-bounded)
 - Append-only signed audit log
 - Hardcoded hard-stop set
-- Repository-distributed Codex skill for Gommage setup and operation
+- Repository-distributed agent skill for Gommage setup and operation
 - Packaged `gommage-stdlib` crate assets for future crates.io support
 - Sigstore-signed binary release artifacts + installer verification
 - Determinism-critical deps pinned with `=x.y.z`, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
