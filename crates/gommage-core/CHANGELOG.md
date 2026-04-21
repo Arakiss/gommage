@@ -9,6 +9,8 @@ enforced by `cargo-semver-checks` in CI.
 
 - `PictoLookup` and `PictoConsume` result types for verified picto lookup and
   verified transactional consumption.
+- Capability mapper stdlib now maps Claude Code `MultiEdit` calls to
+  `fs.write:<path>`.
 
 ### Changed
 
@@ -18,6 +20,7 @@ enforced by `cargo-semver-checks` in CI.
   instead of absolute host paths and raw YAML.
 - Invalid picto creation input returns typed errors instead of panicking.
 - Capability mapper regex compilation now uses explicit size and nesting limits.
+- Policy `${HOME}` substitution is now populated even when no expedition is active.
 
 ## [0.1.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.1.0-alpha.1...gommage-core-v0.1.1-alpha.1) (2026-04-21)
 

@@ -16,6 +16,7 @@ If an item is listed as "Bypasses Gommage", that is not a vulnerability — it i
 | `Read` | `file_path` | `fs.read:<path>` |
 | `Write` | `file_path` | `fs.write:<path>` |
 | `Edit` | `file_path` | `fs.write:<path>` |
+| `MultiEdit` | `file_path` | `fs.write:<path>` |
 | `NotebookEdit` | `notebook_path` | `fs.write:<notebook_path>` |
 | `Glob` | `pattern` | `fs.read:<pattern>` |
 | `Grep` | (not currently mapped) | — |
@@ -24,6 +25,12 @@ If an item is listed as "Bypasses Gommage", that is not a vulnerability — it i
 | `mcp__<server>__<tool>` | (not currently mapped) | — |
 
 To extend coverage, add a mapper rule under `~/.gommage/capabilities.d/` — Claude Code forwards the full `tool_name` + `tool_input` object on every hook call, so the information is there regardless of whether the stdlib pack matches it today.
+
+`gommage quickstart --agent claude` installs the hook and imports supported
+`permissions.deny` entries from `~/.claude/settings.json` into
+`~/.gommage/policy.d/05-claude-import.yaml`. Broad native allow rules stay in
+Claude's config; Gommage remains fail-closed unless a policy rule allows the
+mapped capability.
 
 ### Bypasses Gommage under Claude Code
 
@@ -90,6 +97,10 @@ codex exec --sandbox workspace-write "apply the refactor we discussed"
 ### Wiring
 
 See [`examples/codex-setup.md`](../examples/codex-setup.md).
+`gommage quickstart --agent codex` writes `~/.codex/hooks.json` and enables
+`features.codex_hooks = true`, but it does not convert Codex's OS sandbox or
+approval policy into Gommage YAML. Those native controls remain authoritative
+for non-Bash surfaces.
 
 ---
 

@@ -19,32 +19,14 @@ Same binaries as the Claude Code setup — one install, both agents.
 cargo install --path crates/gommage-cli
 cargo install --path crates/gommage-daemon
 cargo install --path crates/gommage-mcp
-gommage init
-gommage policy init --stdlib
-gommage policy check
+gommage quickstart --agent codex
 ```
 
-## 2. Wire the Codex hook
+`quickstart` creates `~/.gommage`, installs the bundled policy/capability
+stdlib, writes `~/.codex/hooks.json`, and enables `features.codex_hooks = true`
+in `~/.codex/config.toml` with backups.
 
-Create (or edit) `~/.codex/hooks.json`:
-
-```jsonc
-{
-  "PreToolUse": [
-    {
-      "matcher": "Bash",
-      "hooks": [
-        { "type": "command", "command": "gommage-mcp" }
-      ]
-    }
-  ]
-}
-```
-
-Repo-scoped config — if you want Gommage to run only for a given project —
-lives in `.codex/hooks.json` at the repo root with the same shape.
-
-## 3. Start the daemon (recommended for long sessions)
+## 2. Start the daemon (recommended for long sessions)
 
 The `gommage-mcp` adapter falls back to in-process evaluation when the
 daemon socket isn't available, and that fallback still writes signed audit
@@ -56,7 +38,7 @@ behavior:
 gommage-daemon --foreground
 ```
 
-## 4. Start an expedition and use Codex
+## 3. Start an expedition and use Codex
 
 ```sh
 cd /path/to/your/project
@@ -68,7 +50,7 @@ Every Bash command Codex wants to execute is gated through Gommage's
 policy. Pictos, audit log, `gommage explain <id>` all behave identically to
 the Claude Code flow.
 
-## 5. What Gommage does NOT gate under Codex today
+## 4. What Gommage does NOT gate under Codex today
 
 Because Codex only fires `PreToolUse` for Bash, these are NOT intercepted
 by Gommage in a Codex session (until Codex widens the hook surface —

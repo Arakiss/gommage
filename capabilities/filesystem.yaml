@@ -19,6 +19,11 @@
   emit:
     - "fs.write:${input.file_path}"
 
+- name: fs-multi-edit
+  tool: MultiEdit
+  emit:
+    - "fs.write:${input.file_path}"
+
 - name: fs-notebook-edit
   tool: NotebookEdit
   emit:
