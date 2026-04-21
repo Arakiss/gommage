@@ -1,0 +1,90 @@
+# Dependabot configuration for Gommage.
+#
+# Design:
+#   - cargo updates split into two groups so reviews map to risk class:
+#       * determinism-critical pins (=x.y.z) — every bump must pass the full
+#         determinism matrix. Grouping means one PR per "sweep" instead of
+#         seven, which keeps the reviewer's context coherent.
+#       * plumbing (caret-ranged) — patch/minor bumps are mostly free.
+#   - GitHub Actions get weekly rollups — release cadence is low enough that
+#     daily churn is noise.
+
+version: 2
+
+updates:
+  # -----------------------------------------------------------------------
+  # Rust workspace
+  # -----------------------------------------------------------------------
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "cargo"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Determinism-critical pins. Any bump here is a contract-level change
+      # and ships with a fresh 10× determinism sweep. Reviewer must verify
+      # the suite is green on every OS/locale row before merging.
+      deterministic-deps:
+        applies-to: version-updates
+        patterns:
+          - "ed25519-dalek"
+          - "rusqlite"
+          - "globset"
+          - "regex"
+          - "rand_core"
+          - "sha2"
+          - "hex"
+          - "base64"
+          - "time"
+          - "uuid"
+          - "serde_yaml_ng"
+      # Plumbing deps on caret ranges. Patch + minor bump together; majors
+      # always break out into their own PR.
+      plumbing:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+          - "minor"
+        patterns:
+          - "serde"
+          - "serde_json"
+          - "thiserror"
+          - "anyhow"
+          - "tracing*"
+          - "clap"
+          - "tokio"
+          - "dirs"
+
+  # -----------------------------------------------------------------------
+  # GitHub Actions
+  # -----------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "deps"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    groups:
+      actions:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+          - "minor"
+          - "major"

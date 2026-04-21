@@ -1,0 +1,71 @@
+name: Feature request
+description: Propose a new capability, policy primitive, or tooling addition.
+title: "feat: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please read:
+
+        - `CONTRIBUTING.md` §Ground rules — in particular, the rules about
+          heuristics in the evaluator, hardcoded hard-stops, and policy
+          packs.
+        - `THREAT_MODEL.md` §1 and §2 for what Gommage is and is not.
+
+        Feature requests that turn the evaluator into a session-aware
+        classifier, or that make the hard-stop list configurable at runtime,
+        will be closed — those are non-goals.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: >-
+        What use case is currently awkward, unsafe, or impossible? Frame the
+        problem, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: >-
+        What would you add or change? If it touches the evaluator, explain
+        how the change preserves `(policy, capabilities) → decision`
+        determinism. If it adds a policy primitive, sketch the YAML.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - Capability mapper (YAML)
+        - Policy primitive / pack (YAML)
+        - Evaluator (Rust)
+        - Hard-stop list
+        - Picto / grant surface
+        - Audit log / verifier
+        - CLI ergonomics
+        - MCP adapter
+        - Docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you think about, and why did you reject it?
+
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Contract checks
+      options:
+        - label: This proposal does not introduce session-aware or heuristic behavior into the evaluator.
+        - label: This proposal does not make the hard-stop list runtime-configurable.
+        - label: If this is a breaking change to `gommage-core` or the audit log schema, I acknowledge it requires a semver bump and migration notes.

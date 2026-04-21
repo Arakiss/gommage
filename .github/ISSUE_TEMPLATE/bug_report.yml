@@ -1,0 +1,89 @@
+name: Bug report
+description: Something in Gommage behaves incorrectly or crashes.
+title: "bug: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. A few ground rules before you continue:
+
+        - **Security issues do not go here.** If you suspect a signature
+          verification bypass, evaluator non-determinism, a policy parser
+          panic, or any other in-scope issue from `SECURITY.md` §"In scope",
+          use a [private security advisory](https://github.com/Arakiss/gommage/security/advisories/new)
+          instead.
+        - Determinism regressions are always high priority. If the bug is a
+          decision flip on the same `(policy, capabilities, toolcall)`
+          triple, say so — it short-circuits triage.
+
+  - type: input
+    id: gommage-version
+    attributes:
+      label: Gommage version
+      description: Output of `gommage --version` (commit hash if built from source).
+      placeholder: "0.1.0-alpha.1 (755af07)"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 14.5 / Ubuntu 24.04 / …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      description: Which part of Gommage misbehaves?
+      multiple: true
+      options:
+        - CLI (gommage)
+        - Daemon (gommage-daemon)
+        - MCP adapter (gommage-mcp)
+        - Evaluator / policy engine
+        - Audit log (sign / verify / explain)
+        - Picto (grants)
+        - Hard-stop list
+        - Installer (scripts/install.sh)
+        - Docs / threat model
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >-
+        Minimal commands, policy/capability files, and the tool call that
+        triggers the bug. Paste output verbatim — do not paraphrase. If the
+        bug involves a decision, include the exact `(policy, capabilities)`
+        that produced it.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: determinism
+    attributes:
+      label: Determinism check
+      options:
+        - label: This bug is a decision flip on the same `(policy, capabilities, toolcall)` input (if yes, this is treated as a regression).
+        - label: I have attached the audit log line, if one was produced.
