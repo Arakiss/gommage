@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-audit"
-version = "0.1.1-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-cli"
-version = "0.1.1-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -476,7 +476,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-core"
-version = "0.1.1-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "base64",
  "dirs",
@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-daemon"
-version = "0.2.0-alpha.1"
+version = "0.2.1-alpha.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-mcp"
-version = "0.1.1-alpha.1"
+version = "0.2.0-alpha.1"
 dependencies = [
  "anyhow",
  "gommage-audit",

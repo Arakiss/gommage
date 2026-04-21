@@ -1,5 +1,12 @@
 # Changelog — gommage-daemon
 
+## [0.2.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.2.0-alpha.1...gommage-daemon-v0.2.1-alpha.1) (2026-04-21)
+
+
+### Bug fixes
+
+* enforce auditable trust guarantees ([fef1098](https://github.com/Arakiss/gommage/commit/fef1098ea15b3796c578d9a5a55b20e472d532de))
+
 ## [Unreleased]
 
 ### Changed
