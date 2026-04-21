@@ -1,6 +1,7 @@
 <p align="center">
   <img src="assets/banner.png" alt="gommage — policy-as-code for AI coding agents" width="100%" />
 </p>
+<p align="center"><sub><em>The gold dust unmaking the parchment is the gommage. The three pendants below are pictos — signed, single-use grants.</em></sub></p>
 
 # gommage
 
