@@ -75,6 +75,22 @@ cargo install --path crates/gommage-mcp --force
 crates.io while the project is alpha. See
 [`docs/publishing.md`](docs/publishing.md) for the current publish gate.
 
+## Codex skill
+
+This repository also ships a Codex skill at [`skills/gommage`](skills/gommage)
+so future Codex sessions can install, verify, and operate Gommage without
+rediscovering the project-specific flow.
+
+Local install from a checkout:
+
+```sh
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skills/gommage "${CODEX_HOME:-$HOME/.codex}/skills/gommage"
+```
+
+Or ask Codex to install the skill from GitHub repo `Arakiss/gommage`, path
+`skills/gommage`, then restart Codex so it picks up the new skill.
+
 ## Quickstart
 
 ```sh
