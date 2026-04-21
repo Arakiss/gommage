@@ -1,0 +1,5 @@
+{
+  "name": "adversarial-relative-rm-rf-no-hardstop-but-fail-closed",
+  "call": { "tool": "Bash", "input": { "command": "rm -rf ./build" } },
+  "expected": { "kind": "gommage" }
+}
