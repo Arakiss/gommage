@@ -11,13 +11,19 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/install.sh`: one-liner installer that downloads the platform tarball from GitHub Releases, verifies the SHA-256 checksum, and drops the three binaries into `$GOMMAGE_BIN` (default `~/.local/bin`). Refuses to install on checksum mismatch.
+- Daemon reloads its policy + capability mappers on `SIGHUP` without restarting — standard Unix convention for long-running daemons. `SIGTERM` and `SIGINT` now trigger graceful shutdown.
+
+### Changed
+
+- Migrated `serde_yaml` → `serde_yaml_ng 0.10.0` via cargo alias (`serde_yaml = { package = "serde_yaml_ng", … }`). Zero in-tree code changes thanks to the alias; the unmaintained upstream is now behind us.
+
 ### Known issues
 
-- `serde_yaml 0.9.34` is unmaintained upstream. Tracked for replacement with
-  `serde_yaml_ng` or `serde_yml` before `v0.2`.
-- Daemon lacks SIGHUP policy-reload wiring (the primitive exists in
-  `Runtime::reload_policy` but no signal handler is installed yet).
 - No TUI dashboard (`gommage watch`) — only CLI tail for now.
+- No webhook out-of-band channel yet.
 
 ## [0.1.0-alpha.1] — 2026-04-21
 
