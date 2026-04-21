@@ -17,6 +17,10 @@ yanked = "deny"
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Allow path-only wildcards for intra-workspace crates (their version
+# constraint lives on the individual [package] entries; the workspace.dependencies
+# path-only form is intentional and documented in Cargo.toml).
+allow-wildcard-paths = true
 # Deterministic dep graph — duplicate versions are a smell, warn for now.
 highlight = "all"
 deny = [
