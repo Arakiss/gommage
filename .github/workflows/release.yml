@@ -3,6 +3,16 @@ name: release
 on:
   push:
     branches: [main]
+    # Binary-build step triggers off the gommage-cli tag (the user-visible one).
+    # Per-crate tags also exist (gommage-core-v*, …) but binaries live on cli.
+    tags:
+      - "gommage-cli-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to retroactively build + attach binaries to (e.g. gommage-cli-v0.1.1-alpha.1)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,24 +22,27 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # 1) On push to main: run release-please. Opens / updates the release PR.
+  #    Merging that PR creates per-crate tags; the tag push then drives (2).
   release-please:
     name: release-please
     runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.rp.outputs.release_created }}
-      tag_name:        ${{ steps.rp.outputs.tag_name }}
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: googleapis/release-please-action@v4
-        id: rp
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # 2) On tag push gommage-cli-v*: build cross-platform binaries, attach to
+  #    that tag's GitHub release. Also runnable manually via workflow_dispatch
+  #    to retroactively build binaries for tags that predated this workflow.
   build-binaries:
     name: build (${{ matrix.target }})
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gommage-cli-v'))
+      || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -49,6 +62,9 @@ jobs:
             asset: gommage-aarch64-darwin
     steps:
       - uses: actions/checkout@v4
+        with:
+          # When workflow_dispatch-triggered, check out the tag provided via input.
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -72,9 +88,18 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           shasum -a 256 "dist/${{ matrix.asset }}.tar.gz" \
               > "dist/${{ matrix.asset }}.tar.gz.sha256"
+      - name: Resolve upload tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}"       >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          tag_name: ${{ steps.tag.outputs.name }}
           files: |
             dist/${{ matrix.asset }}.tar.gz
             dist/${{ matrix.asset }}.tar.gz.sha256
