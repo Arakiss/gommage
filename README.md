@@ -17,6 +17,8 @@
 
 **Policy-as-code for AI coding agent tool calls. Deterministic decisions. Signed audit. You own the rules.**
 
+> **Development status: alpha.** Gommage is public, installable, and being tested end-to-end, but it is under intensive development and the operator experience is still changing quickly. Expect breaking CLI/config changes, rough installation edges, and policy/mapping gaps until the project reaches a beta line. Use it first on non-critical repositories, keep your agent's native sandbox/permission layer enabled, and review generated policies before trusting them.
+
 Gommage is a **policy decision and audit harness** for AI coding agents. It supports **Claude Code** and **OpenAI Codex CLI** today via their `PreToolUse` hooks. It sits between the agent and the operation the agent wants to perform, consults a declarative policy written in YAML, and emits `allow` / `deny` / `ask` — the same way Kubernetes admission controllers or OPA sit in front of a cluster.
 
 Gommage is **not a sandbox** and does not mediate execution. It decides, audits, and optionally requires a signed grant (picto) to proceed. For OS-level confinement, stack it under AppArmor / SELinux / `seccomp-bpf` / macOS Seatbelt / Codex's own `--sandbox` modes. See [`THREAT_MODEL.md`](THREAT_MODEL.md) for what that split means in practice.
@@ -38,7 +40,7 @@ Gommage takes the opposite stance:
 
 ## Status
 
-**v0.1.0-alpha** — usable with **Claude Code** (all tool types) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). Rough edges expected. See [ROADMAP](#roadmap).
+**Current public release channel: alpha (`gommage-cli-v0.2.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on installer polish, policy import fidelity, mapper coverage, and launch-readiness smoke tests. See [ROADMAP](#roadmap).
 
 ## Positioning
 
@@ -47,7 +49,7 @@ Gommage is an **opt-in complement** to whatever permission layer your agent ship
 ## Install
 
 ```sh
-# macOS / Linux — one-liner (v0.1 onwards)
+# macOS / Linux — alpha one-liner
 # Requires cosign for Sigstore release verification.
 # The installer resolves the latest gommage-cli binary release.
 curl --proto '=https' --tlsv1.2 -sSf \
@@ -177,7 +179,7 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 
 ## Roadmap
 
-**v0.1 (MVP)** — this release
+**v0.2 alpha line** — current release line
 - Daemon + CLI + PreToolUse hook adapter
 - Supported agents: **Claude Code** (all tool types), **OpenAI Codex CLI** (Bash tool only — limited by Codex's current hook surface)
 - YAML policy + capability mappers for Bash / git / vercel / bun / docker
