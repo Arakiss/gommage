@@ -1,0 +1,29 @@
+[package]
+name = "gommage-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Gommage command-line interface."
+
+[[bin]]
+name = "gommage"
+path = "src/main.rs"
+
+[dependencies]
+gommage-core.workspace  = true
+gommage-audit.workspace = true
+serde.workspace         = true
+serde_json.workspace    = true
+anyhow.workspace        = true
+thiserror.workspace     = true
+tracing.workspace       = true
+tracing-subscriber.workspace = true
+clap.workspace          = true
+tokio.workspace         = true
+ed25519-dalek.workspace = true
+rand_core.workspace     = true
+dirs.workspace          = true
+time.workspace          = true
+uuid.workspace          = true

@@ -1,0 +1,6 @@
+{
+  "name": "fs-read-inside-expedition-root-is-allowed",
+  "call": { "tool": "Read", "input": { "file_path": "/tmp/proj/src/lib.rs" } },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

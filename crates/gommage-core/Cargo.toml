@@ -1,0 +1,30 @@
+[package]
+name = "gommage-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Policy engine, capability mapper, and picto store for the Gommage permission harness."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+globset.workspace = true
+regex.workspace = true
+rusqlite.workspace = true
+ed25519-dalek.workspace = true
+rand_core.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+time.workspace = true
+uuid.workspace = true
+dirs.workspace = true
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3"

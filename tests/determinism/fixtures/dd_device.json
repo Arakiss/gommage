@@ -1,0 +1,5 @@
+{
+  "name": "dd-to-device-is-hard-stopped",
+  "call": { "tool": "Bash", "input": { "command": "dd if=/dev/zero of=/dev/sda bs=1M" } },
+  "expected": { "kind": "gommage", "hard_stop": true }
+}

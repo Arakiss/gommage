@@ -1,0 +1,77 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_RELEASE_LTO: thin
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: gommage-x86_64-linux
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: gommage-aarch64-linux
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset: gommage-x86_64-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: gommage-aarch64-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross-linker (linux-aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p .cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> .cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
+      - run: cargo build --release --target ${{ matrix.target }} --workspace
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cd target/${{ matrix.target }}/release
+          tar czf "$GITHUB_WORKSPACE/dist/${{ matrix.asset }}.tar.gz" gommage gommage-daemon gommage-mcp
+          cd "$GITHUB_WORKSPACE"
+          shasum -a 256 "dist/${{ matrix.asset }}.tar.gz" > "dist/${{ matrix.asset }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Flatten
+        run: find dist -mindepth 2 -type f -exec mv -t dist {} +
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

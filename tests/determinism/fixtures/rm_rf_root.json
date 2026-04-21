@@ -1,0 +1,5 @@
+{
+  "name": "rm-rf-root-is-hard-stopped",
+  "call": { "tool": "Bash", "input": { "command": "rm -rf /" } },
+  "expected": { "kind": "gommage", "hard_stop": true }
+}

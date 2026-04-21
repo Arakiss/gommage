@@ -1,0 +1,5 @@
+{
+  "name": "git-push-to-feature-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "git push origin feature/add-login" } },
+  "expected": { "kind": "allow" }
+}

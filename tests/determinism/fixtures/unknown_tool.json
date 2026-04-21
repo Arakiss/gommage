@@ -1,0 +1,5 @@
+{
+  "name": "unknown-tool-emits-no-caps-fails-closed",
+  "call": { "tool": "SomeUnknownTool", "input": { "x": 1 } },
+  "expected": { "kind": "gommage" }
+}

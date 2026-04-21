@@ -1,0 +1,5 @@
+{
+  "name": "git-push-to-main-asks-for-picto",
+  "call": { "tool": "Bash", "input": { "command": "git push origin main" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.push:main" }
+}

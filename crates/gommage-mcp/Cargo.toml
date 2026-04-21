@@ -1,0 +1,23 @@
+[package]
+name = "gommage-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Gommage MCP / PreToolUse hook adapter for Claude Code and generic MCP agents."
+
+[[bin]]
+name = "gommage-mcp"
+path = "src/main.rs"
+
+[dependencies]
+gommage-core.workspace  = true
+serde.workspace         = true
+serde_json.workspace    = true
+anyhow.workspace        = true
+thiserror.workspace     = true
+tracing.workspace       = true
+tracing-subscriber.workspace = true
+tokio.workspace         = true
+time.workspace          = true

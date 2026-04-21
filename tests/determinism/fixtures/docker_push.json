@@ -1,0 +1,5 @@
+{
+  "name": "docker-push-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "docker push registry.example.com/app:v1" } },
+  "expected": { "kind": "ask_picto", "required_scope": "docker.push" }
+}

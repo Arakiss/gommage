@@ -1,0 +1,5 @@
+{
+  "name": "bun-install-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "bun install" } },
+  "expected": { "kind": "allow" }
+}

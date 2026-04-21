@@ -1,0 +1,6 @@
+{
+  "name": "fs-write-inside-expedition-root-is-allowed",
+  "call": { "tool": "Write", "input": { "file_path": "/tmp/proj/src/lib.rs", "content": "x" } },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

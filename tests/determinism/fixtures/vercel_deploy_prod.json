@@ -1,0 +1,5 @@
+{
+  "name": "vercel-prod-deploy-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "vercel deploy --prod" } },
+  "expected": { "kind": "ask_picto", "required_scope": "deploy.vercel:prod" }
+}

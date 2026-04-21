@@ -1,0 +1,19 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# local state
+/.gommage
+*.ed25519
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+audit.log
+audit.log.*
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

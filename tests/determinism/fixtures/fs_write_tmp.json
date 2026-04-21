@@ -1,0 +1,5 @@
+{
+  "name": "fs-write-in-tmp-is-allowed",
+  "call": { "tool": "Write", "input": { "file_path": "/tmp/scratch.txt", "content": "x" } },
+  "expected": { "kind": "allow" }
+}

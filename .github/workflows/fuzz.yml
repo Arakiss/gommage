@@ -1,0 +1,38 @@
+name: fuzz
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"   # Monday ~03:17 UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fuzz-capability-mapper:
+    name: fuzz — capability mapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Fuzz target (TODO — add fuzz/ directory with libfuzzer target)
+        run: |
+          echo "fuzz targets not yet populated — skipping for now"
+          # cd crates/gommage-core && cargo fuzz run mapper -- -max_total_time=600
+
+  fuzz-picto-signature:
+    name: fuzz — picto signature verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Fuzz target (TODO)
+        run: |
+          echo "picto signature fuzz target not yet populated — skipping"
