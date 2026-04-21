@@ -1,0 +1,17 @@
+# Disable blank issues — every report should go through one of the forms below
+# or through the security channel.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Arakiss/gommage/security/advisories/new
+    about: >-
+      Do NOT open a public issue for a vulnerability. Use GitHub's private
+      security advisory flow, or email petruarakiss@gmail.com with the
+      subject prefix [gommage-security]. See SECURITY.md for the full
+      disclosure policy.
+  - name: Question or discussion
+    url: https://github.com/Arakiss/gommage/discussions
+    about: >-
+      Usage questions, design discussions, and open-ended ideas belong in
+      Discussions, not issues.

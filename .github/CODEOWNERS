@@ -1,0 +1,39 @@
+# Code owners for Gommage.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customizations/customizing-your-repository/about-code-owners
+#
+# Gommage is currently maintained by a single person. This file exists so that
+# GitHub auto-requests a review on PRs touching security-critical paths, and so
+# that branch-protection rules with "require review from code owners" cannot be
+# bypassed for those paths.
+#
+# Ordering matters: later, more-specific rules override earlier ones.
+
+# --- Default owner for everything not matched below ------------------------
+*                                 @Arakiss
+
+# --- Security-critical cores -----------------------------------------------
+# Any edit here is a decision-surface change. Keep the review explicit.
+/crates/gommage-core/src/hardstop.rs          @Arakiss
+/crates/gommage-core/src/evaluator.rs         @Arakiss
+/crates/gommage-core/src/policy.rs            @Arakiss
+/crates/gommage-core/src/picto.rs             @Arakiss
+/crates/gommage-core/src/mapper.rs            @Arakiss
+/crates/gommage-core/src/capability.rs        @Arakiss
+/crates/gommage-audit/                         @Arakiss
+
+# --- Build, CI, release plumbing -------------------------------------------
+/.github/workflows/                            @Arakiss
+/release-please-config.json                    @Arakiss
+/.release-please-manifest.json                 @Arakiss
+/deny.toml                                     @Arakiss
+/Cargo.toml                                    @Arakiss
+/Cargo.lock                                    @Arakiss
+/rust-toolchain.toml                           @Arakiss
+
+# --- Governance and threat-model docs --------------------------------------
+/SECURITY.md                                   @Arakiss
+/THREAT_MODEL.md                               @Arakiss
+/CODE_OF_CONDUCT.md                            @Arakiss
+/CONTRIBUTING.md                               @Arakiss
+/.github/CODEOWNERS                            @Arakiss
