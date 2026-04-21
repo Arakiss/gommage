@@ -207,6 +207,17 @@ See [`THREAT_MODEL.md`](THREAT_MODEL.md) for the full statement.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+## Acknowledgements — a tribute to Expedition 33
+
+Gommage borrows its vocabulary — _gommage_, _picto_, _canvas_, _expedition_ — from **[Clair Obscur: Expedition 33](https://expedition33.com/)**, the 2025 game by [Sandfall Interactive](https://www.sandfall.co/). The game's central act — the _gommage_, where the Paintress writes a number on her canvas and the marked are erased — gave this project the precise metaphor it needed for what a policy engine does to tool calls that have no business running. The banner artwork, the picto pendants, the "canvas" naming of the active policy set: all of it is a fan's homage to the world they built.
+
+This project is not affiliated with, endorsed by, or sponsored by **Sandfall Interactive**, **Kepler Interactive**, or any of their partners. _Clair Obscur: Expedition 33_, its characters, logos, artwork, and music remain the sole property of their respective rights holders. The usage of shared terms in this codebase is purely tributary and made with respect for the creators.
+
+If any rights holder would prefer different naming or framing, please [open an issue](https://github.com/Arakiss/gommage/issues) — we will adjust gladly.
+
+If you have not played _Expedition 33_ yet, stop reading this README and go play it.
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
