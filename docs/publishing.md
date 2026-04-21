@@ -22,10 +22,22 @@ Useful installer options:
 sh scripts/install.sh --help
 sh scripts/install.sh --version gommage-cli-v0.4.0-alpha.1
 sh scripts/install.sh --bin-dir "$HOME/.local/bin"
+sh scripts/install.sh --with-skill --skill-agent codex --skill-agent claude
+sh scripts/install.sh --skill-only --skill-agent codex --skill-agent claude
+sh scripts/install.sh --skill-only --skill-agent codex --skill-ref main
 ```
 
 For private release downloads, set `GOMMAGE_GITHUB_TOKEN`, `GH_TOKEN`, or
 `GITHUB_TOKEN`.
+
+The agent skill is distributed from `skills/gommage` and can be installed by the
+same script without reinstalling binaries. Installer-managed destinations are:
+
+- Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
+- Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
+
+Remote skill installs read from `GOMMAGE_SKILL_REF` / `--skill-ref`, defaulting
+to `main`. This keeps old binary tags installable while the alpha skill evolves.
 
 ## crates.io status
 

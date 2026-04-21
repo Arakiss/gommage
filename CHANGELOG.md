@@ -19,6 +19,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage daemon install|status|uninstall` manages user-level launchd/systemd services so long sessions no longer require a foreground daemon process.
 - Stdlib capability coverage for Claude `Grep`, `WebFetch`, `WebSearch`, and MCP tool names (`mcp__<server>__<tool>`), with conservative picto defaults for web/MCP surfaces.
 - Sigstore keyless signing for release archives plus installer verification of both Cosign bundles and SHA-256 checksums.
+- `scripts/install.sh --with-skill`, `--skill-only`, and `--skill-agent codex|claude|all` so the verified installer can also install/update the Gommage agent skill for Codex and Claude Code.
 - `gommage doctor` diagnoses the local home, key, policy, capability mapper, audit log, and daemon socket state.
 - Structured `gommage explain <audit-id>` output with exact id matching plus `--json` for the raw verified entry shape.
 - `gommage grant --ttl` now accepts duration suffixes (`s`, `m`, `h`, `d`) as well as raw seconds.
@@ -31,9 +32,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Policy default `deny-dotdot-escape` in `10-filesystem.yaml`: any `fs.read` / `fs.write` capability whose path contains `..` is denied before `allow-project-*` can match.
 - `docs/input-schema.md` — canonical decision-input contract. Frozen schema for `ToolCall`, explicit list of what the evaluator does NOT read (clock, env, CWD, filesystem state, transcript), path handling rules (opaque UTF-8, no symlink / normalisation / case-folding), and the semver policy that governs future changes to this contract.
 - Cross-platform determinism CI matrix: the 10× sweep now runs across `{ubuntu-latest, macos-latest}` × `{C, en_US.UTF-8, de_DE.UTF-8}` (5 combinations total). An umbrella job `determinism sweep (all)` rolls matrix results into a single required status check on branch protection.
-- Repository-distributed Codex skill at `skills/gommage` so Codex sessions can
-  install, verify, troubleshoot, and operate Gommage without rediscovering the
-  project-specific flow.
+- Repository-distributed agent skill at `skills/gommage` so Codex and Claude
+  Code sessions can install, verify, troubleshoot, and operate Gommage without
+  rediscovering the project-specific flow.
 - `gommage-stdlib` crate with packaged policy and capability mapper YAML for
   future crates.io publishing and package-local CLI embedding.
 
@@ -52,7 +53,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `"zero heuristics"` claim redefined brutally: regex matching and glob matching are deterministic transforms and part of the contract, not heuristics; classifiers, ML scoring, prior accumulation, and intent inference are.
 - README repositioned from "permission harness" to **"policy decision and audit harness"** — Gommage does not mediate execution and is not a sandbox. Users are pointed at OS-level confinement (AppArmor, SELinux, seccomp, macOS Seatbelt, Codex `--sandbox`) as the complementary layer.
 - README now frames Gommage as one layer in a broader AI agent harness
-  engineering stack and documents the Codex skill as part of the install
+  engineering stack and documents the agent skill as part of the install
   surface.
 - `gommage-cli` now embeds bundled defaults through `gommage-stdlib` instead of
   repository-root asset paths.

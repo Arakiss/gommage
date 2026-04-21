@@ -54,7 +54,16 @@ Installer flags:
 sh scripts/install.sh --help
 sh scripts/install.sh --version gommage-cli-v0.4.0-alpha.1
 sh scripts/install.sh --bin-dir "$HOME/.local/bin"
+sh scripts/install.sh --with-skill --skill-agent codex --skill-agent claude
+sh scripts/install.sh --skill-only --skill-agent codex --skill-agent claude
+sh scripts/install.sh --skill-only --skill-agent codex --skill-ref main
 ```
+
+`--with-skill` installs the repository Agent Skill after binary verification.
+`--skill-only` updates the skill without downloading release binaries or using
+Cosign, which is useful for agent setup flows and documentation smoke tests.
+Remote skill installs default to `--skill-ref main` so old alpha binary tags can
+still be paired with the current setup skill.
 
 Checksum assets are generated with the archive basename. The installer hashes
 the downloaded archive directly and compares the first field of the `.sha256`
