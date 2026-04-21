@@ -43,7 +43,7 @@ dirs       = "6"
 globset       = "=0.4.18"
 regex         = "=1.12.3"
 ed25519-dalek = { version = "=2.2.0", features = ["rand_core", "std"] }
-rand_core     = { version = "=0.9.5", features = ["std"] }
+rand_core     = { version = "=0.6.4", features = ["std"] }
 rusqlite      = { version = "=0.39.0", features = ["bundled"] }
 sha2          = "=0.11.0"
 hex           = "=0.4.3"
