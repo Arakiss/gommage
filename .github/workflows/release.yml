@@ -61,7 +61,7 @@ jobs:
             target: aarch64-apple-darwin
             asset: gommage-aarch64-darwin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # When workflow_dispatch-triggered, check out the tag provided via input.
           ref: ${{ github.event.inputs.tag || github.ref }}
@@ -97,7 +97,7 @@ jobs:
           else
             echo "name=${GITHUB_REF#refs/tags/}"       >> "$GITHUB_OUTPUT"
           fi
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           files: |
