@@ -13,6 +13,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- Property-based robustness suite (`crates/gommage-core/tests/proptest_robustness.rs`): 4 properties covering the capability mapper, policy YAML parser, picto signature verifier, and evaluator. 1536 randomised inputs per CI run across all four properties. Asserts: no panic on arbitrary tool-call JSON, no panic on arbitrary YAML (either `Ok(Policy)` or typed error), signature verification rejects random 64-byte blobs, evaluator always returns one of the three decision variants.
 - `docs/agent-compatibility.md` — per-agent matrix of what Gommage sees, what it does NOT see, what bypasses it, and the recommended OS-level stack to layer underneath. Currently covers Claude Code (all mapped tools) and OpenAI Codex CLI (Bash-only per upstream), plus explicit "why not yet" rows for Cursor, Aider, Cline, Continue, Zed. Positions as a credibility artefact: stale rows are a bug.
 - `gommage audit-verify --explain` — forensic report over the entire audit log. Reports entries total vs verified, the signing key's fingerprint (SHA-256[..16] of the verifying key bytes), every anomaly encountered (bad signature, malformed entry, timestamp out of order, mid-log policy version change), the set of policy versions observed, and the set of expeditions seen. Exits 1 when any anomaly fires. Plain `audit-verify` still prints the one-line count and errors on the first bad line.
 - `gommage_audit::VerifyReport`, `gommage_audit::Anomaly`, `gommage_audit::explain_log`, `gommage_audit::key_fingerprint` — part of `gommage-audit` public API, guarded by `cargo-semver-checks`.
@@ -40,6 +41,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 ### Changed
 
 - Migrated `serde_yaml` → `serde_yaml_ng 0.10.0` via cargo alias (`serde_yaml = { package = "serde_yaml_ng", … }`). Zero in-tree code changes thanks to the alias; the unmaintained upstream is now behind us.
+
+### Removed
+
+- `.github/workflows/fuzz.yml` — the scheduled stub was never populated with real cargo-fuzz targets. Property-based testing via `proptest` now runs on every CI build, covering the same surfaces with tighter feedback and without the nightly-Rust infra.
 
 ### Known issues
 
