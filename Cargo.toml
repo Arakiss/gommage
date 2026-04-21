@@ -18,9 +18,13 @@ homepage = "https://gommage.dev"
 authors = ["Petru Arakiss <petruarakiss@gmail.com>"]
 
 [workspace.dependencies]
-# Internal crates — always path + version pinned together.
-gommage-core   = { path = "crates/gommage-core",   version = "=0.1.0-alpha.1" }
-gommage-audit  = { path = "crates/gommage-audit",  version = "=0.1.0-alpha.1" }
+# Internal crates — path-only so release-please can bump per-crate versions
+# independently without hitting a pre-release version-constraint mismatch at
+# the workspace level. When a crate starts publishing to crates.io, its
+# version constraint will be added alongside the path (cargo uses the path
+# locally; external consumers use the version).
+gommage-core   = { path = "crates/gommage-core"   }
+gommage-audit  = { path = "crates/gommage-audit"  }
 
 # --- Plumbing (caret-ranged: stable interfaces, cheap patch bumps) ----------
 serde      = { version = "1", features = ["derive"] }
