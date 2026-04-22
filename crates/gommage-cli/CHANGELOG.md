@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.11.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.10.0-alpha.1...gommage-cli-v0.11.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** import narrow native allows ([92fc003](https://github.com/Arakiss/gommage/commit/92fc003bc39df3b600aa95477a507ac9d6c1a0b1))
+
 ## [0.10.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.9.0-alpha.1...gommage-cli-v0.10.0-alpha.1) (2026-04-22)
 
 
