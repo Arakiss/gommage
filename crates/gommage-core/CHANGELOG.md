@@ -3,6 +3,13 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.3.3-alpha.1...gommage-core-v0.4.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* add out-of-band approval workflow ([159aa6c](https://github.com/Arakiss/gommage/commit/159aa6c19706ef0a2ea6db92f2407b002fedcf1f))
+
 ## [0.3.3-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.3.2-alpha.1...gommage-core-v0.3.3-alpha.1) (2026-04-22)
 
 ## [0.3.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.3.1-alpha.1...gommage-core-v0.3.2-alpha.1) (2026-04-22)
