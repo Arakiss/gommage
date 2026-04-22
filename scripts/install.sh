@@ -337,8 +337,45 @@ install_requested_skills() {
 }
 resolve_latest_cli_release() {
   wanted_asset="$1"
-  fetch_stdout "https://api.github.com/repos/${REPO}/releases?per_page=100" \
+  fetch_releases_index \
     | awk -v wanted_asset="$wanted_asset" '
+      function semver_part(tag, parts, core) {
+        parts[0] = tag
+        sub(/^gommage-cli-v/, "", parts[0])
+        split(parts[0], core, "-")
+        split(core[1], parts, ".")
+        parts[4] = core[2]
+      }
+      function prerelease_newer(candidate, current, cparts, parts, cn, pn, i, c, p) {
+        if (candidate == current) return 0
+        if (candidate == "") return 1
+        if (current == "") return 0
+        cn = split(candidate, cparts, ".")
+        pn = split(current, parts, ".")
+        for (i = 1; i <= cn || i <= pn; i++) {
+          if (i > cn) return 0
+          if (i > pn) return 1
+          c = cparts[i]
+          p = parts[i]
+          if (c == p) continue
+          if (c ~ /^[0-9]+$/ && p ~ /^[0-9]+$/) return c + 0 > p + 0
+          if (c ~ /^[0-9]+$/) return 0
+          if (p ~ /^[0-9]+$/) return 1
+          return c > p
+        }
+        return 0
+      }
+      function tag_newer(candidate, current, c, p, i) {
+        if (current == "") return 1
+        semver_part(candidate, c)
+        semver_part(current, p)
+        for (i = 1; i <= 3; i++) {
+          if (c[i] + 0 != p[i] + 0) return c[i] + 0 > p[i] + 0
+        }
+        if (c[4] == "" && p[4] != "") return 1
+        if (c[4] != "" && p[4] == "") return 0
+        return prerelease_newer(c[4], p[4])
+      }
       /"tag_name": "/ {
         tag = $0
         sub(/.*"tag_name": "/, "", tag)
@@ -348,12 +385,19 @@ resolve_latest_cli_release() {
         name = $0
         sub(/.*"name": "/, "", name)
         sub(/".*/, "", name)
-        if (found == "" && tag ~ /^gommage-cli-v/ && name == wanted_asset) {
+        if (tag ~ /^gommage-cli-v[0-9]+\.[0-9]+\.[0-9]+/ && name == wanted_asset && tag_newer(tag, found)) {
           found = tag
         }
       }
       END { if (found != "") print found }
     '
+}
+fetch_releases_index() {
+  if [ -n "${GOMMAGE_RELEASES_JSON:-}" ]; then
+    cat "$GOMMAGE_RELEASES_JSON"
+  else
+    fetch_stdout "https://api.github.com/repos/${REPO}/releases?per_page=100"
+  fi
 }
 asset_api_url() {
   wanted="$1"
@@ -389,6 +433,18 @@ fetch_asset() {
     fetch "$base/$name" "$out"
   fi
 }
+verify_latest_command_contract() {
+  cli="$1"
+  "$cli" agent status --help >/dev/null 2>&1 || return 1
+  "$cli" agent uninstall --help >/dev/null 2>&1 || return 1
+  "$cli" uninstall --help >/dev/null 2>&1 || return 1
+  "$cli" report --help >/dev/null 2>&1 || return 1
+  "$cli" quickstart --help 2>/dev/null | grep -Fq -- "--self-test" || return 1
+}
+
+if [ "${GOMMAGE_INSTALLER_LIBRARY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -498,6 +554,7 @@ checksum="${asset}.tar.gz.sha256"
 bundle="${asset}.tar.gz.sigstore.json"
 
 # --- Resolve version --------------------------------------------------------
+requested_version="$VERSION"
 if [ "$VERSION" = "latest" ]; then
   say "resolving latest cli release from github.com/${REPO}"
   VERSION="$(resolve_latest_cli_release "$tarball")"
@@ -556,6 +613,11 @@ for bin in gommage gommage-daemon gommage-mcp; do
   [ -f "${tmp}/${bin}" ] || die "binary ${bin} missing from ${tarball}"
   install_file_with_backup "${tmp}/${bin}" "${BIN_DIR}/${bin}" 0755
 done
+
+if [ "$requested_version" = "latest" ]; then
+  verify_latest_command_contract "${BIN_DIR}/gommage" \
+    || die "latest resolved to ${VERSION}, but the installed CLI does not satisfy the current command contract"
+fi
 
 install_requested_skills
 

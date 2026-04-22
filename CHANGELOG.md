@@ -121,6 +121,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   tables instead of an oversized all-in-one command block.
 - `gommage verify --json` now includes a pre-init hint and skips smoke when
   doctor already failed, avoiding noisy cascades from a missing home.
+- `scripts/install.sh` now resolves `latest` by the highest matching
+  `gommage-cli-v*` semantic version with a platform asset instead of trusting
+  GitHub release API order, and latest installs verify the current CLI command
+  contract before reporting success.
 - Picto lookup and consumption now verify ed25519 signatures before a stored row can convert `ask_picto` into `allow`; tampered rows remain unconsumed and emit `picto_rejected` audit events.
 - `gommage-mcp` daemon-absent fallback now writes signed audit entries instead of silently evaluating without audit.
 - Policy version hashes now use relative policy file paths plus substituted effective contents, making identical policy trees path-stable across homes while distinguishing different effective canvases.
