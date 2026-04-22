@@ -790,7 +790,7 @@ impl SmokeExpectation {
                     hard_stop: expected,
                 },
                 Decision::Gommage { hard_stop, .. },
-            ) => expected.map_or(true, |expected| expected == *hard_stop),
+            ) => expected.is_none_or(|expected| expected == *hard_stop),
             (Self::AskPicto { scope }, Decision::AskPicto { required_scope, .. }) => {
                 required_scope == scope
             }
