@@ -27,6 +27,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage policy snapshot` / `capture` reads a tool-call JSON object from
   stdin and emits a YAML regression fixture with the observed decision,
   relevant scope or hard-stop value, and matched rule.
+- `gommage policy schema` prints the official JSON Schema for policy fixture
+  files so agents, editors, and CI generators can validate fixture YAML before
+  running semantic policy checks.
 - `gommage audit-verify --explain --format human` renders the signed audit
   forensic report as a compact human-readable anomaly summary. Plain
   `audit-verify --explain` remains the JSON automation contract.

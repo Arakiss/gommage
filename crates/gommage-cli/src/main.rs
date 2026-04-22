@@ -21,6 +21,8 @@ use std::{
 };
 use time::OffsetDateTime;
 
+const POLICY_FIXTURE_SCHEMA: &str = include_str!("../schemas/policy-fixture.schema.json");
+
 #[derive(Parser)]
 #[command(
     name = "gommage",
@@ -213,6 +215,8 @@ enum PolicyCmd {
     Check,
     /// Parse a single file.
     Lint { file: PathBuf },
+    /// Print the JSON Schema for policy test fixture files.
+    Schema,
     /// Run YAML policy regression fixtures against the active home.
     Test {
         file: PathBuf,
@@ -2475,6 +2479,11 @@ fn cmd_expedition(sub: ExpeditionCmd, layout: HomeLayout) -> Result<ExitCode> {
 }
 
 fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
+    if matches!(sub, PolicyCmd::Schema) {
+        println!("{}", POLICY_FIXTURE_SCHEMA.trim_end());
+        return Ok(ExitCode::SUCCESS);
+    }
+
     layout.ensure()?;
     let env = Expedition::load(&layout.expedition_file)?
         .map(|e| e.policy_env())
@@ -2500,6 +2509,7 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
             let _ = Policy::from_yaml_string(&raw, &env, &file.to_string_lossy())?;
             println!("ok {}", file.display());
         }
+        PolicyCmd::Schema => unreachable!("policy schema returns before home validation"),
         PolicyCmd::Test { file, json } => {
             let report = build_policy_test_report(&layout, &env, &file)?;
             if json {

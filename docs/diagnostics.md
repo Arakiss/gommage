@@ -167,6 +167,12 @@ gommage policy test examples/policy-fixtures.yaml
 gommage policy test examples/policy-fixtures.yaml --json
 ```
 
+Export the fixture contract for editors, agents, and CI generators:
+
+```sh
+gommage policy schema > gommage-policy-fixture.schema.json
+```
+
 To create the first fixture from a real observed tool call, pipe the same
 `ToolCall` JSON shape used by `gommage decide` into `policy snapshot`:
 
@@ -197,3 +203,9 @@ The JSON report has top-level `status: "pass" | "fail"`, `policy_version`,
 `mapper_rules`, `summary`, and per-case `capabilities`, `matched_rule`,
 `actual`, `expected`, and `errors`. Treat `fail` as a policy regression until
 the policy or mapper change is reviewed.
+
+`gommage policy schema` prints the official JSON Schema for the fixture file
+contract. The schema covers both accepted fixture shapes: a mapping with
+`version: 1` plus `cases`, or a top-level list of cases. Use it before
+`policy test` when an agent generates fixture YAML or when an editor needs
+completion and validation.

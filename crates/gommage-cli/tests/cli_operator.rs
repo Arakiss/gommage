@@ -274,6 +274,39 @@ cases:
 }
 
 #[test]
+fn policy_schema_outputs_fixture_contract() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home).args(["policy", "schema"]).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        schema.get("$id").and_then(|value| value.as_str()),
+        Some("https://github.com/Arakiss/gommage/schemas/policy-fixture.schema.json")
+    );
+    assert_eq!(
+        schema
+            .pointer("/$defs/policyFixtureDocument/properties/version/const")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        schema
+            .pointer("/$defs/policyFixtureExpectation/properties/decision/enum")
+            .and_then(|value| value.as_array())
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
+#[test]
 fn policy_snapshot_outputs_fixture_that_policy_test_accepts() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
