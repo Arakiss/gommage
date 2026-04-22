@@ -383,7 +383,25 @@ fn audit_verify_explain_human_prints_forensic_summary() {
     assert!(stdout.contains("verified"));
     assert!(stdout.contains("key_fingerprint:"));
     assert!(stdout.contains("policy_versions:"));
+    assert!(stdout.contains("bypass_activations: 0"));
     assert!(stdout.contains("anomalies: none"));
+
+    let output = gommage(&home)
+        .args(["audit-verify", "--explain"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report.get("policy_versions").is_some());
+    assert!(report.get("expeditions").is_some());
+    assert!(report.get("policy_versions_seen").is_none());
+    assert!(report.get("expeditions_seen").is_none());
+    assert_eq!(
+        report
+            .get("bypass_activations")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
 }
 
 #[test]

@@ -115,8 +115,8 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
 - Quickstart self-test: the readiness gate runs by default. `--self-test` remains accepted for scripts; `--no-self-test` is the manual escape hatch.
 - Backups: Gommage writes `.gommage-bak-<timestamp>` backups before replacing agent configs, generated policy imports, daemon service files, installed binaries, or installed skill files when content changes. Unchanged files are not backed up.
-- Recovery: use `gommage agent uninstall claude --restore-backup`, `gommage agent uninstall codex --restore-backup`, or `gommage uninstall --all --dry-run` before destructive cleanup. `--purge-home` requires `--yes`.
-- Break-glass: `GOMMAGE_BYPASS=1` makes `gommage-mcp` allow without opening `~/.gommage` when the host can set hook process env vars. Use only to recover a broken hook path.
+- Recovery: use `gommage agent uninstall claude --restore-backup`, `gommage agent uninstall codex --restore-backup`, or `gommage uninstall --all --dry-run` before destructive cleanup. `--purge-home` requires `--yes`; `--purge-backups` removes Gommage-created `.gommage-bak-*` files only when a clean slate is intentional.
+- Break-glass: `GOMMAGE_BYPASS=1` is a policy bypass, not a hard-stop bypass. Valid hook payloads are still mapped and compiled hard-stops still deny; when a usable home/key exists, bypass writes a signed `bypass_activated` audit event. Use only to recover a broken hook path.
 
 ## Policy Operations
 

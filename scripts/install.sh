@@ -201,6 +201,9 @@ install_file_with_backup() {
   fi
   install -m "$mode" "$src" "$dest"
 }
+gommage_home_path() {
+  printf '%s\n' "${GOMMAGE_HOME:-${HOME}/.gommage}"
+}
 add_skill_agent() {
   agent="$1"
   case "$agent" in
@@ -441,6 +444,18 @@ verify_latest_command_contract() {
   "$cli" report --help >/dev/null 2>&1 || return 1
   "$cli" quickstart --help 2>/dev/null | grep -Fq -- "--self-test" || return 1
 }
+run_post_install_verify() {
+  if [ "$VERIFY_AFTER_INSTALL" != "1" ]; then
+    return
+  fi
+  verify_home="$(gommage_home_path)"
+  if [ ! -d "$verify_home" ]; then
+    say "skipping verify: no Gommage home at ${verify_home}; run 'gommage quickstart' or 'gommage init' next"
+  else
+    say "running ${BIN_DIR}/gommage verify"
+    "${BIN_DIR}/gommage" verify || die "gommage verify failed"
+  fi
+}
 
 if [ "${GOMMAGE_INSTALLER_LIBRARY:-0}" = "1" ]; then
   return 0 2>/dev/null || exit 0
@@ -622,10 +637,7 @@ fi
 install_requested_skills
 
 # --- Sanity check -----------------------------------------------------------
-if [ "$VERIFY_AFTER_INSTALL" = "1" ]; then
-  say "running ${BIN_DIR}/gommage verify"
-  "${BIN_DIR}/gommage" verify || die "gommage verify failed"
-fi
+run_post_install_verify
 
 if ! echo ":$PATH:" | grep -Fq ":${BIN_DIR}:"; then
   say "WARNING: ${BIN_DIR} is not in \$PATH"

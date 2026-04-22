@@ -17,8 +17,10 @@
 
 ### Added
 
-- `GOMMAGE_BYPASS=1` break-glass mode returns an allow decision without
-  opening `~/.gommage`, for host-managed recovery from broken hook wiring.
+- `GOMMAGE_BYPASS=1` break-glass mode can still recover malformed hook
+  payloads without opening `~/.gommage`, but valid payloads now run through
+  compiled hard-stop checks and write signed `bypass_activated` audit events
+  when a usable home/key exists.
 
 ## [0.2.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.2.1-alpha.1...gommage-mcp-v0.2.2-alpha.1) (2026-04-22)
 

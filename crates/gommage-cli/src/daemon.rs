@@ -4,7 +4,7 @@ use gommage_core::runtime::HomeLayout;
 use serde::Serialize;
 use std::{
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::{Command, ExitCode, Stdio},
 };
 
 use crate::util::{env_path_or_home, write_text};
@@ -177,7 +177,7 @@ pub(crate) fn daemon_uninstall(manager: ServiceManager, dry_run: bool) -> Result
 
 fn daemon_status(manager: ServiceManager) -> Result<ExitCode> {
     let commands = service_status_commands(manager);
-    let status = run_service_commands_allow_failure(commands)?;
+    let status = run_service_commands_allow_failure_verbose(commands)?;
     Ok(if status {
         ExitCode::SUCCESS
     } else {
@@ -394,7 +394,7 @@ fn service_status_commands(manager: ServiceManager) -> Vec<Vec<String>> {
 
 fn run_service_commands(commands: Vec<Vec<String>>) -> Result<()> {
     for command in commands {
-        let status = command_status(&command)?;
+        let status = command_status(&command, false)?;
         if !status {
             anyhow::bail!("service command failed: {}", command.join(" "));
         }
@@ -405,16 +405,29 @@ fn run_service_commands(commands: Vec<Vec<String>>) -> Result<()> {
 fn run_service_commands_allow_failure(commands: Vec<Vec<String>>) -> Result<bool> {
     let mut ok = true;
     for command in commands {
-        ok &= command_status(&command)?;
+        ok &= command_status(&command, false)?;
     }
     Ok(ok)
 }
 
-fn command_status(command: &[String]) -> Result<bool> {
-    let Some(program) = command.first() else {
+fn run_service_commands_allow_failure_verbose(commands: Vec<Vec<String>>) -> Result<bool> {
+    let mut ok = true;
+    for command in commands {
+        ok &= command_status(&command, true)?;
+    }
+    Ok(ok)
+}
+
+fn command_status(argv: &[String], inherit_output: bool) -> Result<bool> {
+    let Some(program) = argv.first() else {
         anyhow::bail!("empty service command");
     };
-    let status = Command::new(program).args(&command[1..]).status()?;
+    let mut command = Command::new(program);
+    command.args(&argv[1..]);
+    if !inherit_output {
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+    }
+    let status = command.status()?;
     Ok(status.success())
 }
 

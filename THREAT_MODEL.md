@@ -43,6 +43,11 @@ Every decision (`allow`, `gommage`, `ask`) and every authorization-state event (
 
 A compiled-in hard-stop list rejects a finite, documented set of capabilities regardless of policy, picto, or expedition: `rm -rf /*`, `dd if=* of=/dev/*`, fork bombs, `mkfs*`, `shred /dev/*`, `chmod -R * /`, and similar. The list lives in `crates/gommage-core/src/hardstop.rs` and grows only via reviewed PRs.
 
+`GOMMAGE_BYPASS=1` does not bypass this list. When the hook payload is valid,
+`gommage-mcp` maps it through bundled capability rules before honoring bypass;
+compiled hard-stop hits still return `deny`. If `~/.gommage/key.ed25519` is
+usable, the bypass path writes a signed `bypass_activated` audit event.
+
 ---
 
 ## 2. Explicit attacker cases (what we actively think about)
@@ -64,6 +69,21 @@ A user with shell access under the same UID as the daemon can:
 - Replace `gommage-daemon` with a malicious binary.
 
 Gommage **trusts** the local user. The directory is `chmod 0700` and the key is `chmod 0600`, but that is OS-enforced, not Gommage-enforced. If the threat model includes hostile local users, Gommage is the wrong layer.
+
+### 2.2.1 Agent-controlled hook environment
+
+Some hosts let users or agents configure environment variables for hook
+processes. If an agent can set `GOMMAGE_BYPASS=1`, it can intentionally skip
+normal policy evaluation. This is a recovery mechanism, not a security grant:
+
+- valid hook payloads still run through compiled hard-stop checks;
+- hard-stop matches return `deny` even under bypass;
+- usable Gommage homes receive signed `bypass_activated` audit events;
+- malformed payloads may still allow without opening home so a broken hook path
+  can be recovered.
+
+Do not expose hook environment mutation to untrusted repositories. Use OS
+sandboxing and host-agent config review for that boundary.
 
 ### 2.3 Malicious repository or working tree
 

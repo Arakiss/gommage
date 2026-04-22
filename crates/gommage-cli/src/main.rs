@@ -133,6 +133,9 @@ enum Cmd {
         /// Restore the newest validated .gommage-bak-* agent config backup when available.
         #[arg(long)]
         restore_backup: bool,
+        /// Remove Gommage-created .gommage-bak-* backup files for known install surfaces.
+        #[arg(long)]
+        purge_backups: bool,
         /// Show planned removals without mutating.
         #[arg(long)]
         dry_run: bool,
@@ -367,6 +370,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             purge_home,
             all,
             restore_backup,
+            purge_backups,
             dry_run,
             yes,
         } => {
@@ -381,6 +385,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     purge_home,
                     all,
                     restore_backup,
+                    purge_backups,
                     dry_run,
                     yes,
                 },
