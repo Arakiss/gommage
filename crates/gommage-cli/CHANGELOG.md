@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.19.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.18.0-alpha.1...gommage-cli-v0.19.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* polish approval operator workflow ([bcbe54e](https://github.com/Arakiss/gommage/commit/bcbe54e3e1753932c697222503d5680d334aac67))
+
 ## [0.18.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.17.0-alpha.1...gommage-cli-v0.18.0-alpha.1) (2026-04-22)
 
 
