@@ -21,6 +21,7 @@ mod mcp;
 mod policy_cmd;
 mod quickstart;
 mod quickstart_plan;
+mod report;
 mod smoke;
 mod uninstall;
 mod util;
@@ -37,6 +38,7 @@ use mascot::{MascotOptions, print_mascot};
 use mcp::run_mcp;
 use policy_cmd::{PolicyCmd, cmd_policy};
 use quickstart::{QuickstartOptions, cmd_quickstart};
+use report::{ReportCmd, cmd_report};
 use smoke::cmd_smoke;
 use uninstall::{UninstallOptions, cmd_uninstall};
 use verify::cmd_verify;
@@ -235,6 +237,10 @@ enum Cmd {
         #[arg(long = "policy-test", value_name = "FILE")]
         policy_tests: Vec<PathBuf>,
     },
+
+    /// Create diagnostic reports for support and issue triage.
+    #[command(subcommand)]
+    Report(ReportCmd),
 
     /// Run semantic policy smoke tests against the active home.
     Smoke {
@@ -487,6 +493,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Map { json, hook } => return cmd_map(layout, json, hook),
         Cmd::Doctor { json } => return cmd_doctor(layout, json),
         Cmd::Verify { json, policy_tests } => return cmd_verify(layout, json, policy_tests),
+        Cmd::Report(sub) => return cmd_report(sub, layout),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
         Cmd::Mascot { plain, compact } => {
             print_mascot(MascotOptions { plain, compact });

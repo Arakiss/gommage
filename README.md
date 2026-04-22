@@ -192,6 +192,7 @@ gommage quickstart --agent claude --daemon --self-test
 gommage quickstart --agent codex --daemon --self-test
 gommage verify --json
 gommage verify --json --policy-test examples/policy-fixtures.yaml
+gommage report bundle --redact --output gommage-report.json
 gommage agent status claude --json
 gommage agent status codex --json
 ```
@@ -256,6 +257,7 @@ Stable automation contracts:
 |---|---|
 | `quickstart --dry-run --json` | Inspect planned setup mutations, backups, hooks, imports, daemon service files, and self-test checks before touching a real home. |
 | `verify --json` | Default readiness gate for installers, CI, and agents. |
+| `report bundle --redact` | Support artifact for install or host-integration failures without exposing secrets. |
 | `doctor --json` | Lower-level runtime and install diagnostics. |
 | `agent status --json` | Claude/Codex hook wiring and native permission import state. |
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |

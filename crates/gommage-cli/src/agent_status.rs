@@ -13,7 +13,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum AgentStatus {
+pub(crate) enum AgentStatus {
     Ok,
     Warn,
     Fail,
@@ -30,13 +30,13 @@ impl AgentStatus {
 }
 
 #[derive(Debug, Default, Serialize)]
-struct AgentStatusSummary {
+pub(crate) struct AgentStatusSummary {
     failures: usize,
     warnings: usize,
 }
 
 #[derive(Debug, Serialize)]
-struct AgentStatusCheck {
+pub(crate) struct AgentStatusCheck {
     name: String,
     status: AgentStatus,
     message: String,
@@ -45,7 +45,7 @@ struct AgentStatusCheck {
 }
 
 #[derive(Debug, Serialize)]
-struct AgentStatusReport {
+pub(crate) struct AgentStatusReport {
     agent: AgentKind,
     status: AgentStatus,
     summary: AgentStatusSummary,
@@ -112,7 +112,10 @@ pub(crate) fn cmd_agent_status(
     Ok(report.exit_code())
 }
 
-fn build_agent_status_report(agent: AgentKind, layout: &HomeLayout) -> AgentStatusReport {
+pub(crate) fn build_agent_status_report(
+    agent: AgentKind,
+    layout: &HomeLayout,
+) -> AgentStatusReport {
     match agent {
         AgentKind::Claude => build_claude_status_report(layout),
         AgentKind::Codex => build_codex_status_report(),

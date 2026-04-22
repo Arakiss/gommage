@@ -56,6 +56,7 @@ gommage doctor
 gommage verify --json
 gommage doctor --json
 gommage smoke --json
+gommage report bundle --redact --output gommage-report.json
 # Optional, when the repository includes policy fixtures.
 gommage verify --json --policy-test path/to/policy-fixtures.yaml
 ```
@@ -102,7 +103,7 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
 - Agent skill install destinations:
   - Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
   - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
-- Agent automation should prefer `gommage quickstart --dry-run --json`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
+- Agent automation should prefer `gommage quickstart --dry-run --json`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage report bundle --redact --output <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
 - Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook, imports supported `permissions.deny` entries into `05-claude-import.yaml`, and imports supported `permissions.allow` entries into `90-claude-allow-import.yaml`. Late allow imports preserve the user's native Claude posture while earlier hard-stops, denies, ask rules, and native deny imports still win.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
