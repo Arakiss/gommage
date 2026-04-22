@@ -167,6 +167,19 @@ gommage policy test examples/policy-fixtures.yaml
 gommage policy test examples/policy-fixtures.yaml --json
 ```
 
+Generate a fixture from the current mapper and policy behavior when you want to
+capture what happened before editing the YAML:
+
+```sh
+echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
+  | gommage policy snapshot --name main_push_requires_picto
+```
+
+The generated YAML includes the observed decision, `hard_stop` or
+`required_scope` when relevant, and the matched policy rule if one matched.
+Review the output before committing it; the snapshot captures current behavior,
+not necessarily desired behavior.
+
 `policy test --json` reports the emitted capabilities, matched rule, actual
 decision, expected decision, and mismatch errors for every case. Use
 `gommage smoke --json` to verify the shipped stdlib, then use `policy test` to

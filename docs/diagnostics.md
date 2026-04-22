@@ -151,6 +151,18 @@ gommage policy test examples/policy-fixtures.yaml
 gommage policy test examples/policy-fixtures.yaml --json
 ```
 
+To create the first fixture from a real observed tool call, pipe the same
+`ToolCall` JSON shape used by `gommage decide` into `policy snapshot`:
+
+```sh
+echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
+  | gommage policy snapshot --name main_push_requires_picto \
+  > examples/policy-fixtures.yaml
+```
+
+Use `--case-only` when appending the generated case list to an existing fixture
+file.
+
 The fixture file may be either a mapping with `version: 1` and `cases`, or a
 top-level YAML list of cases. Each case supports:
 

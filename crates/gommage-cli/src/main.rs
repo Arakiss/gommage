@@ -214,6 +214,19 @@ enum PolicyCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Capture a tool call from stdin as a YAML policy fixture.
+    #[command(alias = "capture")]
+    Snapshot {
+        /// Stable fixture case name to write into the YAML output.
+        #[arg(long)]
+        name: String,
+        /// Optional human-readable fixture description.
+        #[arg(long)]
+        description: Option<String>,
+        /// Emit only the YAML case list, useful when appending to an existing file.
+        #[arg(long)]
+        case_only: bool,
+    },
     /// Print the policy version hash.
     Hash,
 }
@@ -1147,6 +1160,73 @@ struct PolicyTestCaseResult {
     input_hash: String,
     capabilities: Vec<Capability>,
     matched_rule: Option<MatchedRule>,
+}
+
+#[derive(Debug, Serialize)]
+struct PolicySnapshotDocument {
+    version: u32,
+    cases: Vec<PolicySnapshotCase>,
+}
+
+#[derive(Debug, Serialize)]
+struct PolicySnapshotCase {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    tool: String,
+    input: serde_json::Value,
+    expect: PolicySnapshotExpectation,
+}
+
+#[derive(Debug, Serialize)]
+struct PolicySnapshotExpectation {
+    decision: PolicyTestDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hard_stop: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matched_rule: Option<String>,
+}
+
+impl PolicySnapshotExpectation {
+    fn from_eval(eval: &gommage_core::EvalResult) -> Self {
+        let (hard_stop, required_scope) = match &eval.decision {
+            Decision::Allow => (None, None),
+            Decision::Gommage { hard_stop, .. } => (Some(*hard_stop), None),
+            Decision::AskPicto { required_scope, .. } => (None, Some(required_scope.clone())),
+        };
+
+        Self {
+            decision: PolicyTestDecision::from_decision(&eval.decision),
+            hard_stop,
+            required_scope,
+            matched_rule: eval.matched_rule.as_ref().map(|rule| rule.name.clone()),
+        }
+    }
+}
+
+fn build_policy_snapshot_case(
+    layout: &HomeLayout,
+    env: &std::collections::HashMap<String, String>,
+    name: String,
+    description: Option<String>,
+    call: ToolCall,
+) -> Result<PolicySnapshotCase> {
+    let mapper = gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir)
+        .context("loading capability mappers for policy snapshot")?;
+    let policy = Policy::load_from_dir(&layout.policy_dir, env)
+        .context("loading policy for policy snapshot")?;
+    let capabilities = mapper.map(&call);
+    let eval = evaluate(&capabilities, &policy);
+
+    Ok(PolicySnapshotCase {
+        name,
+        description,
+        tool: call.tool,
+        input: call.input,
+        expect: PolicySnapshotExpectation::from_eval(&eval),
+    })
 }
 
 fn build_policy_test_report(
@@ -2411,6 +2491,25 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
                 print_policy_test_report(&report);
             }
             return Ok(report.exit_code());
+        }
+        PolicyCmd::Snapshot {
+            name,
+            description,
+            case_only,
+        } => {
+            let mut buf = String::new();
+            io::stdin().read_to_string(&mut buf)?;
+            let call: ToolCall = serde_json::from_str(&buf).context("parsing stdin as ToolCall")?;
+            let case = build_policy_snapshot_case(&layout, &env, name, description, call)?;
+            if case_only {
+                println!("{}", serde_yaml::to_string(&[case])?.trim_end());
+            } else {
+                let document = PolicySnapshotDocument {
+                    version: 1,
+                    cases: vec![case],
+                };
+                println!("{}", serde_yaml::to_string(&document)?.trim_end());
+            }
         }
         PolicyCmd::Hash => {
             let pol = Policy::load_from_dir(&layout.policy_dir, &env)?;
