@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.1.0-alpha.1...gommage-stdlib-v0.2.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **stdlib:** package bundled policy assets ([6e91243](https://github.com/Arakiss/gommage/commit/6e912433db6c130725ab5469195469f51b36ad3d))
+
 ## [Unreleased]
 
 ### Added
