@@ -77,6 +77,9 @@ enum Cmd {
         /// Write the daemon service file without starting it. Implies --daemon.
         #[arg(long)]
         daemon_no_start: bool,
+        /// Run the readiness gate after setup completes.
+        #[arg(long)]
+        self_test: bool,
         /// Show planned file edits without writing them.
         #[arg(long)]
         dry_run: bool,
@@ -264,6 +267,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             daemon_manager,
             daemon_force,
             daemon_no_start,
+            self_test,
             dry_run,
         } => {
             return cmd_quickstart(
@@ -276,6 +280,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     daemon_manager,
                     daemon_force,
                     daemon_no_start,
+                    self_test,
                     dry_run,
                 },
             );
@@ -422,6 +427,7 @@ struct QuickstartOptions {
     daemon_manager: Option<ServiceManager>,
     daemon_force: bool,
     daemon_no_start: bool,
+    self_test: bool,
     dry_run: bool,
 }
 
@@ -512,6 +518,7 @@ fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> Result<Exit
         daemon_manager,
         daemon_force,
         daemon_no_start,
+        self_test,
         dry_run,
     } = options;
 
@@ -582,6 +589,19 @@ fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> Result<Exit
             policy.rules.len(),
             policy.version_hash
         );
+    }
+
+    if self_test {
+        if dry_run {
+            println!("plan self-test: run `gommage verify` after quickstart");
+        } else {
+            println!("self-test: running `gommage verify`");
+            let code = cmd_verify(HomeLayout::at(&layout.root), false, Vec::new())?;
+            if code != ExitCode::SUCCESS {
+                return Ok(code);
+            }
+            println!("ok self-test complete");
+        }
     }
 
     println!("ok quickstart complete");

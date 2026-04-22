@@ -43,8 +43,8 @@ curl --proto '=https' --tlsv1.2 -sSf \
 5. Set up the target agent:
 
 ```sh
-gommage quickstart --agent claude --daemon
-gommage quickstart --agent codex --daemon
+gommage quickstart --agent claude --daemon --self-test
+gommage quickstart --agent codex --daemon --self-test
 ```
 
 6. Verify:
@@ -100,6 +100,9 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
 - Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook, imports supported `permissions.deny` entries into `05-claude-import.yaml`, and imports narrow supported `permissions.allow` entries into `90-claude-allow-import.yaml`. Broad allow entries such as `Bash` or `*` are hook matcher input only and must be reviewed manually before becoming Gommage allow policy.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
+- Quickstart self-test: `--self-test` runs `gommage verify` after setup.
+  Combined with `--dry-run`, it prints the planned verification step without
+  writing `GOMMAGE_HOME` or host-agent config.
 
 ## Policy Operations
 
