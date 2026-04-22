@@ -72,6 +72,17 @@ The workspace dependencies already carry registry version requirements beside
 their local paths so `cargo package` has the metadata it needs after Cargo
 strips path dependencies for crates.io consumers.
 
+CI and the release workflow enforce that invariant with:
+
+```sh
+sh scripts/check-workspace-internal-deps.sh
+```
+
+Any internal `gommage-*` dependency that points at another workspace crate must
+carry an exact `version = "=<crate version>"` requirement next to its local
+`path`. This keeps release-please version bumps from creating tags whose binary
+builds cannot resolve the workspace.
+
 ## Gates before flipping `publish = false`
 
 First-publish gates are sequential. Before `gommage-stdlib` exists on

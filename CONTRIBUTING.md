@@ -47,6 +47,7 @@ Automated via `release-please`. Do not tag manually. The bot opens a release PR 
 
 ```sh
 cargo fmt --all
+sh scripts/check-workspace-internal-deps.sh
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check                       # requires `cargo install cargo-deny`

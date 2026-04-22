@@ -41,6 +41,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   rediscovering the project-specific flow.
 - `gommage-stdlib` crate with packaged policy and capability mapper YAML for
   future crates.io publishing and package-local CLI embedding.
+- Release invariant guard `scripts/check-workspace-internal-deps.sh`, wired
+  into CI and release-please, so internal workspace dependency version
+  constraints must match the crate versions they point at before alpha tags are
+  cut.
 
 ### Changed
 
