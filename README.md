@@ -341,6 +341,25 @@ gommage expedition end
 gommage uninstall --all --dry-run
 ```
 
+## Backups And Rollback
+
+Gommage backs up files before replacing user-owned state. Agent configs, Codex
+hook/config files, generated policy imports, and daemon service files are copied
+next to the original as `<name>.gommage-bak-<timestamp>`. The installer also
+backs up existing `gommage`, `gommage-daemon`, `gommage-mcp`, and skill files
+before replacing them when the content differs. Unchanged files are left as-is.
+
+Use these recovery paths before manual cleanup:
+
+```sh
+gommage agent uninstall claude --restore-backup
+gommage agent uninstall codex --restore-backup
+gommage uninstall --all --dry-run
+```
+
+`gommage uninstall --purge-home` requires `--yes` because `~/.gommage` contains
+the daemon key, audit log, policy set, and local capability mappers.
+
 ## Diagnostics
 
 Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. On a fresh machine it includes a top-level hint to run `gommage init` or `gommage quickstart`, and skips smoke when doctor already failed so the first error is the root cause. Use `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is a real PreToolUse payload, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:

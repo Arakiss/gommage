@@ -174,6 +174,33 @@ prompt_yes_no() {
     *) return 1 ;;
   esac
 }
+unique_backup_path() {
+  path="$1"
+  stamp="$(date +%s)$$"
+  candidate="${path}.gommage-bak-${stamp}"
+  index=0
+  while [ -e "$candidate" ]; do
+    index=$((index + 1))
+    candidate="${path}.gommage-bak-${stamp}${index}"
+  done
+  printf '%s\n' "$candidate"
+}
+backup_existing_file() {
+  path="$1"
+  [ -f "$path" ] || return 0
+  backup="$(unique_backup_path "$path")"
+  cp -p "$path" "$backup"
+  say "backup: ${path} -> ${backup}"
+}
+install_file_with_backup() {
+  src="$1"
+  dest="$2"
+  mode="$3"
+  if [ -f "$dest" ] && ! cmp -s "$src" "$dest"; then
+    backup_existing_file "$dest"
+  fi
+  install -m "$mode" "$src" "$dest"
+}
 add_skill_agent() {
   agent="$1"
   case "$agent" in
@@ -275,10 +302,17 @@ install_skill_file() {
   dest="$2"
   local_dir="$3"
   if [ -n "$local_dir" ] && [ -f "${local_dir}/${rel}" ]; then
-    install -m 0644 "${local_dir}/${rel}" "$dest"
+    install_file_with_backup "${local_dir}/${rel}" "$dest" 0644
   else
     ref="$(skill_ref)"
-    fetch "https://raw.githubusercontent.com/${REPO}/${ref}/skills/gommage/${rel}" "$dest"
+    skill_tmp="$(mktemp)"
+    if fetch "https://raw.githubusercontent.com/${REPO}/${ref}/skills/gommage/${rel}" "$skill_tmp"; then
+      install_file_with_backup "$skill_tmp" "$dest" 0644
+      rm -f "$skill_tmp"
+    else
+      rm -f "$skill_tmp"
+      return 1
+    fi
   fi
 }
 install_skill_for_agent() {
@@ -423,6 +457,9 @@ need curl
 need mkdir
 need install
 need tr
+need cmp
+need cp
+need date
 
 if [ -n "$GITHUB_TOKEN_VALUE" ]; then
   say "using GitHub token from ${GITHUB_TOKEN_SOURCE}"
@@ -517,7 +554,7 @@ say "extracting to ${BIN_DIR}"
 tar -C "$tmp" -xzf "${tmp}/${tarball}"
 for bin in gommage gommage-daemon gommage-mcp; do
   [ -f "${tmp}/${bin}" ] || die "binary ${bin} missing from ${tarball}"
-  install -m 0755 "${tmp}/${bin}" "${BIN_DIR}/${bin}"
+  install_file_with_backup "${tmp}/${bin}" "${BIN_DIR}/${bin}" 0755
 done
 
 install_requested_skills

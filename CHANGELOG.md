@@ -35,6 +35,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   from a broken hook path without opening `~/.gommage`.
 - Agent command contract check (`scripts/check-agent-command-contracts.sh`) so
   README and skill command surfaces cannot drift from the binary unnoticed.
+- Collision-safe `.gommage-bak-<timestamp>` backups for repeated CLI writes,
+  plus installer backups for replaced binaries and installed skill files.
 - Signed audit lifecycle events for picto create/confirm/consume/revoke/reject and policy reloads. `audit-verify` and `audit-verify --explain` now verify mixed decision/event JSONL logs.
 - `gommage policy init --stdlib` installs the bundled stdlib policies and capability mappers without requiring manual file copies.
 - `gommage quickstart` and `gommage agent install` bootstrap Claude Code/Codex integrations with config backups, stdlib install, Claude native deny-rule import, and hook installation.

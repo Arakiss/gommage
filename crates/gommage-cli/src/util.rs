@@ -58,12 +58,18 @@ pub fn write_text(path: &Path, contents: &str, dry_run: bool) -> Result<()> {
 }
 
 fn backup_path(path: &Path) -> PathBuf {
-    let ts = OffsetDateTime::now_utc().unix_timestamp();
+    let mut ts = OffsetDateTime::now_utc().unix_timestamp_nanos();
     let file_name = path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("config");
-    path.with_file_name(format!("{file_name}.gommage-bak-{ts}"))
+    loop {
+        let candidate = path.with_file_name(format!("{file_name}.gommage-bak-{ts}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        ts += 1;
+    }
 }
 
 pub fn env_path_or_home(env_var: &str, components: &[&str]) -> PathBuf {
@@ -83,4 +89,30 @@ pub fn path_details(path: &Path) -> serde_json::Value {
 
 pub fn path_display(path: &Path) -> String {
     path.display().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_text_creates_unique_backups_for_repeated_writes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.json");
+
+        write_text(&path, "one\n", false).unwrap();
+        write_text(&path, "two\n", false).unwrap();
+        write_text(&path, "three\n", false).unwrap();
+
+        let mut backups = std::fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with("settings.json.gommage-bak-"))
+            .collect::<Vec<_>>();
+        backups.sort();
+
+        assert_eq!(backups.len(), 2);
+        assert_ne!(backups[0], backups[1]);
+    }
 }
