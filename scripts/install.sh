@@ -474,6 +474,6 @@ fi
 
 say "installed ${VERSION} to ${BIN_DIR}"
 say "skills: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh -s -- --skill-only --skill-agent codex --skill-agent claude"
-say "claude: ${BIN_DIR}/gommage quickstart --agent claude --daemon"
-say "codex:  ${BIN_DIR}/gommage quickstart --agent codex --daemon"
-say "health: ${BIN_DIR}/gommage doctor"
+say "claude: ${BIN_DIR}/gommage quickstart --agent claude --daemon --self-test"
+say "codex:  ${BIN_DIR}/gommage quickstart --agent codex --daemon --self-test"
+say "health: ${BIN_DIR}/gommage verify"
