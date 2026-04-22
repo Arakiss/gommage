@@ -25,6 +25,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage report bundle --redact --output <file>` writes a diagnostic support
   bundle with CLI/host metadata, redacted environment hints, doctor/verify
   reports, agent status, daemon service hints, and policy/capability inventory.
+- `docs/agent-command-manifest.json` is now the canonical agent command
+  contract, and CI executes it directly through
+  `scripts/check-agent-command-contracts.sh`.
 - `scripts/check-crates-publish-readiness.sh` and refreshed publishing docs
   with current crates.io evidence, package-gate status, and the explicit
   no-billing/no-publish alpha decision.

@@ -171,6 +171,8 @@ curl --proto '=https' --tlsv1.2 -sSf \
 Agents should use JSON surfaces and ignore decorative output. Do not parse
 `gommage mascot`, `gommage logo`, or human forensic output. The beta-readiness
 checklist lives in [`docs/beta-readiness.md`](docs/beta-readiness.md).
+The canonical machine-readable command contract lives in
+[`docs/agent-command-manifest.json`](docs/agent-command-manifest.json).
 
 Install or update only the skill before operating the project:
 
@@ -266,7 +268,7 @@ Stable automation contracts:
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `agent uninstall` / `uninstall --dry-run` | Reversible cleanup and recovery. |
 
-The command contract above is checked by CI:
+The manifest and command contract above are checked by CI:
 
 ```sh
 sh scripts/check-agent-command-contracts.sh
