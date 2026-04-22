@@ -89,6 +89,8 @@
 - `gommage policy test <file>` / `--json` for user-owned YAML policy regression fixtures with per-case capabilities, matched rule, actual decision, expected decision, and mismatch errors.
 - `gommage policy snapshot` / `capture` for turning a tool-call JSON object
   from stdin into a YAML policy regression fixture.
+- `gommage policy schema` for exporting the official JSON Schema used by
+  agents, editors, and CI generators when creating policy fixture files.
 - `gommage audit-verify --explain --format human` for manual signed-audit
   forensic review. Plain `audit-verify --explain` remains JSON for automation.
 - `gommage mascot` / `gommage logo` for the Gommage Gestral terminal logo, with an interactive Gommage Teal to Picto Gold gradient and `--plain` / `NO_COLOR` script-safe output.

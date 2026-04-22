@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Arakiss/gommage/schemas/policy-fixture.schema.json",
+  "title": "Gommage policy fixture",
+  "description": "Schema for gommage policy test YAML or JSON fixture files.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/policyFixtureDocument"
+    },
+    {
+      "$ref": "#/$defs/policyFixtureCaseList"
+    }
+  ],
+  "$defs": {
+    "policyFixtureDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cases"
+      ],
+      "properties": {
+        "version": {
+          "const": 1,
+          "description": "Policy fixture format version. Omit for legacy fixtures or set to 1."
+        },
+        "cases": {
+          "$ref": "#/$defs/policyFixtureCaseList"
+        }
+      }
+    },
+    "policyFixtureCaseList": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/policyFixtureCase"
+      }
+    },
+    "policyFixtureCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "tool",
+        "expect"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable case identifier for humans, agents, and CI logs."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional human context for why this expected behavior matters."
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Agent tool name, for example Bash, WebFetch, or mcp__github__create_issue."
+        },
+        "input": {
+          "type": "object",
+          "description": "Tool input object. Missing input defaults to an empty object."
+        },
+        "expect": {
+          "$ref": "#/$defs/policyFixtureExpectation"
+        }
+      }
+    },
+    "policyFixtureExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "gommage",
+            "ask_picto"
+          ],
+          "description": "Expected permission decision kind."
+        },
+        "hard_stop": {
+          "type": "boolean",
+          "description": "Expected hard-stop flag when decision is gommage."
+        },
+        "required_scope": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Expected picto scope when decision is ask_picto."
+        },
+        "matched_rule": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Expected matched policy rule name."
+        }
+      }
+    }
+  }
+}

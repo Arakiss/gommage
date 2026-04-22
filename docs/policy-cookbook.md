@@ -167,6 +167,13 @@ gommage policy test examples/policy-fixtures.yaml
 gommage policy test examples/policy-fixtures.yaml --json
 ```
 
+Export the fixture JSON Schema when an editor, CI generator, or agent needs to
+validate the file contract before running semantic checks:
+
+```sh
+gommage policy schema > gommage-policy-fixture.schema.json
+```
+
 Generate a fixture from the current mapper and policy behavior when you want to
 capture what happened before editing the YAML:
 
@@ -183,7 +190,9 @@ not necessarily desired behavior.
 `policy test --json` reports the emitted capabilities, matched rule, actual
 decision, expected decision, and mismatch errors for every case. Use
 `gommage smoke --json` to verify the shipped stdlib, then use `policy test` to
-verify the policy behavior your repository depends on.
+verify the policy behavior your repository depends on. `policy schema` emits
+the official JSON Schema for both supported fixture shapes: a wrapped document
+with `version: 1` plus `cases`, or a top-level list of cases.
 
 ## Debugging
 
