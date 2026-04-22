@@ -41,19 +41,33 @@ to `main`. This keeps old binary tags installable while the alpha skill evolves.
 
 ## crates.io status
 
-As of April 21, 2026, the `gommage-*` crates are not published on crates.io.
-The package names checked during the readiness pass were:
+As of April 22, 2026, the `gommage-*` crates are not published on crates.io.
+crates.io publishing itself does not require paid billing, but it does require
+a crates.io account, an API token, and an explicit maintainer decision to claim
+the package names. The manifests intentionally keep `publish = false` until the
+publish pipeline is ready. This prevents accidental partial publication while
+the API, CLI, and policy stdlib are still changing quickly.
 
-- `gommage-core`
-- `gommage-audit`
-- `gommage-stdlib`
-- `gommage-cli`
-- `gommage-daemon`
-- `gommage-mcp`
+Current evidence:
 
-The manifests intentionally keep `publish = false` until the publish pipeline
-is ready. This prevents accidental partial publication while the API, CLI, and
-policy stdlib are still changing quickly.
+| Package | crates.io API | Local package gate |
+|---|---:|---|
+| `gommage-stdlib` | `404` | Passes `cargo package -p gommage-stdlib --allow-dirty`. |
+| `gommage-core` | `404` | Blocked as expected until `gommage-stdlib` exists on crates.io. |
+| `gommage-audit` | `404` | Blocked as expected until `gommage-core` exists on crates.io. |
+| `gommage-cli` | `404` | Blocked as expected until `gommage-audit` exists on crates.io. |
+| `gommage-daemon` | `404` | Blocked as expected until `gommage-audit` exists on crates.io. |
+| `gommage-mcp` | `404` | Blocked as expected until `gommage-audit` exists on crates.io. |
+
+Refresh the evidence with:
+
+```sh
+sh scripts/check-crates-publish-readiness.sh
+```
+
+The script treats `404` and `200` registry responses as valid status evidence.
+It fails only on unexpected registry errors, an unexpected `cargo package`
+failure, or a broken `gommage-stdlib` package gate.
 
 ## Intended publish order
 
@@ -76,6 +90,12 @@ CI and the release workflow enforce that invariant with:
 
 ```sh
 sh scripts/check-workspace-internal-deps.sh
+```
+
+Publishing readiness is a manual/network gate:
+
+```sh
+sh scripts/check-crates-publish-readiness.sh
 ```
 
 Any internal `gommage-*` dependency that points at another workspace crate must

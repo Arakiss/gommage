@@ -15,6 +15,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 - `docs/beta-readiness.md` and a beta-readiness issue template for tracking
   launch blockers with command, workflow, release, and documentation evidence.
+- `scripts/check-crates-publish-readiness.sh` and refreshed publishing docs
+  with current crates.io evidence, package-gate status, and the explicit
+  no-billing/no-publish alpha decision.
 - Signed audit lifecycle events for picto create/confirm/consume/revoke/reject and policy reloads. `audit-verify` and `audit-verify --explain` now verify mixed decision/event JSONL logs.
 - `gommage policy init --stdlib` installs the bundled stdlib policies and capability mappers without requiring manual file copies.
 - `gommage quickstart` and `gommage agent install` bootstrap Claude Code/Codex integrations with config backups, stdlib install, Claude native deny-rule import, and hook installation.
