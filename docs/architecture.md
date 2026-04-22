@@ -14,6 +14,7 @@
                                                                          │ ~/.gommage/      │
                                                                          │  policy.d/*.yaml │
                                                                          │  capabilities.d/ │
+                                                                         │  approvals.jsonl │
                                                                          │  pictos.sqlite   │
                                                                          │  audit.log       │
                                                                          │  key.ed25519     │
@@ -28,7 +29,9 @@
                                   (same ~/.gommage/ root)
 ```
 
-Three binaries, one root. The CLI and daemon share state by convention: both read the same YAML files, both open the same SQLite picto store.
+Three binaries, one root. The CLI and daemon share state by convention: both
+read the same YAML files, both open the same SQLite picto store, and both
+append or replay the same approval inbox.
 
 ## Request lifecycle
 
@@ -66,9 +69,8 @@ Three binaries, one root. The CLI and daemon share state by convention: both rea
                ▼
 ┌──────────────────────────────┐
 │ 7. If AskPicto:              │
-│    picto_store.find_match    │
-│    picto_store.consume       │
-│    else: escalate OOB        │
+│    picto_store.find/consume  │
+│    else: record approval OOB │
 └──────────────┬───────────────┘
                ▼
 ┌──────────────────────────────┐
@@ -81,7 +83,10 @@ Three binaries, one root. The CLI and daemon share state by convention: both rea
 └──────────────────────────────┘
 ```
 
-Each step is pure except 4 (reads mapper rules), 7 (reads/writes picto store), 8 (writes audit log). The evaluator itself (step 5 + 6) is side-effect free and deterministic — the property the determinism suite proves.
+Each step is pure except 4 (reads mapper rules), 7 (reads/writes picto and
+approval stores), and 8 (writes audit log). The evaluator itself (step 5 + 6)
+is side-effect free and deterministic — the property the determinism suite
+proves.
 
 ## Invariants
 

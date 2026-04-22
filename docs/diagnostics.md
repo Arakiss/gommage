@@ -10,6 +10,11 @@ when filing an issue, or when an agent needs to capture a human-readable report
 without ANSI control sequences. Automation should still parse the JSON commands
 below instead of the TUI.
 
+`gommage tui --view dashboard|policies|audit|capabilities|recovery|all` selects
+operator views. `--view all` is the most useful issue-report snapshot: it
+includes readiness, policy inventory, signed audit summary, mapper inventory,
+and recovery shortcuts. Interactive mode switches views with `1`-`5`.
+
 `gommage doctor` is the lower-level operator installation health check. Use the default text output for humans and `gommage doctor --json` when you need only filesystem/runtime diagnostics.
 
 `gommage agent status <claude|codex>` is the host-agent integration check. Use
@@ -47,7 +52,7 @@ Run the aggregated gate with:
 
 ```sh
 gommage tui
-gommage tui --snapshot
+gommage tui --snapshot --view all
 gommage verify --json
 gommage verify --json --policy-test examples/policy-fixtures.yaml
 ```
@@ -97,6 +102,30 @@ imports, and generated narrow allow imports. Codex checks cover `hooks.json`,
 configured sandbox mode. A missing hook or disabled hook feature is `fail`; a
 dangerous Codex sandbox is `warn` because Gommage currently governs only the
 Bash hook surface under Codex.
+
+## Approval diagnostics
+
+When a policy returns `ask_picto` and no usable signed picto exists, Gommage
+records a pending approval request under `~/.gommage/approvals.jsonl`, writes a
+signed `approval_requested` audit event, and returns an `ask` reason containing
+the exact approval command.
+
+Use these commands for operator triage:
+
+```sh
+gommage approval list
+gommage approval list --json
+gommage approval show <approval-id>
+gommage approval approve <approval-id> --ttl 10m --uses 1
+gommage approval deny <approval-id> --reason "not enough context"
+gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run
+```
+
+Approving a request mints an exact-scope picto and writes signed
+`picto_created` plus `approval_resolved` events. Denying a request writes a
+signed `approval_resolved` event with `status: denied`. Webhook delivery is
+best-effort: failures are signed as `approval_webhook_failed`, but never change
+the permission decision.
 
 ## JSON shape
 

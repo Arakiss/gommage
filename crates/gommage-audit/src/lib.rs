@@ -95,6 +95,30 @@ pub enum AuditEvent {
         scope: String,
         reason: String,
     },
+    ApprovalRequested {
+        id: String,
+        tool: String,
+        input_hash: String,
+        required_scope: String,
+        reason: String,
+        policy_version: String,
+    },
+    ApprovalResolved {
+        id: String,
+        status: String,
+        reason: String,
+        picto_id: Option<String>,
+    },
+    ApprovalWebhookDelivered {
+        id: String,
+        url: String,
+        status: Option<i32>,
+    },
+    ApprovalWebhookFailed {
+        id: String,
+        url: String,
+        error: String,
+    },
     PictosExpired {
         count: usize,
     },

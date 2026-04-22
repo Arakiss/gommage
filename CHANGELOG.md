@@ -32,6 +32,23 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage tui` now adds a readiness summary, focused diagnostic detail, and
   keyboard focus movement (`j`/`k`) in interactive mode while keeping snapshot
   output plain and issue-friendly.
+- `gommage tui --view dashboard|policies|audit|capabilities|recovery|all`
+  adds dependency-free operator views for policy inventory, signed audit
+  forensics, mapper/capability inspection, and recovery shortcuts. Interactive
+  TUI mode can switch views with `1`-`5`.
+- `ask_picto` decisions now create durable local approval requests in
+  `approvals.jsonl` when no usable signed picto exists. Hook reasons include
+  the exact `gommage approval approve <id>` next action. Repeated identical
+  asks de-duplicate while pending, and create a new suffixed request after a
+  prior request has been approved or denied.
+- `gommage approval list|show|approve|deny|webhook` manages out-of-band
+  approval requests. Approving a request mints an exact-scope signed picto;
+  denying it removes the request from pending work; both paths emit signed
+  audit events.
+- `gommage approval webhook` can dry-run or POST pending approval payloads via
+  a fixed `curl` invocation, and `GOMMAGE_APPROVAL_WEBHOOK_URL` enables
+  best-effort hook-time webhook delivery without changing the permission
+  decision when delivery fails.
 - `gommage audit-verify --explain` reports signed bypass activity with
   `bypass_activations` and `hard_stop_bypass_attempts`.
 - `gommage uninstall --purge-backups` removes Gommage-created
@@ -186,9 +203,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Known issues
 
-- `gommage tui` is currently a read-only dashboard. Live out-of-band approvals
-  still need a dedicated TUI flow.
-- No webhook out-of-band channel yet.
+- `gommage tui` is still keyboard-driven and dependency-free; it exposes
+  approval state through audit/recovery views, but does not yet provide an
+  inline approval form.
+- Webhook delivery is generic `curl`-based JSON. Native Slack, Discord, ntfy,
+  or signed callback providers remain roadmap items.
 
 ## [0.1.0-alpha.1] — 2026-04-21
 

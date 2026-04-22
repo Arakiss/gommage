@@ -109,14 +109,15 @@ Goal: approval and audit become a live workflow instead of scattered commands.
 Features:
 
 - `gommage watch`
-  - Terminal dashboard for daemon status, live decisions, pending asks, active
+  - Follow-up to the current `gommage tui --view all` snapshot/interactive
+    command center: live daemon status, decision stream, pending asks, active
     pictos, policy hash, audit tail, and recovery shortcuts.
 - Local picto approval flow
-  - Create, confirm, revoke, and consume pictos from the TUI without sending the
-    agent back into the approval path.
+  - The CLI approval path now exists. Next step is an inline TUI form for
+    approve/deny so operators do not need to copy request IDs.
 - Approval provider interface
-  - Start with a generic webhook provider, then add ntfy, Slack, or Discord as
-    optional providers.
+  - The generic webhook payload now exists through `gommage approval webhook`.
+    Next step is signed callbacks and native ntfy, Slack, or Discord providers.
 - Metrics endpoint
   - Local counters for decisions, denials, asks, picto outcomes, audit anomalies,
     and daemon health.
@@ -132,9 +133,10 @@ Primary code surfaces:
 
 Exit criteria:
 
-- A user can approve a one-shot picto from `gommage watch` and verify the audit
-  entry afterward.
-- Webhook approval is out-of-band and replay-resistant.
+- A user can approve a one-shot picto from the TUI and verify the audit entry
+  afterward.
+- Webhook approval supports signed callbacks or an equivalent replay-resistant
+  confirmation channel.
 - Human TUI output is never part of an automation contract.
 
 ## Milestone 3: Host Coverage Beyond Hooks
@@ -233,7 +235,8 @@ Required product qualities:
 - Policy authoring has a flywheel: capture or replay observed calls, explain
   the decision trace, generate candidate fixtures, and review before writing.
 - Approval flows are out-of-band and auditable. A picto can be created,
-  confirmed, consumed, revoked, and explained without relying on chat memory.
+  confirmed, consumed, revoked, approved from a pending request, denied, and
+  explained without relying on chat memory.
 - Recovery behavior is boring: every command that mutates host config has a
   dry-run, backup, restore, and purge story.
 

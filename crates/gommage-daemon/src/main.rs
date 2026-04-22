@@ -13,11 +13,17 @@ use clap::Parser;
 use ed25519_dalek::VerifyingKey;
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
+    ApprovalRequest, Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
     runtime::{HomeLayout, Runtime},
 };
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    env,
+    io::Write,
+    path::PathBuf,
+    process::{Command, Stdio},
+    sync::Arc,
+};
 use time::OffsetDateTime;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -224,14 +230,35 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
     let caps = s.rt.mapper.map(call);
     let mut eval = evaluate(&caps, &s.rt.policy);
 
-    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone() {
+    if let Decision::AskPicto {
+        required_scope,
+        reason,
+    } = eval.decision.clone()
+    {
         let now = OffsetDateTime::now_utc();
         match s
             .rt
             .pictos
             .find_verified_match(&required_scope, now, &s.verifying_key)?
         {
-            PictoLookup::None => {}
+            PictoLookup::None => {
+                let request =
+                    s.rt.approvals
+                        .request_for_ask(call, &eval, &required_scope, &reason)?;
+                s.writer.append_event(AuditEvent::ApprovalRequested {
+                    id: request.id.clone(),
+                    tool: request.tool.clone(),
+                    input_hash: request.input_hash.clone(),
+                    required_scope: request.required_scope.clone(),
+                    reason: request.reason.clone(),
+                    policy_version: request.policy_version.clone(),
+                })?;
+                notify_approval_webhook_best_effort(&mut s.writer, &request);
+                eval.decision = Decision::AskPicto {
+                    required_scope,
+                    reason: approval_reason(&reason, &request.id),
+                };
+            }
             PictoLookup::BadSignature { id, scope } => {
                 s.writer.append_event(AuditEvent::PictoRejected {
                     id,
@@ -273,6 +300,97 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
     // touch home_root to silence dead-code lint and document the field's purpose.
     let _ = &s.home_root;
     Ok(eval)
+}
+
+fn approval_reason(reason: &str, request_id: &str) -> String {
+    format!(
+        "{reason}; approval request {request_id} pending; run `gommage approval approve {request_id}`"
+    )
+}
+
+fn notify_approval_webhook_best_effort(writer: &mut AuditWriter, request: &ApprovalRequest) {
+    let Ok(url) = env::var("GOMMAGE_APPROVAL_WEBHOOK_URL") else {
+        return;
+    };
+    if url.trim().is_empty() {
+        return;
+    }
+    match post_approval_json(&url, request) {
+        Ok(status) => {
+            if let Err(error) = writer.append_event(AuditEvent::ApprovalWebhookDelivered {
+                id: request.id.clone(),
+                url,
+                status: Some(status),
+            }) {
+                tracing::warn!(?error, "failed to audit approval webhook delivery");
+            }
+        }
+        Err(error) => {
+            if let Err(audit_error) = writer.append_event(AuditEvent::ApprovalWebhookFailed {
+                id: request.id.clone(),
+                url,
+                error: error.to_string(),
+            }) {
+                tracing::warn!(?audit_error, "failed to audit approval webhook failure");
+            }
+        }
+    }
+}
+
+fn post_approval_json(url: &str, request: &ApprovalRequest) -> Result<i32> {
+    let payload = serde_json::json!({
+        "kind": "gommage_approval_request",
+        "id": request.id,
+        "created_at": request.created_at,
+        "tool": request.tool,
+        "input_hash": request.input_hash,
+        "required_scope": request.required_scope,
+        "reason": request.reason,
+        "capabilities": request.capabilities,
+        "matched_rule": request.matched_rule,
+        "policy_version": request.policy_version,
+        "commands": {
+            "approve": format!("gommage approval approve {}", request.id),
+            "deny": format!("gommage approval deny {}", request.id)
+        }
+    });
+    let mut child = Command::new("curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "5",
+            "--output",
+            "/dev/null",
+            "--write-out",
+            "%{http_code}",
+            "--header",
+            "content-type: application/json",
+            "--request",
+            "POST",
+            "--data-binary",
+            "@-",
+            url,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("starting curl for approval webhook delivery")?;
+    child
+        .stdin
+        .take()
+        .context("opening curl stdin")?
+        .write_all(serde_json::to_string(&payload)?.as_bytes())?;
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<i32>()
+        .unwrap_or(0))
 }
 
 fn ok<T: Serialize>(v: &T) -> String {

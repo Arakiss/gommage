@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 mod agent;
 mod agent_status;
 mod agent_uninstall;
+mod approval_cmd;
 mod audit_cmd;
 mod daemon;
 mod doctor;
@@ -25,12 +26,14 @@ mod quickstart_plan;
 mod report;
 mod smoke;
 mod tui;
+mod tui_views;
 mod uninstall;
 mod util;
 mod verify;
 
 use agent::{AgentCmd, AgentKind, cmd_agent};
 use agent_uninstall::AgentUninstallTarget;
+use approval_cmd::{ApprovalCmd, cmd_approval};
 use audit_cmd::{AuditExplainFormat, cmd_audit_verify, cmd_explain, print_log};
 use daemon::{DaemonCmd, ServiceManager, cmd_daemon};
 use doctor::cmd_doctor;
@@ -43,6 +46,7 @@ use quickstart::{QuickstartOptions, cmd_quickstart};
 use report::{ReportCmd, cmd_report};
 use smoke::cmd_smoke;
 use tui::{TuiOptions, cmd_tui};
+use tui_views::TuiView;
 use uninstall::{UninstallOptions, cmd_uninstall};
 use verify::cmd_verify;
 
@@ -176,6 +180,10 @@ enum Cmd {
     /// Confirm a pending picto.
     Confirm { id: String },
 
+    /// Manage out-of-band approval requests.
+    #[command(subcommand)]
+    Approval(ApprovalCmd),
+
     /// Check a policy file or directory.
     #[command(subcommand)]
     Policy(PolicyCmd),
@@ -260,6 +268,9 @@ enum Cmd {
         /// Limit dashboard agent checks. Defaults to claude and codex.
         #[arg(long = "agent", value_enum)]
         agents: Vec<AgentKind>,
+        /// Operator view to render.
+        #[arg(long, value_enum, default_value_t = TuiView::Dashboard)]
+        view: TuiView,
         /// Print a deterministic non-interactive dashboard snapshot.
         #[arg(long)]
         snapshot: bool,
@@ -468,6 +479,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                 return Ok(ExitCode::from(1));
             }
         }
+        Cmd::Approval(sub) => return cmd_approval(sub, layout),
         Cmd::Policy(sub) => return cmd_policy(sub, layout),
         Cmd::Tail { follow } => {
             use std::io::{BufRead, BufReader};
@@ -518,6 +530,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
         Cmd::Tui {
             agents,
+            view,
             snapshot,
             refresh_ms,
         } => {
@@ -525,6 +538,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                 layout,
                 TuiOptions {
                     agents,
+                    view,
                     snapshot,
                     refresh_ms,
                 },
@@ -576,13 +590,33 @@ pub(crate) fn decide_with_pictos(
     let caps = rt.mapper.map(call);
     let mut eval = evaluate(&caps, &rt.policy);
     let mut events = Vec::new();
-    if let Decision::AskPicto { required_scope, .. } = eval.decision.clone() {
+    if let Decision::AskPicto {
+        required_scope,
+        reason,
+    } = eval.decision.clone()
+    {
         let now = OffsetDateTime::now_utc();
         match rt
             .pictos
             .find_verified_match(&required_scope, now, verifying_key)?
         {
-            PictoLookup::None => {}
+            PictoLookup::None => {
+                let request =
+                    rt.approvals
+                        .request_for_ask(call, &eval, &required_scope, &reason)?;
+                events.push(AuditEvent::ApprovalRequested {
+                    id: request.id.clone(),
+                    tool: request.tool.clone(),
+                    input_hash: request.input_hash.clone(),
+                    required_scope: request.required_scope.clone(),
+                    reason: request.reason.clone(),
+                    policy_version: request.policy_version.clone(),
+                });
+                eval.decision = Decision::AskPicto {
+                    required_scope,
+                    reason: approval_reason(&reason, &request.id),
+                };
+            }
             PictoLookup::BadSignature { id, scope } => {
                 events.push(AuditEvent::PictoRejected {
                     id,
@@ -615,6 +649,12 @@ pub(crate) fn decide_with_pictos(
         }
     }
     Ok((eval, events))
+}
+
+fn approval_reason(reason: &str, request_id: &str) -> String {
+    format!(
+        "{reason}; approval request {request_id} pending; run `gommage approval approve {request_id}`"
+    )
 }
 
 fn cmd_expedition(sub: ExpeditionCmd, layout: HomeLayout) -> Result<ExitCode> {
