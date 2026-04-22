@@ -30,9 +30,13 @@ To extend coverage, add a mapper rule under `~/.gommage/capabilities.d/` — Cla
 
 `gommage quickstart --agent claude` installs the hook and imports supported
 `permissions.deny` entries from `~/.claude/settings.json` into
-`~/.gommage/policy.d/05-claude-import.yaml`. Broad native allow rules stay in
-Claude's config; Gommage remains fail-closed unless a policy rule allows the
-mapped capability.
+`~/.gommage/policy.d/05-claude-import.yaml`. Narrow supported
+`permissions.allow` entries such as `Bash(git status *)` and
+`Read(./docs/**)` are imported into
+`~/.gommage/policy.d/90-claude-allow-import.yaml`, which loads after bundled
+deny and ask rules so Gommage guardrails still win. Broad native allow rules
+such as `Bash` or `*` stay in Claude's config; Gommage remains fail-closed
+unless a policy rule allows the mapped capability.
 
 ### Bypasses Gommage under Claude Code
 

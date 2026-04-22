@@ -236,7 +236,7 @@ presentation output is intentionally not part of the automation contract; use
 # One-command setup for Claude Code:
 # - initializes ~/.gommage
 # - installs bundled policies + capability mappers
-# - imports supported Claude permissions.deny entries into policy.d/
+# - imports supported Claude permissions.deny and narrow permissions.allow entries into policy.d/
 # - installs the Claude PreToolUse hook with backups
 # - installs and starts the user-level daemon service
 gommage quickstart --agent claude --daemon
