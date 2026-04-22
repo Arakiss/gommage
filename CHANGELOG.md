@@ -28,6 +28,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `docs/agent-command-manifest.json` is now the canonical agent command
   contract, and CI executes it directly through
   `scripts/check-agent-command-contracts.sh`.
+- `scripts/host-smoke.sh` and `docs/host-smoke.md` capture temp-home and
+  reviewed real-home evidence for systemd/CachyOS and launchd/macOS hosts.
 - `scripts/check-crates-publish-readiness.sh` and refreshed publishing docs
   with current crates.io evidence, package-gate status, and the explicit
   no-billing/no-publish alpha decision.

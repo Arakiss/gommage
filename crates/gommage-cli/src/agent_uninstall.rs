@@ -75,10 +75,17 @@ fn uninstall_claude(restore_backup: bool, dry_run: bool) -> Result<()> {
         return Ok(());
     }
     write_json(&settings_path, &settings, dry_run)?;
-    println!(
-        "ok claude: removed {removed} Gommage hook group(s) from {}",
-        settings_path.display()
-    );
+    if dry_run {
+        println!(
+            "plan claude: remove {removed} Gommage hook group(s) from {}",
+            settings_path.display()
+        );
+    } else {
+        println!(
+            "ok claude: removed {removed} Gommage hook group(s) from {}",
+            settings_path.display()
+        );
+    }
     Ok(())
 }
 
@@ -96,10 +103,17 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
         let removed = remove_json_hook_groups(&mut hooks, "/PreToolUse", "gommage-mcp");
         if removed > 0 {
             write_json(&hooks_path, &hooks, dry_run)?;
-            println!(
-                "ok codex: removed {removed} Gommage hook group(s) from {}",
-                hooks_path.display()
-            );
+            if dry_run {
+                println!(
+                    "plan codex: remove {removed} Gommage hook group(s) from {}",
+                    hooks_path.display()
+                );
+            } else {
+                println!(
+                    "ok codex: removed {removed} Gommage hook group(s) from {}",
+                    hooks_path.display()
+                );
+            }
         } else {
             println!(
                 "ok codex: no Gommage hook found at {}",
@@ -119,10 +133,17 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
         {
             config["features"]["codex_hooks"] = toml_edit::value(false);
             write_text(&config_path, &config.to_string(), dry_run)?;
-            println!(
-                "ok codex: disabled features.codex_hooks at {}",
-                config_path.display()
-            );
+            if dry_run {
+                println!(
+                    "plan codex: disable features.codex_hooks at {}",
+                    config_path.display()
+                );
+            } else {
+                println!(
+                    "ok codex: disabled features.codex_hooks at {}",
+                    config_path.display()
+                );
+            }
         }
     }
     Ok(())

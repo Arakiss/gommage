@@ -173,6 +173,8 @@ Agents should use JSON surfaces and ignore decorative output. Do not parse
 checklist lives in [`docs/beta-readiness.md`](docs/beta-readiness.md).
 The canonical machine-readable command contract lives in
 [`docs/agent-command-manifest.json`](docs/agent-command-manifest.json).
+Host validation evidence lives in [`docs/host-smoke.md`](docs/host-smoke.md)
+and `scripts/host-smoke.sh`.
 
 Install or update only the skill before operating the project:
 
