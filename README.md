@@ -75,6 +75,7 @@ The alpha distribution has two install surfaces:
 
 - **Runtime binaries**: `gommage`, `gommage-daemon`, and `gommage-mcp`, installed through the verified GitHub Release installer.
 - **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
+- **Operator dashboard**: `gommage tui`, a read-only terminal dashboard for humans. Use `gommage tui --snapshot` for issue reports and non-interactive shells.
 
 ## Positioning
 
@@ -277,8 +278,9 @@ sh scripts/check-agent-command-contracts.sh
 ```
 
 Human presentation output is intentionally not part of the automation contract.
-Use `gommage audit-verify --explain --format human` only for manual forensic
-review.
+Agents may suggest `gommage tui --snapshot` for human issue reports, but should
+continue to parse `--json` commands. Use `gommage audit-verify --explain
+--format human` only for manual forensic review.
 
 ## Quickstart
 
@@ -316,6 +318,10 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
 
 # One readiness gate for scripts, CI, and agent skills.
 gommage verify --json --policy-test examples/policy-fixtures.yaml
+
+# Human operator dashboard. It is read-only and never mutates GOMMAGE_HOME.
+gommage tui
+gommage tui --snapshot
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
@@ -370,7 +376,7 @@ the daemon key, audit log, policy set, and local capability mappers.
 
 ## Diagnostics
 
-Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. On a fresh machine it includes a top-level hint to run `gommage init` or `gommage quickstart`, and skips smoke when doctor already failed so the first error is the root cause. Use `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is a real PreToolUse payload, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
+Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. On a fresh machine it includes a top-level hint to run `gommage init` or `gommage quickstart`, and skips smoke when doctor already failed so the first error is the root cause. Use `gommage tui` for a read-only human operator dashboard, `gommage tui --snapshot` for terminal-safe issue reports, `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is a real PreToolUse payload, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
 
 - `ok`: all checks passed.
 - `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.
@@ -495,6 +501,7 @@ execution order.
 - Append-only signed audit log
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
+- Dependency-free operator dashboard with `gommage tui` and `gommage tui --snapshot`
 - Built-in semantic smoke checks and project-owned policy regression fixtures
 - Capability mapping inspector for policy-authoring and mapper-debugging loops
 - Packaged `gommage-stdlib` crate assets for future crates.io support
@@ -508,7 +515,7 @@ execution order.
   strict policy linting for the policy-authoring loop
 - crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
-- TUI dashboard (`gommage watch`) with live approvals
+- Live approval TUI flow on top of the current read-only `gommage tui` dashboard
 - Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
 - Generic MCP server mode for agents without a PreToolUse concept

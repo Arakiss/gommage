@@ -14,6 +14,7 @@ mod agent_uninstall;
 mod audit_cmd;
 mod daemon;
 mod doctor;
+mod gestral;
 mod input;
 mod map;
 mod mascot;
@@ -23,6 +24,7 @@ mod quickstart;
 mod quickstart_plan;
 mod report;
 mod smoke;
+mod tui;
 mod uninstall;
 mod util;
 mod verify;
@@ -40,6 +42,7 @@ use policy_cmd::{PolicyCmd, cmd_policy};
 use quickstart::{QuickstartOptions, cmd_quickstart};
 use report::{ReportCmd, cmd_report};
 use smoke::cmd_smoke;
+use tui::{TuiOptions, cmd_tui};
 use uninstall::{UninstallOptions, cmd_uninstall};
 use verify::cmd_verify;
 
@@ -247,6 +250,19 @@ enum Cmd {
         /// Emit a stable machine-readable smoke-test report.
         #[arg(long)]
         json: bool,
+    },
+
+    /// Open the operator dashboard TUI.
+    Tui {
+        /// Limit dashboard agent checks. Defaults to claude and codex.
+        #[arg(long = "agent", value_enum)]
+        agents: Vec<AgentKind>,
+        /// Print a deterministic non-interactive dashboard snapshot.
+        #[arg(long)]
+        snapshot: bool,
+        /// Interactive refresh interval in milliseconds.
+        #[arg(long, default_value_t = 1500)]
+        refresh_ms: u64,
     },
 
     /// Print the Gommage terminal logo and Gestral signature.
@@ -495,6 +511,20 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Verify { json, policy_tests } => return cmd_verify(layout, json, policy_tests),
         Cmd::Report(sub) => return cmd_report(sub, layout),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
+        Cmd::Tui {
+            agents,
+            snapshot,
+            refresh_ms,
+        } => {
+            return cmd_tui(
+                layout,
+                TuiOptions {
+                    agents,
+                    snapshot,
+                    refresh_ms,
+                },
+            );
+        }
         Cmd::Mascot { plain, compact } => {
             print_mascot(MascotOptions { plain, compact });
         }

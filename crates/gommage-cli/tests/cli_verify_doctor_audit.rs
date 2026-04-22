@@ -163,6 +163,56 @@ fn verify_json_preinit_reports_hint_and_skips_smoke() {
 }
 
 #[test]
+fn verify_human_preinit_prints_hint_next_steps_and_no_ansi() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home).arg("verify").output().unwrap();
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Gommage verify"));
+    assert!(stdout.contains("status: fail"));
+    assert!(stdout.contains("hint: run 'gommage init' or 'gommage quickstart' first"));
+    assert!(stdout.contains("fail doctor:"));
+    assert!(stdout.contains("skip smoke: skipped: doctor failed"));
+    assert!(stdout.contains("summary: 1 failure(s), 0 warning(s), 0 policy test file(s)"));
+    assert!(stdout.contains("gommage quickstart --agent claude --daemon --self-test"));
+    assert!(stdout.contains("gommage tui --snapshot"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn verify_human_initialized_keeps_readable_section_lines() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home).arg("verify").output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Gommage verify"));
+    assert!(stdout.contains("status: warn"));
+    assert!(stdout.contains("warn doctor:"));
+    assert!(stdout.contains("pass smoke:"));
+    assert!(stdout.contains("summary: 0 failure(s),"));
+    assert!(stdout.contains("gommage doctor --json"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
 fn doctor_json_reports_missing_home_as_failure() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

@@ -5,6 +5,7 @@ use std::{path::PathBuf, process::ExitCode};
 
 use crate::{
     doctor::{DoctorReport, DoctorStatus, build_doctor_report},
+    gestral::{UiTone, color_enabled, paint},
     policy_cmd::{PolicyTestReport, build_policy_test_report},
     smoke::{SmokeReport, SmokeStatus, build_smoke_report},
     util::path_display,
@@ -236,9 +237,26 @@ fn preinit_hint(layout: &HomeLayout, doctor_status: VerifyStatus) -> Option<Stri
 }
 
 fn print_verify_report(report: &VerifyReport) {
+    let colors = color_enabled();
+    println!("Gommage verify");
+    println!(
+        "status: {}",
+        paint(
+            report.status.as_str(),
+            verify_tone(report.status),
+            true,
+            colors
+        )
+    );
+    println!("home: {}", report.home);
+    if let Some(hint) = &report.hint {
+        println!("hint: {hint}");
+    }
+    println!();
+
     println!(
         "{} doctor: {} failure(s), {} warning(s)",
-        report.doctor.status.as_str(),
+        status_text(report.doctor.status, colors),
         report
             .doctor
             .report
@@ -256,19 +274,25 @@ fn print_verify_report(report: &VerifyReport) {
     match (&report.smoke.report, &report.smoke.error) {
         (Some(smoke), _) => println!(
             "{} smoke: {} passed, {} failed",
-            report.smoke.status.as_str(),
+            status_text(report.smoke.status, colors),
             smoke.summary.passed,
             smoke.summary.failed
         ),
-        (None, Some(error)) => println!("{} smoke: {error}", report.smoke.status.as_str()),
-        (None, None) => println!("{} smoke: missing report", report.smoke.status.as_str()),
+        (None, Some(error)) => println!(
+            "{} smoke: {error}",
+            status_text(report.smoke.status, colors)
+        ),
+        (None, None) => println!(
+            "{} smoke: missing report",
+            status_text(report.smoke.status, colors)
+        ),
     }
 
     for section in &report.policy_tests {
         match (&section.report, &section.error) {
             (Some(policy), _) => println!(
                 "{} policy test {}: {} passed, {} failed",
-                section.status.as_str(),
+                status_text(section.status, colors),
                 section.file,
                 policy.summary.passed,
                 policy.summary.failed
@@ -282,4 +306,60 @@ fn print_verify_report(report: &VerifyReport) {
         "summary: {} failure(s), {} warning(s), {} policy test file(s)",
         report.summary.failures, report.summary.warnings, report.summary.policy_tests
     );
+
+    let next = verify_next_actions(report);
+    if !next.is_empty() {
+        println!();
+        println!("{}", paint("next:", UiTone::Gold, true, colors));
+        for (index, action) in next.iter().enumerate() {
+            println!("{}. {action}", index + 1);
+        }
+    }
+}
+
+fn status_text(status: VerifyStatus, colors: bool) -> String {
+    paint(status.as_str(), verify_tone(status), true, colors)
+}
+
+fn verify_tone(status: VerifyStatus) -> UiTone {
+    match status {
+        VerifyStatus::Pass => UiTone::Green,
+        VerifyStatus::Warn => UiTone::Gold,
+        VerifyStatus::Skip => UiTone::Muted,
+        VerifyStatus::Fail => UiTone::Red,
+    }
+}
+
+fn verify_next_actions(report: &VerifyReport) -> Vec<String> {
+    let mut actions = Vec::new();
+    if report.status == VerifyStatus::Pass {
+        return actions;
+    }
+    if report.doctor.status == VerifyStatus::Fail {
+        actions.push(
+            report
+                .hint
+                .as_ref()
+                .map(|_| "gommage quickstart --agent claude --daemon --self-test".to_string())
+                .unwrap_or_else(|| "gommage doctor --json".to_string()),
+        );
+    }
+    if report.smoke.status == VerifyStatus::Fail {
+        actions.push("gommage smoke --json".to_string());
+    }
+    if report
+        .policy_tests
+        .iter()
+        .any(|test| test.status == VerifyStatus::Fail)
+    {
+        actions.push("gommage policy test <fixture.yaml> --json".to_string());
+    }
+    if report.status == VerifyStatus::Warn {
+        actions.push("gommage doctor --json".to_string());
+    }
+    actions.push("gommage tui --snapshot".to_string());
+    actions.sort();
+    actions.dedup();
+    actions.truncate(4);
+    actions
 }
