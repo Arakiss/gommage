@@ -1,5 +1,17 @@
 # Changelog — gommage-cli
 
+## [0.12.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.11.0-alpha.1...gommage-cli-v0.12.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** report agent integration status ([cbc5e90](https://github.com/Arakiss/gommage/commit/cbc5e90d6289f8d2a77baf6e28c0c4e7435a235d))
+
+
+### Bug fixes
+
+* **cli:** avoid agent status test shadowing ([637738f](https://github.com/Arakiss/gommage/commit/637738fe0f41e3b5c8666d1e06b71be19729a3a6))
+
 ## [0.11.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.10.0-alpha.1...gommage-cli-v0.11.0-alpha.1) (2026-04-22)
 
 
