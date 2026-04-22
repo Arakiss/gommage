@@ -19,7 +19,10 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
       "Bash",
       "Bash(git status *)",
       "Read(./docs/**)",
+      "Write",
+      "Edit",
       "MultiEdit(./src/**)",
+      "NotebookEdit(*)",
       "WebFetch(domain:example.com)",
       "WebSearch"
     ],
@@ -65,6 +68,11 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
     assert!(imported_allows.contains("proc.exec:*"));
     assert!(imported_allows.contains("fs.read:${EXPEDITION_ROOT}/docs/**"));
     assert!(imported_allows.contains("fs.write:${EXPEDITION_ROOT}/src/**"));
+    assert_eq!(imported_allows.matches("fs.write:**").count(), 1);
+    assert!(
+        imported_allows
+            .contains("imported from Claude Code permissions.allow: Write, Edit, NotebookEdit(*)")
+    );
     assert!(imported_allows.contains("net.fetch:example.com"));
     assert!(imported_allows.contains("net.search:web"));
 
@@ -87,7 +95,7 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
     assert_eq!(pre_tool_use.len(), 1);
     assert_eq!(
         pre_tool_use[0].get("matcher").and_then(|v| v.as_str()),
-        Some("Bash|Read|MultiEdit|WebFetch|WebSearch")
+        Some("Bash|Read|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch")
     );
     assert!(
         pre_tool_use[0]
@@ -123,7 +131,7 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
         doctor_check(&report, "allow_import")
             .pointer("/details/importable_rules")
             .and_then(|value| value.as_u64()),
-        Some(6)
+        Some(9)
     );
 }
 

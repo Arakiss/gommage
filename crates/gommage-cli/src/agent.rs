@@ -425,7 +425,9 @@ fn translate_claude_permission_specifier(raw: &str) -> Option<String> {
 }
 
 fn normalize_native_path_pattern(raw: &str) -> String {
-    if raw == "~" {
+    if raw == "*" || raw == "**" {
+        "**".to_string()
+    } else if raw == "~" {
         "${HOME}".to_string()
     } else if let Some(rest) = raw.strip_prefix("~/") {
         format!("${{HOME}}/{rest}")
@@ -542,4 +544,43 @@ fn json_hook_entry_contains_command(entry: &serde_json::Value, needle: &str) -> 
                     .is_some_and(|command| command.contains(needle))
             })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn broad_write_native_permissions_collapse_to_one_capability() {
+        let rules = vec![
+            "Write".to_string(),
+            "Edit".to_string(),
+            "NotebookEdit(*)".to_string(),
+            "MultiEdit(**)".to_string(),
+        ];
+
+        let (translated, skipped) =
+            translate_claude_native_rules(&rules, translate_claude_permission_allow);
+        let grouped = group_native_permission_imports(&translated);
+
+        assert!(skipped.is_empty());
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped[0].capability, "fs.write:**");
+        assert_eq!(
+            grouped[0].raws,
+            vec!["Write", "Edit", "NotebookEdit(*)", "MultiEdit(**)"]
+        );
+    }
+
+    #[test]
+    fn native_star_path_is_normalized_to_recursive_glob() {
+        assert_eq!(
+            translate_claude_permission_allow("Read(*)").as_deref(),
+            Some("fs.read:**")
+        );
+        assert_eq!(
+            translate_claude_permission_allow("Write(*)").as_deref(),
+            Some("fs.write:**")
+        );
+    }
 }

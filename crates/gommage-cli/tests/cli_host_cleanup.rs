@@ -459,3 +459,50 @@ fn daemon_install_systemd_writes_service_without_starting() {
     assert!(service.contains(&home.to_string_lossy().to_string()));
     assert!(service.contains(&fake_daemon.to_string_lossy().to_string()));
 }
+
+#[test]
+#[cfg(unix)]
+fn daemon_uninstall_suppresses_service_manager_output() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let systemd = temp.path().join("systemd-user");
+    let bin = temp.path().join("bin");
+    let fake_systemctl = bin.join("systemctl");
+    fs::create_dir_all(&systemd).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    fs::write(systemd.join("gommage-daemon.service"), "[Unit]\n").unwrap();
+    fs::write(
+        &fake_systemctl,
+        "#!/bin/sh\necho \"Removed '/tmp/raw.service'.\"\necho 'raw stderr' >&2\nexit 0\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&fake_systemctl).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&fake_systemctl, perms).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = gommage(&home)
+        .env("GOMMAGE_SYSTEMD_USER_DIR", &systemd)
+        .env("PATH", path)
+        .args(["daemon", "uninstall", "--manager", "systemd"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stdout.contains("ok daemon: removed"));
+    assert!(!stdout.contains("Removed '/tmp/raw.service'"));
+    assert!(!stderr.contains("raw stderr"));
+    assert!(!systemd.join("gommage-daemon.service").exists());
+}
