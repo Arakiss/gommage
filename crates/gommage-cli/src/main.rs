@@ -150,7 +150,7 @@ enum Cmd {
         #[arg(long)]
         json: bool,
         /// Include a repository-owned policy fixture file. Can be repeated.
-        #[arg(long = "policy-test")]
+        #[arg(long = "policy-test", value_name = "FILE")]
         policy_tests: Vec<PathBuf>,
     },
 
