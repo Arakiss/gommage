@@ -926,9 +926,9 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
     assert!(!imported_allows.contains("proc.exec:*"));
     assert!(!imported_allows.contains("net.search:web"));
 
-    let settings: serde_json::Value =
+    let settings_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
-    let pre_tool_use = settings
+    let pre_tool_use = settings_json
         .pointer("/hooks/PreToolUse")
         .and_then(|v| v.as_array())
         .unwrap();
@@ -1056,10 +1056,10 @@ fn agent_install_codex_writes_hook_and_enables_feature_flag() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let hooks: serde_json::Value =
+    let hooks_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&hooks).unwrap()).unwrap();
     assert!(
-        hooks
+        hooks_json
             .pointer("/PreToolUse")
             .and_then(|v| v.as_array())
             .unwrap()
