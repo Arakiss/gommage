@@ -80,6 +80,11 @@ The alpha distribution has two install surfaces:
   views. Use `gommage tui --snapshot --view all` for issue reports and
   non-interactive shells.
 
+<p align="center">
+  <img src="docs/assets/tui-dashboard.gif" alt="Animated Gommage operator dashboard TUI demo showing readiness, policies, audit, capabilities, and recovery views" width="100%" />
+</p>
+<p align="center"><sub>Representative animated demo of <code>gommage tui --snapshot --view all</code>. The real command prints plain text for terminals, issue reports, and agent-readable diagnostics. Static fallback: <a href="docs/assets/tui-dashboard.svg">SVG</a>.</sub></p>
+
 ## Positioning
 
 Gommage is an **opt-in complement** to whatever permission layer your agent ships with. Run both: keep native sandboxing and approvals enabled, then let Gommage handle the decisions you want to own as code. If the agent's native layer blocks something before the hook fires, Gommage cannot override that; if the hook observes the call, Gommage can make the local policy decision and audit it.

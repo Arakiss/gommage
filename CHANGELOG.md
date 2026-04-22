@@ -36,6 +36,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   adds dependency-free operator views for policy inventory, signed audit
   forensics, mapper/capability inspection, and recovery shortcuts. Interactive
   TUI mode can switch views with `1`-`5`.
+- README now embeds a sanitized animated TUI demo, with a static SVG fallback,
+  so new users can see the operator dashboard before installing.
+- The live-doc release-reference check now skips known binary asset extensions
+  so README media files do not break documentation CI.
 - `ask_picto` decisions now create durable local approval requests in
   `approvals.jsonl` when no usable signed picto exists. Hook reasons include
   the exact `gommage approval approve <id>` next action. Repeated identical

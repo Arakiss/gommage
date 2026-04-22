@@ -30,12 +30,16 @@ files = paths.flat_map do |path|
     [path]
   end
 end
+binary_extensions = %w[
+  .avif .gif .ico .jpeg .jpg .pdf .png .webp .woff .woff2
+]
 
 failures = []
 
 files.sort.each do |file|
   relative = file.sub(%r{\A\./}, "")
   next if allowed.any? { |rule| rule.match?(relative) }
+  next if binary_extensions.include?(File.extname(relative).downcase)
 
   File.readlines(file, chomp: true).each_with_index do |line, index|
     line.scan(pattern).each do |tag|
