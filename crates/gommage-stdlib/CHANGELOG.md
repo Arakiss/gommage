@@ -1,5 +1,14 @@
 # Changelog — gommage-stdlib
 
+## [Unreleased]
+
+### Added
+
+- `05-recovery.yaml` keeps Gommage readiness commands, basic inspection,
+  systemd daemon recovery, and Claude settings backup restore commands
+  available after quickstart while loading after hard-stops and native deny
+  imports.
+
 ## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.1.0-alpha.1...gommage-stdlib-v0.2.0-alpha.1) (2026-04-22)
 
 

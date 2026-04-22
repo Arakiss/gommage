@@ -168,25 +168,11 @@ curl --proto '=https' --tlsv1.2 -sSf \
 
 ## For agents
 
-Agents should use stable machine-readable surfaces and ignore decorative output.
-The beta-readiness checklist lives in [`docs/beta-readiness.md`](docs/beta-readiness.md).
+Agents should use JSON surfaces and ignore decorative output. Do not parse
+`gommage mascot`, `gommage logo`, or human forensic output. The beta-readiness
+checklist lives in [`docs/beta-readiness.md`](docs/beta-readiness.md).
 
-| Task | Command |
-|---|---|
-| Install or update the agent skill | See the install block below. |
-| Run the default readiness gate | `gommage verify --json` |
-| Add repository policy fixtures | Add repeated `--policy-test <file>` flags. |
-| Check Claude wiring | `gommage agent status claude --json` |
-| Check Codex wiring | `gommage agent status codex --json` |
-| Inspect mapper output | `gommage map --json --hook` |
-| Verify active stdlib semantics | `gommage smoke --json` |
-| Run policy regression fixtures | `gommage policy test <file> --json` |
-| Export the fixture schema | `gommage policy schema` |
-| Capture a policy fixture | `gommage policy snapshot --name <case_name>` |
-| Verify signed audit history | `gommage audit-verify --explain` |
-| Check crates.io publish readiness | `sh scripts/check-crates-publish-readiness.sh` |
-
-Install or update only the skill:
+Install or update only the skill before operating the project:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
@@ -198,21 +184,18 @@ curl --proto '=https' --tlsv1.2 -sSf \
       --no-prompt
 ```
 
-Run the readiness gate:
+Primary setup and readiness commands:
 
 ```sh
+gommage quickstart --agent claude --daemon --self-test
+gommage quickstart --agent codex --daemon --self-test
 gommage verify --json
 gommage verify --json --policy-test examples/policy-fixtures.yaml
-```
-
-Inspect host-agent wiring:
-
-```sh
 gommage agent status claude --json
 gommage agent status codex --json
 ```
 
-Inspect mapper output from a real hook payload:
+Debug the mapper with a real hook payload:
 
 ```sh
 cat <<'JSON' | gommage map --json --hook
@@ -243,6 +226,29 @@ JSON
 gommage policy test examples/policy-fixtures.yaml --json
 ```
 
+Recovery and uninstall commands:
+
+```sh
+# Remove only host-agent hook wiring. Use --restore-backup when a quickstart
+# backup is the safest recovery source.
+gommage agent uninstall claude --restore-backup
+gommage agent uninstall codex --restore-backup
+
+# Inspect every removal before touching the system.
+gommage uninstall --all --dry-run
+
+# Remove selected surfaces without deleting ~/.gommage.
+gommage uninstall --agent all --skills --binaries
+
+# Destructive home removal requires explicit confirmation.
+gommage uninstall --purge-home --yes
+```
+
+`GOMMAGE_BYPASS=1` is a hook-adapter break-glass for host environments that can
+set hook process env vars. It makes `gommage-mcp` return `allow` without
+opening `~/.gommage`, which is useful only for emergency recovery of a broken
+hook path.
+
 Stable automation contracts:
 
 | Surface | Use it for |
@@ -254,6 +260,13 @@ Stable automation contracts:
 | `smoke --json` | Built-in semantic post-install checks. |
 | `policy test --json` | Project-owned policy regression fixtures. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
+| `agent uninstall` / `uninstall --dry-run` | Reversible cleanup and recovery. |
+
+The command contract above is checked by CI:
+
+```sh
+sh scripts/check-agent-command-contracts.sh
+```
 
 Human presentation output is intentionally not part of the automation contract.
 Use `gommage audit-verify --explain --format human` only for manual forensic
@@ -265,10 +278,10 @@ review.
 # One-command setup for Claude Code:
 # - initializes ~/.gommage
 # - installs bundled policies + capability mappers
-# - imports supported Claude permissions.deny and narrow permissions.allow entries into policy.d/
+# - imports supported Claude permissions.deny and permissions.allow entries into policy.d/
 # - installs the Claude PreToolUse hook with backups
 # - installs and starts the user-level daemon service
-# - runs the readiness gate after setup
+# - runs the readiness gate after setup (`--self-test` is default; explicit here for scripts)
 gommage quickstart --agent claude --daemon --self-test
 
 # Scriptable verification. `warn` is expected before the first audit entry
@@ -306,7 +319,7 @@ gommage quickstart --agent claude --daemon-no-start --self-test
 gommage agent install codex
 
 # Diagnose the local installation
-gommage doctor
+gommage verify
 
 # Grant a one-shot picto for pushing to main
 gommage grant \
@@ -323,11 +336,14 @@ gommage explain <audit-id>
 
 # Close the expedition (resets the canvas)
 gommage expedition end
+
+# Remove Gommage-managed host integrations when testing alpha builds.
+gommage uninstall --all --dry-run
 ```
 
 ## Diagnostics
 
-Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. Use `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is a real PreToolUse payload, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
+Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. On a fresh machine it includes a top-level hint to run `gommage init` or `gommage quickstart`, and skips smoke when doctor already failed so the first error is the root cause. Use `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is a real PreToolUse payload, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
 
 - `ok`: all checks passed.
 - `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.
