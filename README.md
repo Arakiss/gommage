@@ -78,13 +78,15 @@ The alpha distribution has two install surfaces:
 - **Operator dashboard**: `gommage tui`, a dependency-free terminal command
   center for humans with readiness, approvals, policies, audit, capabilities,
   and recovery views. Use `gommage tui --snapshot --view all` for issue reports
-  and non-interactive shells; interactive mode can resolve pending approvals
-  only after an explicit confirmation keystroke.
+  and non-interactive shells, or `gommage tui --watch --watch-ticks 3` when a
+  headless terminal should show live refreshes. Interactive approvals can tune
+  TTL/use-count presets before resolving pending requests, and still require an
+  explicit confirmation keystroke before mutating state.
 
 <p align="center">
   <img src="docs/assets/tui-dashboard.gif" alt="Animated Gommage operator dashboard TUI demo showing readiness, approvals, policies, audit, capabilities, and recovery views" width="100%" />
 </p>
-<p align="center"><sub>Representative animated demo of <code>gommage tui --snapshot --view all</code>. The real command prints plain text for terminals, issue reports, and agent-readable diagnostics. Static fallback: <a href="docs/assets/tui-dashboard.svg">SVG</a>.</sub></p>
+<p align="center"><sub>Representative animated demo of <code>gommage tui</code>, <code>--snapshot</code>, and <code>--watch</code> operator views. Snapshot/watch output stays plain text for terminals, issue reports, and agent-readable diagnostics. Static fallback: <a href="docs/assets/tui-dashboard.svg">SVG</a>.</sub></p>
 
 ## Positioning
 
@@ -102,7 +104,8 @@ Gommage follows **Semantic Versioning**, with pre-1.0 rules applied strictly:
 The beta bar is not "more features". It is stable install, stable hook wiring,
 stable docs, crates.io publishing, healthy changelogs, and a green determinism
 matrix with no known red workflows. The concrete launch gate is tracked in
-[`docs/beta-readiness.md`](docs/beta-readiness.md).
+[`docs/beta-readiness.md`](docs/beta-readiness.md); real host test passes
+should follow [`docs/beta-test-loop.md`](docs/beta-test-loop.md).
 
 ## Install
 
@@ -284,6 +287,7 @@ Stable automation contracts:
 | `smoke --json` | Built-in semantic post-install checks. |
 | `policy test --json` | Project-owned policy regression fixtures. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
+| `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
 | `approval list --json` | Pending out-of-band approval requests. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
@@ -298,9 +302,10 @@ sh scripts/check-agent-command-contracts.sh
 ```
 
 Human presentation output is intentionally not part of the automation contract.
-Agents may suggest `gommage tui --snapshot` for human issue reports, but should
-continue to parse `--json` commands. Use `gommage audit-verify --explain
---format human` only for manual forensic review.
+Agents may suggest `gommage tui --snapshot` or bounded `gommage tui --watch
+--watch-ticks <n>` for human issue reports, but should continue to parse
+`--json` commands. Use `gommage audit-verify --explain --format human` only for
+manual forensic review.
 
 ## Quickstart
 
@@ -339,10 +344,11 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
 # One readiness gate for scripts, CI, and agent skills.
 gommage verify --json --policy-test examples/policy-fixtures.yaml
 
-# Human operator dashboard. Snapshot mode is read-only and issue-friendly.
-# Interactive mode can approve/deny pending requests only after y/n confirmation.
+# Human operator dashboard. Snapshot/watch modes are read-only and issue-friendly.
+# Interactive approvals use t/T for TTL, u/U for uses, then A/D + y/n confirmation.
 gommage tui
 gommage tui --snapshot --view all
+gommage tui --watch --watch-ticks 3 --view approvals
 gommage tui --view approvals
 
 # Start an expedition (a.k.a. task context)
@@ -541,8 +547,9 @@ execution order.
 - Append-only signed audit log
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
-- Dependency-free operator dashboard with `gommage tui`, `--snapshot`, and
-  approvals/policies/audit/capabilities/recovery views
+- Dependency-free operator dashboard with `gommage tui`, `--snapshot`,
+  `--watch`, approvals/policies/audit/capabilities/recovery views, and
+  confirmation-protected approval TTL/use-count presets
 - Built-in semantic smoke checks and project-owned policy regression fixtures
 - Capability mapping inspector for policy-authoring and mapper-debugging loops
 - Packaged `gommage-stdlib` crate assets for future crates.io support
@@ -561,8 +568,8 @@ execution order.
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
 - Generic MCP server mode for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
-- Native ntfy approval provider and richer provider templates on top of the
-  generic webhook payload
+- Native ntfy approval provider, signed callbacks, and richer editable approval
+  forms on top of the generic webhook payload
 - Browser playground for mapping, policy evaluation, explain traces, and fixture
   generation
 

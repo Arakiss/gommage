@@ -137,7 +137,37 @@ fn tui_help_lists_snapshot_and_refresh_controls() {
     assert!(stdout.contains("--snapshot"));
     assert!(stdout.contains("--agent"));
     assert!(stdout.contains("--view"));
+    assert!(stdout.contains("--watch"));
+    assert!(stdout.contains("--watch-ticks"));
     assert!(stdout.contains("--refresh-ms"));
+}
+
+#[test]
+fn tui_watch_ticks_prints_bounded_plain_frames() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home)
+        .args([
+            "tui",
+            "--watch",
+            "--watch-ticks",
+            "2",
+            "--refresh-ms",
+            "250",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.matches("--- gommage tui frame").count(), 2);
+    assert_eq!(stdout.matches("Gommage dashboard").count(), 2);
+    assert!(!stdout.contains("\x1b["));
 }
 
 #[test]
@@ -216,6 +246,9 @@ fn tui_approval_snapshot_lists_pending_requests() {
     assert!(stdout.contains("approvals:"));
     assert!(stdout.contains("requests: 1 pending"));
     assert!(stdout.contains("mcp__db__write_row"));
+    assert!(stdout.contains("selected:"));
+    assert!(stdout.contains("scope: mcp.write"));
+    assert!(stdout.contains("gommage approval evidence apr_"));
     assert!(stdout.contains("gommage approval approve apr_"));
     assert!(stdout.contains("gommage approval replay apr_"));
     assert!(!stdout.contains("\x1b["));

@@ -58,7 +58,7 @@ pub(crate) fn build_view_report(layout: &HomeLayout, view: TuiView) -> Result<Vi
             lines: vec!["readiness dashboard is shown in the primary panel".to_string()],
             next_actions: vec!["gommage verify --json".to_string()],
         },
-        TuiView::Approvals => approvals_report(layout, None),
+        TuiView::Approvals => approvals_report(layout, Some(0)),
         TuiView::Policies => policies_report(layout),
         TuiView::Audit => audit_report(layout),
         TuiView::Capabilities => capabilities_report(layout),
@@ -127,6 +127,31 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
                 short_hash(&state.request.input_hash)
             ));
         }
+        let selected = selected_pending
+            .unwrap_or(0)
+            .min(pending.len().saturating_sub(1));
+        if let Some(state) = pending.get(selected) {
+            lines.push("selected:".to_string());
+            lines.push(format!("  id: {}", state.request.id));
+            lines.push(format!("  tool: {}", state.request.tool));
+            lines.push(format!("  scope: {}", state.request.required_scope));
+            lines.push(format!("  reason: {}", state.request.reason));
+            lines.push(format!("  policy: {}", state.request.policy_version));
+            if let Some(rule) = &state.request.matched_rule {
+                lines.push(format!(
+                    "  rule: {} ({}:{})",
+                    rule.name, rule.file, rule.index
+                ));
+            }
+            lines.push(format!(
+                "  replay: gommage approval replay {} --json",
+                state.request.id
+            ));
+            lines.push(format!(
+                "  evidence: gommage approval evidence {} --redact",
+                state.request.id
+            ));
+        }
     }
     let mut next_actions = vec![
         "gommage approval list --status pending".to_string(),
@@ -136,6 +161,10 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
         next_actions.push(format!("gommage approval show {} --json", first.request.id));
         next_actions.push(format!(
             "gommage approval approve {} --ttl 10m --uses 1",
+            first.request.id
+        ));
+        next_actions.push(format!(
+            "gommage approval evidence {} --redact",
             first.request.id
         ));
         next_actions.push(format!("gommage approval replay {}", first.request.id));

@@ -3,16 +3,17 @@ use gommage_core::runtime::HomeLayout;
 use std::{
     io::{self, IsTerminal, Read, Write},
     process::{Command, ExitCode, Stdio},
+    thread,
     time::{Duration, Instant},
 };
 
 use crate::{
     agent::AgentKind,
     agent_status::build_agent_status_report,
-    approval_cmd::{approve_request, deny_request},
     doctor::{DoctorStatus, build_doctor_report},
     gestral::{UiStatus, color_enabled, truncate_plain},
     smoke::{SmokeStatus, build_smoke_report},
+    tui_actions::{ApprovalDraft, PendingTuiAction, execute_tui_action},
     tui_render::{RenderState, render_lines},
     tui_views::{TuiView, build_view_report, pending_approval_ids},
     util::path_display,
@@ -23,6 +24,8 @@ pub(crate) struct TuiOptions {
     pub(crate) agents: Vec<AgentKind>,
     pub(crate) view: TuiView,
     pub(crate) snapshot: bool,
+    pub(crate) watch: bool,
+    pub(crate) watch_ticks: Option<u32>,
     pub(crate) refresh_ms: u64,
 }
 
@@ -52,25 +55,18 @@ pub(crate) struct DashboardSummary {
     pub(crate) skip: usize,
 }
 
-#[derive(Debug, Clone)]
-enum PendingTuiAction {
-    Approve(String),
-    Deny(String),
-}
-
-impl PendingTuiAction {
-    fn prompt(&self) -> String {
-        match self {
-            PendingTuiAction::Approve(id) => {
-                format!("approve {id} with ttl=10m uses=1 from the TUI?")
-            }
-            PendingTuiAction::Deny(id) => format!("deny {id} from the TUI?"),
-        }
-    }
-}
-
 pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCode> {
     let agents = normalize_agents(options.agents);
+    if options.watch || options.watch_ticks.is_some() {
+        print_watch(
+            &layout,
+            &agents,
+            options.view,
+            Duration::from_millis(options.refresh_ms),
+            options.watch_ticks,
+        )?;
+        return Ok(ExitCode::SUCCESS);
+    }
     if options.snapshot || !io::stdout().is_terminal() || !io::stdin().is_terminal() {
         let dashboard = build_dashboard(&layout, &agents)?;
         print_snapshot(&layout, &dashboard, options.view)?;
@@ -251,6 +247,34 @@ fn print_view_snapshot(layout: &HomeLayout, view: TuiView) -> Result<()> {
     Ok(())
 }
 
+fn print_watch(
+    layout: &HomeLayout,
+    agents: &[AgentKind],
+    view: TuiView,
+    refresh: Duration,
+    ticks: Option<u32>,
+) -> Result<()> {
+    let refresh = refresh.clamp(Duration::from_millis(250), Duration::from_millis(10_000));
+    let limit = ticks.unwrap_or(u32::MAX);
+    let mut stdout = io::stdout();
+    for frame in 0..limit {
+        if frame > 0 {
+            thread::sleep(refresh);
+            writeln!(stdout)?;
+        }
+        let dashboard = build_dashboard(layout, agents)?;
+        writeln!(
+            stdout,
+            "--- gommage tui frame {} at {} ---",
+            frame + 1,
+            dashboard.updated
+        )?;
+        print_snapshot(layout, &dashboard, view)?;
+        stdout.flush()?;
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn run_interactive(
     layout: &HomeLayout,
@@ -269,6 +293,7 @@ fn run_interactive(
     let mut view = normalize_interactive_view(initial_view);
     let mut notice: Option<String> = None;
     let mut confirm: Option<PendingTuiAction> = None;
+    let mut approval_draft = ApprovalDraft::default();
     let confirm_prompt = confirm.as_ref().map(PendingTuiAction::prompt);
     draw_dashboard(
         &mut stdout,
@@ -279,6 +304,8 @@ fn run_interactive(
             selected,
             selected_approval,
             view,
+            approval_uses: approval_draft.uses,
+            approval_ttl: approval_draft.ttl_label(),
             notice: notice.as_deref(),
             confirm: confirm_prompt.as_deref(),
         },
@@ -344,9 +371,32 @@ fn run_interactive(
                         b'4' => view = TuiView::Audit,
                         b'5' => view = TuiView::Capabilities,
                         b'6' => view = TuiView::Recovery,
+                        b't' if view == TuiView::Approvals => {
+                            approval_draft.cycle_ttl(false);
+                            notice = Some(format!(
+                                "approval ttl set to {}",
+                                approval_draft.ttl_label()
+                            ));
+                        }
+                        b'T' if view == TuiView::Approvals => {
+                            approval_draft.cycle_ttl(true);
+                            notice = Some(format!(
+                                "approval ttl set to {}",
+                                approval_draft.ttl_label()
+                            ));
+                        }
+                        b'u' if view == TuiView::Approvals => {
+                            approval_draft.cycle_uses(false);
+                            notice = Some(format!("approval uses set to {}", approval_draft.uses));
+                        }
+                        b'U' if view == TuiView::Approvals => {
+                            approval_draft.cycle_uses(true);
+                            notice = Some(format!("approval uses set to {}", approval_draft.uses));
+                        }
                         b'A' if view == TuiView::Approvals => {
                             if let Some(id) = selected_approval_id(layout, selected_approval) {
-                                confirm = Some(PendingTuiAction::Approve(id));
+                                confirm =
+                                    Some(PendingTuiAction::Approve(id, approval_draft.clone()));
                                 notice = None;
                             } else {
                                 notice = Some("no pending approval selected".to_string());
@@ -384,6 +434,8 @@ fn run_interactive(
                 selected,
                 selected_approval,
                 view,
+                approval_uses: approval_draft.uses,
+                approval_ttl: approval_draft.ttl_label(),
                 notice: notice.as_deref(),
                 confirm: confirm_prompt.as_deref(),
             },
@@ -479,21 +531,6 @@ fn pending_approval_max(layout: &HomeLayout) -> usize {
 
 fn clamp_approval_selection(layout: &HomeLayout, selected: usize) -> usize {
     selected.min(pending_approval_max(layout))
-}
-
-fn execute_tui_action(layout: &HomeLayout, action: PendingTuiAction) -> String {
-    match action {
-        PendingTuiAction::Approve(id) => {
-            match approve_request(layout, &id, 1, 600, "approved from gommage tui") {
-                Ok(report) => report.message,
-                Err(error) => format!("approval failed: {error:#}"),
-            }
-        }
-        PendingTuiAction::Deny(id) => match deny_request(layout, &id, "denied from gommage tui") {
-            Ok(report) => report.message,
-            Err(error) => format!("deny failed: {error:#}"),
-        },
-    }
 }
 
 fn terminal_size() -> (usize, usize) {

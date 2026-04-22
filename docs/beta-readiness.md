@@ -44,8 +44,8 @@ issue:
 | Readiness gate | `gommage verify --json` exits with `pass` or documented `warn`. |
 | Quickstart self-test | `gommage quickstart --self-test` reaches the same readiness gate after setup. |
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
-| Operator TUI | `gommage tui --snapshot --view all` shows summary, focus, readiness rows, approvals, policy, audit, capability, recovery, and next actions on a clean pre-init home and after quickstart. |
-| Approval flow | An `ask_picto` decision creates an approval request; `gommage tui --view approvals` can approve/deny with confirmation; `gommage approval approve <id>` mints an exact-scope picto; the next matching call consumes it; `audit-verify --explain` verifies the signed evidence. |
+| Operator TUI | `gommage tui --snapshot --view all` shows summary, focus, readiness rows, approvals, policy, audit, capability, recovery, and next actions on a clean pre-init home and after quickstart. `gommage tui --watch --watch-ticks 2 --view approvals` produces bounded plain-text refreshes without ANSI escapes. |
+| Approval flow | An `ask_picto` decision creates an approval request; `gommage tui --view approvals` can tune TTL/use-count presets and approve/deny with confirmation; `gommage approval approve <id>` mints an exact-scope picto; the next matching call consumes it; `audit-verify --explain` verifies the signed evidence. |
 | Approval replay/evidence | `gommage approval replay <id> --json` compares stored request semantics with current policy; `gommage approval evidence <id> --redact` exports request state, relevant audit lines, verification summary, and next commands. |
 | Webhook flow | `gommage approval webhook --provider generic|slack|discord --dry-run` renders pending payloads and a fake or test endpoint proves signed success/failure audit events. |
 | Host wiring | `gommage agent status claude --json` and `gommage agent status codex --json` are documented for supported states. |
@@ -93,6 +93,7 @@ the redacted report bundle, and an uninstall dry-run rollback plan.
 
 ## Tracking issue checklist
 
-Use the `Beta readiness` issue template for public launch tracking. Keep one
+Use the `Beta readiness` issue template for public launch tracking and
+[`beta-test-loop.md`](beta-test-loop.md) for per-host test passes. Keep one
 canonical issue open until every required gate has either evidence or an
 explicit non-blocking decision.
