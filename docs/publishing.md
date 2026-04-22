@@ -20,7 +20,7 @@ Useful installer options:
 
 ```sh
 sh scripts/install.sh --help
-sh scripts/install.sh --version gommage-cli-v0.4.0-alpha.1
+sh scripts/install.sh --version gommage-cli-vX.Y.Z-alpha.N
 sh scripts/install.sh --bin-dir "$HOME/.local/bin"
 sh scripts/install.sh --with-skill --skill-agent codex --skill-agent claude
 sh scripts/install.sh --skill-only --skill-agent codex --skill-agent claude
@@ -82,6 +82,17 @@ Any internal `gommage-*` dependency that points at another workspace crate must
 carry an exact `version = "=<crate version>"` requirement next to its local
 `path`. This keeps release-please version bumps from creating tags whose binary
 builds cannot resolve the workspace.
+
+Living release docs are also guarded:
+
+```sh
+sh scripts/check-doc-release-refs.sh
+```
+
+README, docs, installer comments, workflows, and agent skills should not pin
+concrete `gommage-cli-v<version>` tags. Use the installer's `latest` resolution
+or placeholder tags such as `gommage-cli-vX.Y.Z-alpha.N` in examples. Changelogs
+remain the release-history surface for concrete tags.
 
 ## Gates before flipping `publish = false`
 

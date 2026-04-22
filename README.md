@@ -69,7 +69,7 @@ Gommage takes a narrow stance:
 
 ## Status
 
-**Current public release channel: alpha (`gommage-cli-v0.4.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on launch-readiness smoke tests, policy regression fixtures, crates.io publishing gates, policy import fidelity, mapper coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
+**Current public release channel: alpha (`gommage-cli-v*`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on launch-readiness smoke tests, policy regression fixtures, crates.io publishing gates, policy import fidelity, mapper coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
 
 The alpha distribution has two install surfaces:
 
@@ -120,7 +120,7 @@ curl --proto '=https' --tlsv1.2 -sSf \
 # Pin a specific alpha release or install elsewhere.
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --version gommage-cli-v0.4.0-alpha.1 --bin-dir "$HOME/.local/bin"
+  | sh -s -- --version gommage-cli-vX.Y.Z-alpha.N --bin-dir "$HOME/.local/bin"
 
 # Private repo installs may pass a GitHub token for release downloads.
 curl --proto '=https' --tlsv1.2 -sSf \
@@ -398,7 +398,7 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 
 ## Roadmap
 
-**v0.4 alpha line** — current release line
+**Current alpha line** — signed release-installer line
 - Daemon + CLI + PreToolUse hook adapter
 - Supported agents: **Claude Code** (all tool types), **OpenAI Codex CLI** (Bash tool only — limited by Codex's current hook surface)
 - YAML policy + capability mappers for Bash, filesystem tools, Grep, WebFetch, WebSearch, MCP tools, git, cloud CLIs, package managers, Vercel, Bun, and Docker

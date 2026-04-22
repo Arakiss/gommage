@@ -116,6 +116,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Verify internal workspace dependency versions
         run: sh scripts/check-workspace-internal-deps.sh
+      - name: Verify living docs avoid pinned release drift
+        run: sh scripts/check-doc-release-refs.sh
       - name: Verify stdlib root mirrors
         run: |
           diff -ru policies crates/gommage-stdlib/policies

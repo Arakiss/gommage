@@ -37,7 +37,7 @@ curl --proto '=https' --tlsv1.2 -sSf \
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --version gommage-cli-v0.4.0-alpha.1 --bin-dir "$HOME/.local/bin"
+  | sh -s -- --version gommage-cli-vX.Y.Z-alpha.N --bin-dir "$HOME/.local/bin"
 ```
 
 5. Set up the target agent:
