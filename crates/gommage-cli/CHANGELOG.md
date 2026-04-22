@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.5.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.5.0-alpha.1...gommage-cli-v0.5.1-alpha.1) (2026-04-22)
+
+
+### Bug fixes
+
+* **cli:** label verify policy-test input ([2338899](https://github.com/Arakiss/gommage/commit/2338899a605850c13297c399274e696c70418901))
+
 ## [0.5.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.4.0-alpha.1...gommage-cli-v0.5.0-alpha.1) (2026-04-22)
 
 
