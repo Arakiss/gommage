@@ -145,6 +145,13 @@ enum Cmd {
         pretty: bool,
     },
 
+    /// Map a tool call JSON from stdin into capabilities without evaluating policy.
+    Map {
+        /// Emit a stable machine-readable mapper report.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Diagnose the local Gommage installation and runtime state.
     Doctor {
         /// Emit a stable machine-readable diagnostic report.
@@ -506,6 +513,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             };
             println!("{out}");
         }
+        Cmd::Map { json } => return cmd_map(layout, json),
         Cmd::Doctor { json } => return cmd_doctor(layout, json),
         Cmd::Verify { json, policy_tests } => return cmd_verify(layout, json, policy_tests),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
@@ -692,6 +700,56 @@ fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
 fn evaluate_only(rt: &Runtime, call: &ToolCall) -> gommage_core::EvalResult {
     let caps = rt.mapper.map(call);
     evaluate(&caps, &rt.policy)
+}
+
+#[derive(Debug, Serialize)]
+struct MapReport {
+    input_hash: String,
+    tool: String,
+    capabilities_dir: String,
+    mapper_rules: usize,
+    capabilities: Vec<Capability>,
+}
+
+fn build_map_report(layout: &HomeLayout, call: ToolCall) -> Result<MapReport> {
+    let mapper = gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir)
+        .context("loading capability mappers")?;
+    let capabilities = mapper.map(&call);
+    Ok(MapReport {
+        input_hash: call.input_hash(),
+        tool: call.tool,
+        capabilities_dir: path_display(&layout.capabilities_dir),
+        mapper_rules: mapper.rule_count(),
+        capabilities,
+    })
+}
+
+fn cmd_map(layout: HomeLayout, json: bool) -> Result<ExitCode> {
+    let mut buf = String::new();
+    io::stdin().read_to_string(&mut buf)?;
+    let call: ToolCall = serde_json::from_str(&buf).context("parsing stdin as ToolCall")?;
+    let report = build_map_report(&layout, call)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_map_report(&report);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn print_map_report(report: &MapReport) {
+    println!("input_hash: {}", report.input_hash);
+    println!("tool: {}", report.tool);
+    println!("capabilities_dir: {}", report.capabilities_dir);
+    println!("mapper_rules: {}", report.mapper_rules);
+    if report.capabilities.is_empty() {
+        println!("capabilities: none");
+    } else {
+        println!("capabilities:");
+        for capability in &report.capabilities {
+            println!("- {capability}");
+        }
+    }
 }
 
 fn decide_with_pictos(

@@ -182,6 +182,16 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
   | gommage policy snapshot --name main_push_requires_picto
 ```
 
+Inspect mapper output alone before deciding which policy rule to write:
+
+```sh
+echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' \
+  | gommage map --json
+```
+
+`gommage map` reports `input_hash`, the active `capabilities_dir`, mapper rule
+count, and emitted capabilities without loading policy or writing audit entries.
+
 The generated YAML includes the observed decision, `hard_stop` or
 `required_scope` when relevant, and the matched policy rule if one matched.
 Review the output before committing it; the snapshot captures current behavior,
@@ -197,6 +207,9 @@ with `version: 1` plus `cases`, or a top-level list of cases.
 ## Debugging
 
 ```sh
+# Show mapper output without policy evaluation
+echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' | gommage map
+
 # Show which rule matched a given call
 echo '{"tool":"Bash","input":{"command":"git push origin main"}}' | gommage decide --pretty
 

@@ -30,6 +30,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage policy schema` prints the official JSON Schema for policy fixture
   files so agents, editors, and CI generators can validate fixture YAML before
   running semantic policy checks.
+- `gommage map` and `gommage map --json` inspect `ToolCall -> capabilities`
+  mapper output without evaluating policy, reading pictos, or writing audit
+  entries.
 - `gommage audit-verify --explain --format human` renders the signed audit
   forensic report as a compact human-readable anomaly summary. Plain
   `audit-verify --explain` remains the JSON automation contract.

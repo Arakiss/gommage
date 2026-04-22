@@ -185,6 +185,19 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
 Use `--case-only` when appending the generated case list to an existing fixture
 file.
 
+When the question is "what did the mapper emit?" rather than "what decision did
+the policy make?", inspect the mapper directly:
+
+```sh
+echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' \
+  | gommage map --json
+```
+
+`gommage map` loads only `capabilities.d/`. It does not load policy files, read
+pictos, talk to the daemon, or write audit entries. Use it before writing a new
+rule, when debugging mapper coverage, or when an agent needs to propose a
+fixture from observed tool traffic.
+
 The fixture file may be either a mapping with `version: 1` and `cases`, or a
 top-level YAML list of cases. Each case supports:
 
