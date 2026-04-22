@@ -52,6 +52,7 @@ gommage quickstart --agent codex --daemon
 ```sh
 gommage doctor
 gommage doctor --json
+gommage smoke --json
 ```
 
 Treat `doctor --json` status as:
@@ -59,6 +60,11 @@ Treat `doctor --json` status as:
 - `ok`: healthy.
 - `warn`: operable, commonly before the first audit entry or without a daemon socket.
 - `fail`: do not trust the hook path until fixed.
+
+Treat `smoke --json` status as:
+
+- `pass`: active mapper + policy semantics match the built-in harness fixtures.
+- `fail`: do not trust the hook path until the unexpected decision is understood.
 
 ## Source Checkout
 
@@ -77,7 +83,7 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
 - Agent skill install destinations:
   - Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
   - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
-- Agent automation should prefer `gommage doctor --json`, `gommage policy check`, and `gommage audit-verify --explain`. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
+- Agent automation should prefer `gommage doctor --json`, `gommage smoke --json`, `gommage policy check`, and `gommage audit-verify --explain`. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
 - Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook and imports supported `permissions.deny` entries from `~/.claude/settings.json`.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
@@ -90,6 +96,7 @@ Useful commands:
 gommage expedition start "<task-name>"
 gommage expedition end
 gommage policy check
+gommage smoke --json
 gommage grant --scope "git.push:main" --uses 1 --ttl 10m --reason "<reason>"
 gommage audit-verify
 gommage explain <audit-id>

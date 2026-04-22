@@ -179,6 +179,9 @@ curl --proto '=https' --tlsv1.2 -sSf \
 # Verify local runtime health.
 gommage doctor --json
 
+# Verify active mapper + policy semantics.
+gommage smoke --json
+
 # Validate policies before trusting a hook path.
 gommage policy check
 
@@ -186,9 +189,12 @@ gommage policy check
 gommage audit-verify --explain
 ```
 
-`doctor --json`, policy hashes, audit verification, and decision JSON are the
-automation contracts. Human presentation output is intentionally not part of
-the automation contract.
+`doctor --json`, `smoke --json`, policy hashes, audit verification, and
+decision JSON are the automation contracts. `smoke --json` is the semantic
+post-install check: it verifies that the active mapper and policy set still
+produce the expected hard-stop, fail-closed, allow, ask-picto, web, and MCP
+decisions. Human presentation output is intentionally not part of the automation
+contract.
 
 ## Quickstart
 
@@ -204,6 +210,9 @@ gommage quickstart --agent claude --daemon
 # Scriptable verification. `warn` is expected before the first audit entry
 # and `fail` means setup needs attention.
 gommage doctor --json
+
+# Semantic verification. This should pass before trusting the harness.
+gommage smoke --json
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
@@ -236,7 +245,7 @@ gommage expedition end
 
 ## Diagnostics
 
-Use `gommage doctor` for human-readable checks and `gommage doctor --json` for installers, skills, CI smoke tests, and agent setup scripts. The JSON report has a top-level `status`:
+Use `gommage doctor` for human-readable installation checks and `gommage doctor --json` for installers, skills, CI smoke tests, and agent setup scripts. Use `gommage smoke --json` after policy installation to verify the active mapper + policy semantics end to end. The doctor JSON report has a top-level `status`:
 
 - `ok`: all checks passed.
 - `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.
