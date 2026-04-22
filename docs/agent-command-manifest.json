@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "description": "Canonical agent-facing Gommage command contract. Commands are executed in order by scripts/check-agent-command-contracts.sh.",
+  "placeholders": {
+    "{report_bundle}": "Temporary JSON output path provided by the contract test."
+  },
+  "commands": [
+    {
+      "id": "init",
+      "purpose": "Initialize the selected Gommage home.",
+      "stdin_mode": "none",
+      "argv": ["init"]
+    },
+    {
+      "id": "policy_init_stdlib",
+      "purpose": "Install bundled policies and capability mappers.",
+      "stdin_mode": "none",
+      "argv": ["policy", "init", "--stdlib"]
+    },
+    {
+      "id": "quickstart_dry_run_json",
+      "purpose": "Inspect setup mutations without writing files.",
+      "stdin_mode": "none",
+      "argv": [
+        "quickstart",
+        "--agent",
+        "claude",
+        "--daemon",
+        "--daemon-manager",
+        "systemd",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    {
+      "id": "quickstart_claude",
+      "purpose": "Install Claude Code hooks and native permission imports.",
+      "stdin_mode": "none",
+      "argv": ["quickstart", "--agent", "claude", "--no-self-test"]
+    },
+    {
+      "id": "agent_install_codex",
+      "purpose": "Install Codex hook wiring.",
+      "stdin_mode": "none",
+      "argv": ["agent", "install", "codex"]
+    },
+    {
+      "id": "verify_json",
+      "purpose": "Run the default readiness gate.",
+      "stdin_mode": "none",
+      "argv": ["verify", "--json"]
+    },
+    {
+      "id": "verify_policy_fixtures",
+      "purpose": "Run repository-owned policy fixtures.",
+      "stdin_mode": "none",
+      "argv": ["verify", "--json", "--policy-test", "examples/policy-fixtures.yaml"]
+    },
+    {
+      "id": "report_bundle",
+      "purpose": "Create a redacted support bundle.",
+      "stdin_mode": "none",
+      "argv": ["report", "bundle", "--redact", "--output", "{report_bundle}"]
+    },
+    {
+      "id": "doctor_json",
+      "purpose": "Inspect lower-level runtime health.",
+      "stdin_mode": "none",
+      "argv": ["doctor", "--json"]
+    },
+    {
+      "id": "agent_status_claude",
+      "purpose": "Inspect Claude Code hook and permission import state.",
+      "stdin_mode": "none",
+      "argv": ["agent", "status", "claude", "--json"]
+    },
+    {
+      "id": "agent_status_codex",
+      "purpose": "Inspect Codex hook and sandbox state.",
+      "stdin_mode": "none",
+      "argv": ["agent", "status", "codex", "--json"]
+    },
+    {
+      "id": "smoke_json",
+      "purpose": "Run built-in semantic policy checks.",
+      "stdin_mode": "none",
+      "argv": ["smoke", "--json"]
+    },
+    {
+      "id": "policy_schema",
+      "purpose": "Print the fixture schema for agents/editors/CI.",
+      "stdin_mode": "none",
+      "argv": ["policy", "schema"]
+    },
+    {
+      "id": "policy_check",
+      "purpose": "Validate active policy files.",
+      "stdin_mode": "none",
+      "argv": ["policy", "check"]
+    },
+    {
+      "id": "policy_test_json",
+      "purpose": "Run a fixture file directly.",
+      "stdin_mode": "none",
+      "argv": ["policy", "test", "examples/policy-fixtures.yaml", "--json"]
+    },
+    {
+      "id": "map_json",
+      "purpose": "Inspect capability mapping for a ToolCall.",
+      "stdin_mode": "json",
+      "stdin_json": {
+        "tool": "Bash",
+        "input": {
+          "command": "git push --force origin main"
+        }
+      },
+      "argv": ["map", "--json"]
+    },
+    {
+      "id": "map_hook_json",
+      "purpose": "Inspect capability mapping for a PreToolUse hook payload.",
+      "stdin_mode": "json",
+      "stdin_json": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "git push --force origin main"
+        }
+      },
+      "argv": ["map", "--json", "--hook"]
+    },
+    {
+      "id": "grant_creates_audit_event",
+      "purpose": "Verify picto creation and audit-event write path.",
+      "stdin_mode": "none",
+      "argv": [
+        "grant",
+        "--scope",
+        "test.contract",
+        "--uses",
+        "1",
+        "--ttl",
+        "60",
+        "--reason",
+        "contract"
+      ]
+    },
+    {
+      "id": "audit_verify_explain",
+      "purpose": "Verify signed audit logs with automation JSON.",
+      "stdin_mode": "none",
+      "argv": ["audit-verify", "--explain"]
+    },
+    {
+      "id": "agent_uninstall_dry_run",
+      "purpose": "Inspect reversible agent hook cleanup.",
+      "stdin_mode": "none",
+      "argv": ["agent", "uninstall", "all", "--restore-backup", "--dry-run"]
+    },
+    {
+      "id": "uninstall_dry_run",
+      "purpose": "Inspect full cleanup without mutating state.",
+      "stdin_mode": "none",
+      "argv": ["uninstall", "--all", "--dry-run", "--daemon-manager", "systemd"]
+    }
+  ]
+}

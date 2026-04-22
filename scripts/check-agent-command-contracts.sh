@@ -11,6 +11,7 @@ export GOMMAGE_CLAUDE_SETTINGS="$tmp/claude/settings.json"
 export GOMMAGE_CODEX_HOOKS="$tmp/codex/hooks.json"
 export GOMMAGE_CODEX_CONFIG="$tmp/codex/config.toml"
 export GOMMAGE_SYSTEMD_USER_DIR="$tmp/systemd-user"
+export GOMMAGE_CONTRACT_REPORT="$tmp/report-bundle.json"
 mkdir -p "$(dirname "$GOMMAGE_CLAUDE_SETTINGS")" "$(dirname "$GOMMAGE_CODEX_HOOKS")"
 printf '{"permissions":{"allow":["Bash","Read(./docs/**)"],"deny":["Read(./secrets/**)"]}}\n' > "$GOMMAGE_CLAUDE_SETTINGS"
 printf 'sandbox_mode = "workspace-write"\n[features]\n' > "$GOMMAGE_CODEX_CONFIG"
@@ -23,38 +24,47 @@ gommage_cmd() {
   fi
 }
 
-check() {
+run_manifest_command() {
   label="$1"
+  stdin_json="$2"
+  shift
   shift
   printf 'contract: %s\n' "$label"
-  "$@" >/dev/null
+  if [ -n "$stdin_json" ]; then
+    printf '%s' "$stdin_json" | gommage_cmd "$@" >/dev/null
+  else
+    gommage_cmd "$@" >/dev/null
+  fi
 }
 
-check "init" gommage_cmd init
-check "policy init" gommage_cmd policy init --stdlib
-check "quickstart dry-run json" gommage_cmd quickstart --agent claude --daemon --daemon-manager systemd --dry-run --json
-check "quickstart claude" gommage_cmd quickstart --agent claude --no-self-test
-check "agent install codex" gommage_cmd agent install codex
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to read docs/agent-command-manifest.json" >&2
+  exit 1
+fi
 
-check "verify json" gommage_cmd verify --json
-check "verify policy fixtures" gommage_cmd verify --json --policy-test examples/policy-fixtures.yaml
-check "report bundle" gommage_cmd report bundle --redact --output "$tmp/report-bundle.json"
-check "doctor json" gommage_cmd doctor --json
-check "agent status claude" gommage_cmd agent status claude --json
-check "agent status codex" gommage_cmd agent status codex --json
-check "smoke json" gommage_cmd smoke --json
-check "policy schema" gommage_cmd policy schema
-check "policy check" gommage_cmd policy check
-check "policy test" gommage_cmd policy test examples/policy-fixtures.yaml --json
+python3 - docs/agent-command-manifest.json > "$tmp/manifest-runner.sh" <<'PY'
+import json
+import os
+import shlex
+import sys
 
-printf '%s' '{"tool":"Bash","input":{"command":"git push --force origin main"}}' \
-  | check "map json" gommage_cmd map --json
-printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' \
-  | check "map hook json" gommage_cmd map --json --hook
+manifest_path = sys.argv[1]
+with open(manifest_path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
 
-check "grant creates audit event" gommage_cmd grant --scope test.contract --uses 1 --ttl 60 --reason contract
-check "audit verify explain" gommage_cmd audit-verify --explain
-check "agent uninstall dry-run" gommage_cmd agent uninstall all --restore-backup --dry-run
-check "uninstall dry-run" gommage_cmd uninstall --all --dry-run --daemon-manager systemd
+for command in manifest["commands"]:
+    argv = [
+        os.environ["GOMMAGE_CONTRACT_REPORT"] if arg == "{report_bundle}" else arg
+        for arg in command["argv"]
+    ]
+    stdin_json = ""
+    if command.get("stdin_mode") == "json":
+        stdin_json = json.dumps(command["stdin_json"], separators=(",", ":"))
+    parts = ["run_manifest_command", command["id"], stdin_json, *argv]
+    print(" ".join(shlex.quote(part) for part in parts))
+PY
+
+# shellcheck source=/dev/null
+. "$tmp/manifest-runner.sh"
 
 printf 'contract: ok\n'
