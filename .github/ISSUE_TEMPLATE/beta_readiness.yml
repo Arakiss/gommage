@@ -22,9 +22,14 @@ body:
         - Home setup
         - Readiness gate
         - Semantic smoke
+        - Operator TUI
+        - Approval flow
+        - Approval webhook
         - Host-agent wiring
         - Policy fixtures
         - Audit verification
+        - Recovery / uninstall
+        - Host smoke
         - CI / release automation
         - Documentation
         - Publishing / crates.io
@@ -35,7 +40,7 @@ body:
     id: evidence
     attributes:
       label: Evidence
-      description: Commands, workflow URLs, release URLs, or screenshots proving the blocker.
+      description: Commands, workflow URLs, release URLs, redacted bundles, or screenshots proving the blocker.
       render: shell
     validations:
       required: true
@@ -63,4 +68,5 @@ body:
       options:
         - label: The fix has a command or workflow proving it works.
         - label: Documentation was updated if the operator path changed.
+        - label: The beta-test-loop checklist was updated if the real host workflow changed.
         - label: This issue links the release, commit, or PR that resolves it.

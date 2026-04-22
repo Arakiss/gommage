@@ -44,11 +44,14 @@ The operator TUI exposes the same inbox:
 ```sh
 gommage tui --view approvals
 gommage tui --snapshot --view approvals
+gommage tui --watch --watch-ticks 3 --view approvals
 ```
 
-Interactive TUI approval is intentionally two-step: `A` or `D` stages the
-selected pending request, and `y` is required before Gommage mints a picto or
-records a denial.
+Interactive TUI approval is intentionally two-step. Operators can use `t/T` to
+cycle TTL presets and `u/U` to cycle use-count presets, then `A` or `D` stages
+the selected pending request. `y` is required before Gommage mints a picto or
+records a denial. Snapshot and bounded watch modes are read-only and include
+selected-request detail plus replay/evidence commands for support.
 
 Replay and evidence commands are for debugging and support. Replay evaluates the
 stored request capabilities against the current policy, so an operator can see

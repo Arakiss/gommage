@@ -99,6 +99,21 @@
       "argv": ["tui", "--snapshot", "--view", "approvals"]
     },
     {
+      "id": "tui_watch_approvals",
+      "purpose": "Capture bounded approval inbox refresh frames without ANSI output.",
+      "stdin_mode": "none",
+      "argv": [
+        "tui",
+        "--watch",
+        "--watch-ticks",
+        "2",
+        "--refresh-ms",
+        "250",
+        "--view",
+        "approvals"
+      ]
+    },
+    {
       "id": "approval_list_json",
       "purpose": "Inspect pending out-of-band approval requests.",
       "stdin_mode": "none",

@@ -27,6 +27,7 @@ mod quickstart_plan;
 mod report;
 mod smoke;
 mod tui;
+mod tui_actions;
 mod tui_render;
 mod tui_views;
 mod uninstall;
@@ -276,6 +277,12 @@ enum Cmd {
         /// Print a deterministic non-interactive dashboard snapshot.
         #[arg(long)]
         snapshot: bool,
+        /// Print repeated plain-text dashboard snapshots instead of opening the full-screen TUI.
+        #[arg(long)]
+        watch: bool,
+        /// Stop watch mode after this many frames. Implies --watch.
+        #[arg(long)]
+        watch_ticks: Option<u32>,
         /// Interactive refresh interval in milliseconds.
         #[arg(long, default_value_t = 1500)]
         refresh_ms: u64,
@@ -534,6 +541,8 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             agents,
             view,
             snapshot,
+            watch,
+            watch_ticks,
             refresh_ms,
         } => {
             return cmd_tui(
@@ -542,6 +551,8 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     agents,
                     view,
                     snapshot,
+                    watch,
+                    watch_ticks,
                     refresh_ms,
                 },
             );

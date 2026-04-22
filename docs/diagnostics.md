@@ -13,9 +13,12 @@ should still parse the JSON commands below instead of the TUI.
 `gommage tui --view dashboard|approvals|policies|audit|capabilities|recovery|all`
 selects operator views. `--view all` is the most useful issue-report snapshot:
 it includes readiness, pending approvals, policy inventory, signed audit
-summary, mapper inventory, and recovery shortcuts. Interactive mode switches
-views with `1`-`6`. In the approvals view, `A` and `D` stage an approve/deny
-action for the selected request and require `y` before mutating state.
+summary, mapper inventory, and recovery shortcuts. `gommage tui --watch` prints
+the same report repeatedly as plain text; use `--watch-ticks <n>` to bound demos,
+CI artifacts, and issue-report captures. Interactive mode switches views with
+`1`-`6`. In the approvals view, `t/T` changes the TTL preset, `u/U` changes the
+use-count preset, and `A` / `D` stage an approve/deny action for the selected
+request. `y` is still required before mutating state.
 The README embeds a sanitized animated demo at `docs/assets/tui-dashboard.gif`
 and keeps `docs/assets/tui-dashboard.svg` as a static fallback; update both
 assets whenever the TUI's primary sections or vocabulary change.
@@ -58,6 +61,7 @@ Run the aggregated gate with:
 ```sh
 gommage tui
 gommage tui --snapshot --view all
+gommage tui --watch --watch-ticks 3 --view approvals
 gommage verify --json
 gommage verify --json --policy-test examples/policy-fixtures.yaml
 ```
@@ -138,6 +142,14 @@ best-effort: failures are signed as `approval_webhook_failed`, but never change
 the permission decision. Replay compares the stored request capabilities against
 the current policy; evidence bundles collect request state, relevant signed
 audit lines, verification summary, and next commands for issue reports.
+`gommage tui --snapshot --view approvals` includes selected-request detail and
+the same replay/evidence commands. Bounded watch mode is useful when an operator
+or agent wants to capture the inbox changing without driving the interactive
+TUI:
+
+```sh
+gommage tui --watch --watch-ticks 3 --view approvals
+```
 
 ## JSON shape
 

@@ -108,13 +108,15 @@ Goal: approval and audit become a live workflow instead of scattered commands.
 
 Features:
 
-- `gommage watch`
-  - Follow-up to the current `gommage tui --view all` snapshot/interactive
-    command center: live daemon status, decision stream, pending asks, active
-    pictos, policy hash, audit tail, and recovery shortcuts.
+- Operator watch mode
+  - `gommage tui --watch --watch-ticks <n>` now provides bounded plain-text
+    refreshes for demos, headless operators, and issue reports. Next step:
+    merge in a live decision stream, active pictos, daemon state, and audit
+    tail without making human output an automation contract.
 - Local picto approval flow
-  - The CLI approval path and TUI approve/deny confirmation now exist. Next
-    step is a richer inline form with editable TTL, use count, and reason.
+  - The CLI approval path, TUI approve/deny confirmation, and TUI TTL/use-count
+    presets now exist. Next step is a richer inline form with editable reason
+    text and policy-context preview.
 - Approval provider interface
   - Generic, Slack-shaped, and Discord-shaped webhook payloads now exist through
     `gommage approval webhook`. Next step is signed callbacks and native ntfy
@@ -134,7 +136,7 @@ Primary code surfaces:
 
 Exit criteria:
 
-- A user can approve a one-shot picto from the TUI, tune the grant parameters
+- A user can approve a one-shot picto from the TUI, tune grant TTL/use-count
   before confirmation, and verify the audit entry afterward.
 - Webhook approval supports signed callbacks or an equivalent replay-resistant
   confirmation channel.
@@ -215,7 +217,8 @@ Exit criteria:
 1. Ship Milestone 0 before any public beta announcement.
 2. Ship `replay`, `policy diff`, and `explain --trace` before `policy suggest`.
 3. Ship `policy suggest` before community policy packs.
-4. Ship `gommage watch` before remote approval providers.
+4. Extend TUI watch with decision-stream and active-picto panes before remote
+   approval providers.
 5. Ship MCP gateway before claiming broader host support.
 6. Ship package-manager integrations only after the signed release installer has
    stayed green through multiple alpha releases.

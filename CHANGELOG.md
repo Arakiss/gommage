@@ -52,6 +52,15 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   incoming webhooks. Generic JSON remains the stable automation contract.
 - `gommage approval template --provider generic|slack|discord|ntfy` prints
   provider setup notes and payload templates without sending network requests.
+- `gommage tui --watch` prints repeated plain-text dashboard snapshots for
+  headless operators, demos, and issue reports. `--watch-ticks <n>` bounds the
+  loop for scripts and CI artifacts.
+- `gommage tui --snapshot --view approvals` now includes selected-request
+  detail, replay commands, and redacted evidence-bundle commands.
+- Interactive `gommage tui --view approvals` now supports TTL and use-count
+  presets before approve confirmation via `t/T` and `u/U`.
+- `docs/beta-test-loop.md` documents the host-level beta feedback checklist
+  from install through recovery and uninstall evidence.
 - The live-doc release-reference check now skips known binary asset extensions
   so README media files do not break documentation CI.
 - `ask_picto` decisions now create durable local approval requests in

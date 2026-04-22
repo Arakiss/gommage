@@ -6,11 +6,13 @@ use crate::{
     tui_views::{TuiView, ViewReport, build_approvals_report, build_view_report},
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct RenderState<'a> {
     pub(crate) selected: usize,
     pub(crate) selected_approval: usize,
     pub(crate) view: TuiView,
+    pub(crate) approval_uses: u32,
+    pub(crate) approval_ttl: String,
     pub(crate) notice: Option<&'a str>,
     pub(crate) confirm: Option<&'a str>,
 }
@@ -65,15 +67,7 @@ pub(crate) fn render_lines(
             colors
         )
     ));
-    render_view_body(
-        &mut lines,
-        layout,
-        dashboard,
-        colors,
-        state.selected,
-        state.selected_approval,
-        state.view,
-    );
+    render_view_body(&mut lines, layout, dashboard, colors, &state);
     if let Some(confirm) = state.confirm {
         lines.push(String::new());
         lines.push(format!(
@@ -92,12 +86,13 @@ pub(crate) fn render_lines(
     }
     lines.push(String::new());
     lines.push(format!(
-        "{} quit   {} refresh   {} move   {} approve   {} deny   {} for CI and issue reports",
+        "{} quit   {} refresh   {} move   {} approve   {} deny   {} approval draft   {} for CI and issue reports",
         paint("q", UiTone::Gold, true, colors),
         paint("r", UiTone::Gold, true, colors),
         paint("j/k", UiTone::Gold, true, colors),
         paint("A", UiTone::Gold, true, colors),
         paint("D", UiTone::Gold, true, colors),
+        paint("t/T u/U", UiTone::Gold, true, colors),
         paint("--snapshot", UiTone::Muted, false, colors)
     ));
     lines
@@ -108,19 +103,27 @@ fn render_view_body(
     layout: &HomeLayout,
     dashboard: &Dashboard,
     colors: bool,
-    selected: usize,
-    selected_approval: usize,
-    view: TuiView,
+    state: &RenderState<'_>,
 ) {
-    match view {
+    match state.view {
         TuiView::Dashboard | TuiView::All => {
-            render_dashboard_body(lines, dashboard, colors, selected);
+            render_dashboard_body(lines, dashboard, colors, state.selected);
         }
-        TuiView::Approvals => render_report_body(
-            lines,
-            &build_approvals_report(layout, Some(selected_approval)),
-            colors,
-        ),
+        TuiView::Approvals => {
+            lines.push(format!(
+                "{} ttl {}  uses {}  {}",
+                paint("Approval draft", UiTone::Gold, true, colors),
+                state.approval_ttl,
+                state.approval_uses,
+                paint("t/T ttl  u/U uses", UiTone::Muted, false, colors)
+            ));
+            lines.push(String::new());
+            render_report_body(
+                lines,
+                &build_approvals_report(layout, Some(state.selected_approval)),
+                colors,
+            );
+        }
         other => match build_view_report(layout, other) {
             Ok(report) => render_report_body(lines, &report, colors),
             Err(error) => lines.push(format!("could not render {}: {error}", other.label())),
