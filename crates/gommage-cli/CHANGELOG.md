@@ -38,6 +38,7 @@
 - `gommage agent install claude|codex` for targeted hook installation.
 - `gommage daemon install|status|uninstall` for user-level launchd/systemd service management.
 - `gommage smoke` / `gommage smoke --json` for semantic post-install fixtures covering hard-stop, fail-closed, allow, ask-picto, web, and MCP policy paths.
+- `gommage policy test <file>` / `--json` for user-owned YAML policy regression fixtures with per-case capabilities, matched rule, actual decision, expected decision, and mismatch errors.
 - `gommage mascot` / `gommage logo` for the Gommage Gestral terminal logo, with an interactive Gommage Teal to Picto Gold gradient and `--plain` / `NO_COLOR` script-safe output.
 - Claude quickstart now includes `Grep`, `WebFetch`, `WebSearch`, and MCP matcher coverage when native allow rules permit those tools.
 - `gommage doctor`.

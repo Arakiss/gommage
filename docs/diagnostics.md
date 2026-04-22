@@ -4,6 +4,8 @@
 
 `gommage smoke` is the semantic health check. It runs built-in tool-call fixtures against the active capability mappers and policy set without writing audit entries or consuming pictos. Use `gommage smoke --json` after installing policies or changing policy packs.
 
+`gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
+
 ## Exit codes
 
 | Status | Exit code | Meaning |
@@ -102,3 +104,47 @@ Each check includes the tool call, canonical `input_hash`, emitted
 capabilities, matched rule, expected decision, and actual decision. This makes
 `smoke --json` suitable for installer verification, CI images, and agent skills
 that need to prove semantic readiness instead of only checking that files exist.
+
+## Policy regression fixtures
+
+Use `policy test` when a repository wants to lock down its own policy behavior:
+
+```yaml
+version: 1
+cases:
+  - name: main_push_requires_picto
+    description: Pushes to main should require a signed git.push:main picto.
+    tool: Bash
+    input:
+      command: git push origin main
+    expect:
+      decision: ask_picto
+      required_scope: git.push:main
+      matched_rule: gate-main-push
+```
+
+Run it locally or in CI:
+
+```sh
+gommage policy test examples/policy-fixtures.yaml
+gommage policy test examples/policy-fixtures.yaml --json
+```
+
+The fixture file may be either a mapping with `version: 1` and `cases`, or a
+top-level YAML list of cases. Each case supports:
+
+| Field | Required | Meaning |
+|---|---:|---|
+| `name` | yes | Stable case identifier for humans, agents, and CI logs. |
+| `description` | no | Human context for why the behavior matters. |
+| `tool` | yes | Agent tool name, for example `Bash`, `WebFetch`, or `mcp__github__create_issue`. |
+| `input` | no | Tool input object. Defaults to `{}`. |
+| `expect.decision` | yes | One of `allow`, `gommage`, or `ask_picto`. |
+| `expect.hard_stop` | no | Expected `gommage` hard-stop boolean. |
+| `expect.required_scope` | no | Expected ask-picto scope. |
+| `expect.matched_rule` | no | Expected matched policy rule name. |
+
+The JSON report has top-level `status: "pass" | "fail"`, `policy_version`,
+`mapper_rules`, `summary`, and per-case `capabilities`, `matched_rule`,
+`actual`, `expected`, and `errors`. Treat `fail` as a policy regression until
+the policy or mapper change is reviewed.

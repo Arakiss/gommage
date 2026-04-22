@@ -69,7 +69,7 @@ Gommage takes a narrow stance:
 
 ## Status
 
-**Current public release channel: alpha (`gommage-cli-v0.4.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on launch-readiness smoke tests, crates.io publishing gates, policy import fidelity, mapper coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
+**Current public release channel: alpha (`gommage-cli-v0.4.0-alpha.1`).** Usable with **Claude Code** (all supported tool types through the bundled mappers) and **OpenAI Codex CLI** (Bash tool only; Codex's `PreToolUse` hook is currently Bash-scoped upstream, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)). This is not production-ready yet; the next iterations are focused on launch-readiness smoke tests, policy regression fixtures, crates.io publishing gates, policy import fidelity, mapper coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
 
 The alpha distribution has two install surfaces:
 
@@ -182,6 +182,9 @@ gommage doctor --json
 # Verify active mapper + policy semantics.
 gommage smoke --json
 
+# Run project-owned policy regression fixtures when present.
+gommage policy test examples/policy-fixtures.yaml --json
+
 # Validate policies before trusting a hook path.
 gommage policy check
 
@@ -189,12 +192,14 @@ gommage policy check
 gommage audit-verify --explain
 ```
 
-`doctor --json`, `smoke --json`, policy hashes, audit verification, and
-decision JSON are the automation contracts. `smoke --json` is the semantic
-post-install check: it verifies that the active mapper and policy set still
-produce the expected hard-stop, fail-closed, allow, ask-picto, web, and MCP
-decisions. Human presentation output is intentionally not part of the automation
-contract.
+`doctor --json`, `smoke --json`, `policy test --json`, policy hashes, audit
+verification, and decision JSON are the automation contracts. `smoke --json` is
+the semantic post-install check: it verifies that the active mapper and policy
+set still produce the expected hard-stop, fail-closed, allow, ask-picto, web,
+and MCP decisions. `policy test --json` is the project-owned regression surface:
+put expected decisions in versioned YAML fixtures and run them in CI before
+trusting a hook path. Human presentation output is intentionally not part of the
+automation contract.
 
 ## Quickstart
 
@@ -213,6 +218,9 @@ gommage doctor --json
 
 # Semantic verification. This should pass before trusting the harness.
 gommage smoke --json
+
+# Optional project regression fixtures. Keep these in the repo and run in CI.
+gommage policy test examples/policy-fixtures.yaml --json
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
@@ -245,7 +253,7 @@ gommage expedition end
 
 ## Diagnostics
 
-Use `gommage doctor` for human-readable installation checks and `gommage doctor --json` for installers, skills, CI smoke tests, and agent setup scripts. Use `gommage smoke --json` after policy installation to verify the active mapper + policy semantics end to end. The doctor JSON report has a top-level `status`:
+Use `gommage doctor` for human-readable installation checks and `gommage doctor --json` for installers, skills, CI smoke tests, and agent setup scripts. Use `gommage smoke --json` after policy installation to verify the active mapper + policy semantics end to end. Use `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
 
 - `ok`: all checks passed.
 - `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.
@@ -321,6 +329,34 @@ Borrowed from _Expedition 33_ (Sandfall Interactive, 2025) — functional, not o
 
 Full cookbook in [`docs/policy-cookbook.md`](docs/policy-cookbook.md).
 
+## Policy regression fixtures
+
+Built-in `gommage smoke --json` proves the installed stdlib. Project fixtures
+prove your own policy intent:
+
+```yaml
+version: 1
+cases:
+  - name: main_push_requires_picto
+    tool: Bash
+    input:
+      command: git push origin main
+    expect:
+      decision: ask_picto
+      required_scope: git.push:main
+      matched_rule: gate-main-push
+```
+
+Run fixtures with:
+
+```sh
+gommage policy test examples/policy-fixtures.yaml --json
+```
+
+Each case reports the tool call, canonical `input_hash`, emitted capabilities,
+matched rule, expected decision, actual decision, and mismatch errors. The
+command exits non-zero when any case fails.
+
 ## Determinism guarantee
 
 Gommage ships a deterministic fixture corpus with an expected decision oracle, in-order and shuffled. CI runs the sweep repeatedly across OS and locale combinations; if any decision flips based on ordering, the build fails. See [`tests/determinism/`](tests/determinism/).
@@ -335,6 +371,7 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 - Append-only signed audit log
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
+- Built-in semantic smoke checks and project-owned policy regression fixtures
 - Packaged `gommage-stdlib` crate assets for future crates.io support
 - Sigstore-signed binary release artifacts + installer verification
 - Determinism-critical deps pinned with `=x.y.z`, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
