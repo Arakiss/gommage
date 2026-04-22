@@ -106,7 +106,7 @@ pub(crate) fn daemon_install(
     Ok(ExitCode::SUCCESS)
 }
 
-fn daemon_uninstall(manager: ServiceManager, dry_run: bool) -> Result<ExitCode> {
+pub(crate) fn daemon_uninstall(manager: ServiceManager, dry_run: bool) -> Result<ExitCode> {
     let path = service_file_path(manager)?;
     if dry_run {
         for command in service_stop_commands(manager, &path) {

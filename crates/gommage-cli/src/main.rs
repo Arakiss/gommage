@@ -10,6 +10,7 @@ use time::OffsetDateTime;
 
 mod agent;
 mod agent_status;
+mod agent_uninstall;
 mod audit_cmd;
 mod daemon;
 mod doctor;
@@ -20,10 +21,12 @@ mod mcp;
 mod policy_cmd;
 mod quickstart;
 mod smoke;
+mod uninstall;
 mod util;
 mod verify;
 
 use agent::{AgentCmd, AgentKind, cmd_agent};
+use agent_uninstall::AgentUninstallTarget;
 use audit_cmd::{AuditExplainFormat, cmd_audit_verify, cmd_explain, print_log};
 use daemon::{DaemonCmd, ServiceManager, cmd_daemon};
 use doctor::cmd_doctor;
@@ -34,6 +37,7 @@ use mcp::run_mcp;
 use policy_cmd::{PolicyCmd, cmd_policy};
 use quickstart::{QuickstartOptions, cmd_quickstart};
 use smoke::cmd_smoke;
+use uninstall::{UninstallOptions, cmd_uninstall};
 use verify::cmd_verify;
 
 #[derive(Parser)]
@@ -93,6 +97,40 @@ enum Cmd {
     /// Install or inspect host-agent integrations.
     #[command(subcommand)]
     Agent(AgentCmd),
+
+    /// Remove Gommage integrations and installed state.
+    Uninstall {
+        /// Agent integration to remove.
+        #[arg(long, value_enum)]
+        agent: Option<AgentUninstallTarget>,
+        /// Stop/disable and remove the daemon user service.
+        #[arg(long)]
+        daemon: bool,
+        /// Service manager to use with --daemon. Defaults to launchd on macOS and systemd on Linux.
+        #[arg(long, value_enum)]
+        daemon_manager: Option<ServiceManager>,
+        /// Remove installed binaries from $GOMMAGE_BIN_DIR or ~/.local/bin.
+        #[arg(long)]
+        binaries: bool,
+        /// Remove installed Codex and Claude Code skills.
+        #[arg(long)]
+        skills: bool,
+        /// Remove the Gommage home directory selected by --home / $GOMMAGE_HOME.
+        #[arg(long = "purge-home", visible_alias = "home-data")]
+        purge_home: bool,
+        /// Select agent=all, daemon, binaries, skills, and purge-home.
+        #[arg(long)]
+        all: bool,
+        /// Restore the newest validated .gommage-bak-* agent config backup when available.
+        #[arg(long)]
+        restore_backup: bool,
+        /// Show planned removals without mutating.
+        #[arg(long)]
+        dry_run: bool,
+        /// Confirm destructive home removal.
+        #[arg(long)]
+        yes: bool,
+    },
 
     /// Start a new expedition (task context).
     #[command(subcommand)]
@@ -292,6 +330,34 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             );
         }
         Cmd::Agent(sub) => return cmd_agent(sub, layout),
+        Cmd::Uninstall {
+            agent,
+            daemon,
+            daemon_manager,
+            binaries,
+            skills,
+            purge_home,
+            all,
+            restore_backup,
+            dry_run,
+            yes,
+        } => {
+            return cmd_uninstall(
+                layout,
+                UninstallOptions {
+                    agent,
+                    daemon,
+                    daemon_manager,
+                    binaries,
+                    skills,
+                    purge_home,
+                    all,
+                    restore_backup,
+                    dry_run,
+                    yes,
+                },
+            );
+        }
         Cmd::Expedition(sub) => return cmd_expedition(sub, layout),
         Cmd::Grant {
             scope,
