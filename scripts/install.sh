@@ -33,6 +33,8 @@
 #                    — git ref for remote skill files (default: main)
 #   GOMMAGE_NO_PROMPT
 #                    — set to 1 for headless/non-interactive installs
+#   GOMMAGE_VERIFY_AFTER_INSTALL
+#                    — set to 1 to run `gommage verify` after binary install
 #   GOMMAGE_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN
 #                    — optional token for private repo releases
 
@@ -46,8 +48,20 @@ INSTALL_SKILL="${GOMMAGE_INSTALL_SKILL:-auto}"
 SKILL_AGENTS="${GOMMAGE_SKILL_AGENTS:-}"
 SKILL_REF="${GOMMAGE_SKILL_REF:-main}"
 NO_PROMPT="${GOMMAGE_NO_PROMPT:-0}"
+VERIFY_AFTER_INSTALL="${GOMMAGE_VERIFY_AFTER_INSTALL:-0}"
 SKILL_ONLY=0
-GITHUB_TOKEN="${GOMMAGE_GITHUB_TOKEN:-${GH_TOKEN:-${GITHUB_TOKEN:-}}}"
+GITHUB_TOKEN_SOURCE=""
+GITHUB_TOKEN_VALUE=""
+if [ -n "${GOMMAGE_GITHUB_TOKEN:-}" ]; then
+  GITHUB_TOKEN_SOURCE="GOMMAGE_GITHUB_TOKEN"
+  GITHUB_TOKEN_VALUE="${GOMMAGE_GITHUB_TOKEN}"
+elif [ -n "${GH_TOKEN:-}" ]; then
+  GITHUB_TOKEN_SOURCE="GH_TOKEN"
+  GITHUB_TOKEN_VALUE="${GH_TOKEN}"
+elif [ -n "${GITHUB_TOKEN:-}" ]; then
+  GITHUB_TOKEN_SOURCE="GITHUB_TOKEN"
+  GITHUB_TOKEN_VALUE="${GITHUB_TOKEN}"
+fi
 
 say()  { printf 'gommage-install: %s\n' "$*"; }
 die()  { printf 'gommage-install: error: %s\n' "$*" >&2; exit 1; }
@@ -72,6 +86,7 @@ Options:
                         May be repeated. Default with --with-skill: codex.
   --skill-ref <ref>     Git ref for remote skill files. Default: main.
   --no-prompt           Never prompt. Auto mode skips skill installation.
+  --verify              Run `gommage verify` after installing binaries.
   -h, --help            Show this help.
 
 Environment:
@@ -80,6 +95,7 @@ Environment:
   GOMMAGE_SKILL_AGENTS="codex claude" or "codex,claude"
   GOMMAGE_SKILL_REF=main
   GOMMAGE_NO_PROMPT=1
+  GOMMAGE_VERIFY_AFTER_INSTALL=1
   GOMMAGE_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN for private release downloads.
 
 The installer verifies the Sigstore bundle and SHA-256 checksum before it
@@ -88,15 +104,46 @@ extracts or writes binaries. Skill installation copies the repository skill to:
   Claude Code: ${CLAUDE_HOME:-$HOME/.claude}/skills/gommage
 EOF
 }
+cosign_install_hint() {
+  kernel="$(uname -s 2>/dev/null || printf unknown)"
+  case "$kernel" in
+    Darwin)
+      printf '%s\n' "install with: brew install cosign"
+      return
+      ;;
+  esac
+
+  os_ids=""
+  if [ -r /etc/os-release ]; then
+    os_ids="$(
+      . /etc/os-release 2>/dev/null || true
+      printf '%s %s\n' "${ID:-}" "${ID_LIKE:-}"
+    )"
+  fi
+  case "$os_ids" in
+    *cachyos*|*arch*)
+      printf '%s\n' "install with: paru -S cosign (or pacman -S cosign if your repos provide it)"
+      ;;
+    *fedora*|*rhel*|*centos*)
+      printf '%s\n' "install with: sudo dnf install cosign"
+      ;;
+    *debian*|*ubuntu*)
+      printf '%s\n' "Debian/Ubuntu: install cosign from Sigstore releases: https://github.com/sigstore/cosign/releases"
+      ;;
+    *)
+      printf '%s\n' "install cosign or set GOMMAGE_COSIGN; releases: https://github.com/sigstore/cosign/releases"
+      ;;
+  esac
+}
 need_cosign() {
-  command -v "$COSIGN" >/dev/null 2>&1 || die "required tool not found: $COSIGN (install cosign or set GOMMAGE_COSIGN)"
+  command -v "$COSIGN" >/dev/null 2>&1 || die "required tool not found: $COSIGN. $(cosign_install_hint)"
 }
 fetch() {
   url="$1"
   out="$2"
-  if [ -n "$GITHUB_TOKEN" ]; then
+  if [ -n "$GITHUB_TOKEN_VALUE" ]; then
     curl --proto '=https' --tlsv1.2 -sSfL \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Authorization: Bearer ${GITHUB_TOKEN_VALUE}" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
       -o "$out" "$url"
   else
@@ -105,9 +152,9 @@ fetch() {
 }
 fetch_stdout() {
   url="$1"
-  if [ -n "$GITHUB_TOKEN" ]; then
+  if [ -n "$GITHUB_TOKEN_VALUE" ]; then
     curl --proto '=https' --tlsv1.2 -sSfL \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Authorization: Bearer ${GITHUB_TOKEN_VALUE}" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
       "$url"
   else
@@ -201,6 +248,7 @@ configure_skill_install() {
     if [ "$NO_PROMPT" != "1" ] && has_tty; then
       prompt_skill_agents
     else
+      say "no --skill-agent provided and no TTY; defaulting to codex"
       SKILL_AGENTS="codex"
     fi
   fi
@@ -295,11 +343,11 @@ asset_api_url() {
 fetch_asset() {
   name="$1"
   out="$2"
-  if [ -n "$GITHUB_TOKEN" ]; then
+  if [ -n "$GITHUB_TOKEN_VALUE" ]; then
     api_url="$(asset_api_url "$name")"
     [ -n "$api_url" ] || die "release asset not found via GitHub API: ${name}"
     curl --proto '=https' --tlsv1.2 -sSfL \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Authorization: Bearer ${GITHUB_TOKEN_VALUE}" \
       -H "Accept: application/octet-stream" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
       -o "$out" "$api_url"
@@ -357,6 +405,10 @@ while [ "$#" -gt 0 ]; do
       NO_PROMPT=1
       shift
       ;;
+    --verify)
+      VERIFY_AFTER_INSTALL=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -371,6 +423,10 @@ need curl
 need mkdir
 need install
 need tr
+
+if [ -n "$GITHUB_TOKEN_VALUE" ]; then
+  say "using GitHub token from ${GITHUB_TOKEN_SOURCE}"
+fi
 
 configure_skill_install
 
@@ -467,7 +523,12 @@ done
 install_requested_skills
 
 # --- Sanity check -----------------------------------------------------------
-if ! echo ":$PATH:" | grep -q ":${BIN_DIR}:"; then
+if [ "$VERIFY_AFTER_INSTALL" = "1" ]; then
+  say "running ${BIN_DIR}/gommage verify"
+  "${BIN_DIR}/gommage" verify || die "gommage verify failed"
+fi
+
+if ! echo ":$PATH:" | grep -Fq ":${BIN_DIR}:"; then
   say "WARNING: ${BIN_DIR} is not in \$PATH"
   say "add this to your shell rc:  export PATH=\"${BIN_DIR}:\$PATH\""
 fi

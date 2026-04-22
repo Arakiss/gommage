@@ -29,6 +29,7 @@ pub(crate) fn cmd_verify(
 enum VerifyStatus {
     Pass,
     Warn,
+    Skip,
     Fail,
 }
 
@@ -37,6 +38,7 @@ impl VerifyStatus {
         match self {
             Self::Pass => "pass",
             Self::Warn => "warn",
+            Self::Skip => "skip",
             Self::Fail => "fail",
         }
     }
@@ -61,6 +63,8 @@ impl VerifyStatus {
 struct VerifyReport {
     status: VerifyStatus,
     home: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
     summary: VerifySummary,
     doctor: VerifySection<DoctorReport>,
     smoke: VerifySection<SmokeReport>,
@@ -118,22 +122,36 @@ fn build_verify_report(layout: &HomeLayout, policy_test_files: &[PathBuf]) -> Ve
         error: None,
     };
 
-    let smoke = match build_smoke_report(layout) {
-        Ok(report) => {
-            let status = VerifyStatus::from_smoke(report.status);
-            push_verify_status(&mut summary, status);
-            VerifySection {
-                status,
-                report: Some(report),
-                error: None,
-            }
+    let hint = preinit_hint(layout, doctor_status);
+    let smoke = if doctor_status == VerifyStatus::Fail {
+        VerifySection {
+            status: VerifyStatus::Skip,
+            report: None,
+            error: Some(format!(
+                "skipped: doctor failed{}",
+                hint.as_ref()
+                    .map(|hint| format!("; {hint}"))
+                    .unwrap_or_default()
+            )),
         }
-        Err(error) => {
-            push_verify_status(&mut summary, VerifyStatus::Fail);
-            VerifySection {
-                status: VerifyStatus::Fail,
-                report: None,
-                error: Some(error.to_string()),
+    } else {
+        match build_smoke_report(layout) {
+            Ok(report) => {
+                let status = VerifyStatus::from_smoke(report.status);
+                push_verify_status(&mut summary, status);
+                VerifySection {
+                    status,
+                    report: Some(report),
+                    error: None,
+                }
+            }
+            Err(error) => {
+                push_verify_status(&mut summary, VerifyStatus::Fail);
+                VerifySection {
+                    status: VerifyStatus::Fail,
+                    report: None,
+                    error: Some(error.to_string()),
+                }
             }
         }
     };
@@ -186,6 +204,7 @@ fn build_verify_report(layout: &HomeLayout, policy_test_files: &[PathBuf]) -> Ve
             VerifyStatus::Pass
         },
         home: path_display(&layout.root),
+        hint,
         summary,
         doctor,
         smoke,
@@ -197,7 +216,19 @@ fn push_verify_status(summary: &mut VerifySummary, status: VerifyStatus) {
     match status {
         VerifyStatus::Pass => {}
         VerifyStatus::Warn => summary.warnings += 1,
+        VerifyStatus::Skip => {}
         VerifyStatus::Fail => summary.failures += 1,
+    }
+}
+
+fn preinit_hint(layout: &HomeLayout, doctor_status: VerifyStatus) -> Option<String> {
+    if doctor_status != VerifyStatus::Fail {
+        return None;
+    }
+    if !layout.root.exists() || !layout.policy_dir.exists() || !layout.key_file.exists() {
+        Some("run 'gommage init' or 'gommage quickstart' first".to_string())
+    } else {
+        None
     }
 }
 
@@ -226,8 +257,8 @@ fn print_verify_report(report: &VerifyReport) {
             smoke.summary.passed,
             smoke.summary.failed
         ),
-        (None, Some(error)) => println!("fail smoke: {error}"),
-        (None, None) => println!("fail smoke: missing report"),
+        (None, Some(error)) => println!("{} smoke: {error}", report.smoke.status.as_str()),
+        (None, None) => println!("{} smoke: missing report", report.smoke.status.as_str()),
     }
 
     for section in &report.policy_tests {
