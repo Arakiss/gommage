@@ -269,11 +269,23 @@ fn quickstart_rolls_back_agent_config_when_self_test_fails() {
     let original = r#"{
   "permissions": {
     "allow": ["Bash"],
-    "deny": ["Bash(gommage verify *)"]
+    "deny": []
   }
 }
 "#;
     fs::write(&settings, original).unwrap();
+    let policy_dir = home.join("policy.d");
+    fs::create_dir_all(&policy_dir).unwrap();
+    fs::write(
+        policy_dir.join("02-test-bad-gommage-deny.yaml"),
+        r#"
+- name: test-bad-gommage-deny
+  decision: gommage
+  match: { any_capability: ["proc.exec:gommage verify *"] }
+  reason: "fixture intentionally breaks quickstart self-test"
+"#,
+    )
+    .unwrap();
 
     let output = gommage(&home)
         .env("GOMMAGE_CLAUDE_SETTINGS", &settings)

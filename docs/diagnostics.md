@@ -23,8 +23,8 @@ present when applicable, and that Codex hooks are enabled.
 `gommage audit-verify --explain` is the signed audit forensic report. The
 default format is JSON for agent and CI automation. Use
 `gommage audit-verify --explain --format human` when a person needs a compact
-status, verified-entry count, key fingerprint, policy-version list, expedition
-list, and anomaly list.
+status, verified-entry count, key fingerprint, bypass counters,
+policy-version list, expedition list, and anomaly list.
 
 ## Exit codes
 
@@ -76,8 +76,10 @@ gommage audit-verify --explain
 gommage audit-verify --explain --format human
 ```
 
-The JSON form is stable for agents. The human form is intentionally optimized
-for review and should not be parsed by automation.
+The JSON form is stable for agents and uses the same operator vocabulary as the
+human form: `policy_versions`, `expeditions`, `bypass_activations`, and
+`hard_stop_bypass_attempts`. The human form is intentionally optimized for
+review and should not be parsed by automation.
 
 Agent integration status is separate because it reads host config, not the
 Gommage home health model:

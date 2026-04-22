@@ -276,6 +276,56 @@ fn uninstall_removes_selected_local_surfaces() {
 }
 
 #[test]
+fn uninstall_can_purge_known_backup_files_explicitly() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    let bin_dir = temp.path().join("bin");
+    let codex_home = temp.path().join("codex-home");
+    let skill_dir = codex_home.join("skills/gommage");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::create_dir_all(hooks.parent().unwrap()).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(settings.with_file_name("settings.json.gommage-bak-100"), "").unwrap();
+    fs::write(hooks.with_file_name("hooks.json.gommage-bak-100"), "").unwrap();
+    fs::write(config.with_file_name("config.toml.gommage-bak-100"), "").unwrap();
+    fs::write(bin_dir.join("gommage.gommage-bak-100"), "").unwrap();
+    fs::write(skill_dir.join("SKILL.md.gommage-bak-100"), "").unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .env("GOMMAGE_BIN_DIR", &bin_dir)
+        .env("CODEX_HOME", &codex_home)
+        .args(["uninstall", "--purge-backups"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !settings
+            .with_file_name("settings.json.gommage-bak-100")
+            .exists()
+    );
+    assert!(!hooks.with_file_name("hooks.json.gommage-bak-100").exists());
+    assert!(
+        !config
+            .with_file_name("config.toml.gommage-bak-100")
+            .exists()
+    );
+    assert!(!bin_dir.join("gommage.gommage-bak-100").exists());
+    assert!(!skill_dir.join("SKILL.md.gommage-bak-100").exists());
+}
+
+#[test]
 fn agent_install_codex_writes_hook_and_enables_feature_flag() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

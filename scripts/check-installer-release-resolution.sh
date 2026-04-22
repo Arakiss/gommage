@@ -79,4 +79,26 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
+bin_dir="${tmp}/bin"
+mkdir -p "$bin_dir"
+cat > "${bin_dir}/gommage" <<'SH'
+#!/usr/bin/env sh
+echo "verify-called"
+exit 42
+SH
+chmod +x "${bin_dir}/gommage"
+
+verify_skip="$(
+  GOMMAGE_INSTALLER_LIBRARY=1 \
+  sh -c ". ./scripts/install.sh; BIN_DIR='${bin_dir}'; VERIFY_AFTER_INSTALL=1; GOMMAGE_HOME='${tmp}/missing-home'; run_post_install_verify"
+)"
+case "$verify_skip" in
+  *"skipping verify: no Gommage home"*) ;;
+  *)
+    echo "installer --verify did not skip missing fresh home" >&2
+    printf '%s\n' "$verify_skip" >&2
+    exit 1
+    ;;
+esac
+
 echo "installer latest resolver ok"

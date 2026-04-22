@@ -237,6 +237,33 @@ fn map_json_reports_capabilities_without_policy_files() {
 }
 
 #[test]
+fn decide_suggests_hook_flag_for_pre_tool_use_payload() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let mut child = gommage(&home)
+        .arg("decide")
+        .stdin(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("use --hook"));
+    assert!(stderr.contains("tool_name/tool_input"));
+}
+
+#[test]
 fn smoke_json_reports_semantic_passes() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

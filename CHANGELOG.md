@@ -29,6 +29,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   doctor health, smoke status, Claude/Codex integration status, and next
   actions. `gommage tui --snapshot` prints a plain text dashboard for
   non-interactive terminals and issue reports.
+- `gommage audit-verify --explain` reports signed bypass activity with
+  `bypass_activations` and `hard_stop_bypass_attempts`.
+- `gommage uninstall --purge-backups` removes Gommage-created
+  `.gommage-bak-*` files for known agent config, binary, and skill surfaces.
 - `docs/agent-command-manifest.json` is now the canonical agent command
   contract, and CI executes it directly through
   `scripts/check-agent-command-contracts.sh`.
@@ -42,6 +46,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Installer diagnostics now explain missing `cosign` with OS-aware hints, log
   which GitHub token environment variable is used, expose non-TTY skill-agent
   defaults, and support an explicit `--verify` post-install delegation.
+- Installer `--verify` now skips cleanly on fresh installs where the Gommage
+  home does not exist yet, instead of reporting the binary install as failed.
+- `gommage decide` now suggests `--hook` when stdin looks like a PreToolUse
+  payload with `tool_name` / `tool_input`.
 - `gommage quickstart` now runs its self-test by default, checks recovery
   decisions in addition to `gommage verify`, and restores touched agent config
   snapshots if the post-install self-test fails.
@@ -50,8 +58,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage uninstall` provides dry-run cleanup for agent hooks, daemon service
   files, installed skills, binaries, and Gommage home data. Destructive home
   removal requires `--yes`.
-- `GOMMAGE_BYPASS=1` for `gommage-mcp`, allowing host environments to recover
-  from a broken hook path without opening `~/.gommage`.
+- `GOMMAGE_BYPASS=1` for `gommage-mcp` is now policy-only break-glass:
+  valid hook payloads still run through compiled hard-stop checks, bypass
+  hard-stop attempts deny, and usable homes receive signed `bypass_activated`
+  audit events.
 - Agent command contract check (`scripts/check-agent-command-contracts.sh`) so
   README and skill command surfaces cannot drift from the binary unnoticed.
 - Collision-safe `.gommage-bak-<timestamp>` backups for repeated CLI writes,

@@ -16,7 +16,7 @@
 
 ### Added
 
-- `05-recovery.yaml` keeps Gommage readiness commands, basic inspection,
+- `03-recovery.yaml` keeps Gommage readiness commands, basic inspection,
   systemd daemon recovery, and Claude settings backup restore commands
   available after quickstart while loading after hard-stops and native deny
   imports.

@@ -15,8 +15,24 @@ pub(crate) fn read_tool_call_from_stdin(hook: bool) -> Result<ToolCall> {
             serde_json::from_str(&buf).context("parsing stdin as hook payload")?;
         tool_call_from_hook_payload(input)
     } else {
-        serde_json::from_str(&buf).context("parsing stdin as ToolCall")
+        let input: serde_json::Value =
+            serde_json::from_str(&buf).context("parsing stdin as ToolCall")?;
+        if looks_like_hook_payload(&input) {
+            anyhow::bail!(
+                "parsing stdin as ToolCall: received a PreToolUse hook payload; use --hook when passing tool_name/tool_input JSON"
+            );
+        }
+        serde_json::from_value(input).context("parsing stdin as ToolCall")
     }
+}
+
+fn looks_like_hook_payload(input: &serde_json::Value) -> bool {
+    input.get("tool_name").is_some()
+        || input.get("tool_input").is_some()
+        || input
+            .get("hook_event_name")
+            .and_then(|value| value.as_str())
+            .is_some_and(|name| name == "PreToolUse")
 }
 
 pub(crate) fn tool_call_from_hook_payload(input: serde_json::Value) -> Result<ToolCall> {

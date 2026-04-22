@@ -249,12 +249,18 @@ gommage uninstall --agent all --skills --binaries
 
 # Destructive home removal requires explicit confirmation.
 gommage uninstall --purge-home --yes
+
+# Remove Gommage-created backup files only when you want a clean slate.
+gommage uninstall --purge-backups
 ```
 
 `GOMMAGE_BYPASS=1` is a hook-adapter break-glass for host environments that can
-set hook process env vars. It makes `gommage-mcp` return `allow` without
-opening `~/.gommage`, which is useful only for emergency recovery of a broken
-hook path.
+set hook process env vars. It is a policy bypass, not a superuser bypass:
+valid hook payloads are still mapped through compiled capability rules, and
+compiled hard-stops still return `deny`. When a usable Gommage home/key exists,
+the bypass writes a signed `bypass_activated` audit event. If the hook payload
+itself is malformed, bypass can still allow without opening `~/.gommage` for
+emergency hook recovery.
 
 Stable automation contracts:
 
