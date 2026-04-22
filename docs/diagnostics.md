@@ -2,6 +2,13 @@
 
 `gommage verify` is the default readiness gate for scripts, installers, skills, and CI smoke tests. It aggregates `doctor`, built-in semantic `smoke`, and optional repository policy fixtures into one report.
 
+`gommage tui` is the read-only operator dashboard for humans. It renders the
+same high-level readiness model as `verify`, plus host-agent status and next
+actions, without mutating `GOMMAGE_HOME`. Use `gommage tui --snapshot` when a
+terminal is non-interactive, when filing an issue, or when an agent needs to
+capture a human-readable report without ANSI control sequences. Automation
+should still parse the JSON commands below instead of the TUI.
+
 `gommage doctor` is the lower-level operator installation health check. Use the default text output for humans and `gommage doctor --json` when you need only filesystem/runtime diagnostics.
 
 `gommage agent status <claude|codex>` is the host-agent integration check. Use
@@ -38,6 +45,8 @@ list, and anomaly list.
 Run the aggregated gate with:
 
 ```sh
+gommage tui
+gommage tui --snapshot
 gommage verify --json
 gommage verify --json --policy-test examples/policy-fixtures.yaml
 ```

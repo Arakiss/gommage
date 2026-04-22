@@ -25,6 +25,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage report bundle --redact --output <file>` writes a diagnostic support
   bundle with CLI/host metadata, redacted environment hints, doctor/verify
   reports, agent status, daemon service hints, and policy/capability inventory.
+- `gommage tui` opens a dependency-free, read-only operator dashboard showing
+  doctor health, smoke status, Claude/Codex integration status, and next
+  actions. `gommage tui --snapshot` prints a plain text dashboard for
+  non-interactive terminals and issue reports.
 - `docs/agent-command-manifest.json` is now the canonical agent command
   contract, and CI executes it directly through
   `scripts/check-agent-command-contracts.sh`.
@@ -119,6 +123,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 - README agent guidance now uses short command blocks and stable contract
   tables instead of an oversized all-in-one command block.
+- `gommage verify` human output now includes a header, top-level status, home,
+  pre-init hints, and next actions while preserving the existing section lines
+  and leaving `verify --json` unchanged.
 - `gommage verify --json` now includes a pre-init hint and skips smoke when
   doctor already failed, avoiding noisy cascades from a missing home.
 - `scripts/install.sh` now resolves `latest` by the highest matching
@@ -163,7 +170,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Known issues
 
-- No TUI dashboard (`gommage watch`) — only CLI tail for now.
+- `gommage tui` is currently a read-only dashboard. Live out-of-band approvals
+  still need a dedicated TUI flow.
 - No webhook out-of-band channel yet.
 
 ## [0.1.0-alpha.1] — 2026-04-21
