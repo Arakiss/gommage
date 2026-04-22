@@ -91,7 +91,8 @@ Gommage follows **Semantic Versioning**, with pre-1.0 rules applied strictly:
 
 The beta bar is not "more features". It is stable install, stable hook wiring,
 stable docs, crates.io publishing, healthy changelogs, and a green determinism
-matrix with no known red workflows.
+matrix with no known red workflows. The concrete launch gate is tracked in
+[`docs/beta-readiness.md`](docs/beta-readiness.md).
 
 ## Install
 
@@ -167,75 +168,95 @@ curl --proto '=https' --tlsv1.2 -sSf \
 
 ## For agents
 
-When an agent operates Gommage, prefer stable machine-readable surfaces and
-avoid parsing decorative output:
+Agents should use stable machine-readable surfaces and ignore decorative output.
+The beta-readiness checklist lives in [`docs/beta-readiness.md`](docs/beta-readiness.md).
+
+| Task | Command |
+|---|---|
+| Install or update the agent skill | See the install block below. |
+| Run the default readiness gate | `gommage verify --json` |
+| Add repository policy fixtures | Add repeated `--policy-test <file>` flags. |
+| Check Claude wiring | `gommage agent status claude --json` |
+| Check Codex wiring | `gommage agent status codex --json` |
+| Inspect mapper output | `gommage map --json --hook` |
+| Verify active stdlib semantics | `gommage smoke --json` |
+| Run policy regression fixtures | `gommage policy test <file> --json` |
+| Export the fixture schema | `gommage policy schema` |
+| Capture a policy fixture | `gommage policy snapshot --name <case_name>` |
+| Verify signed audit history | `gommage audit-verify --explain` |
+
+Install or update only the skill:
 
 ```sh
-# Install or update only the skill.
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --skill-only --skill-agent codex --skill-agent claude --no-prompt
-
-# Verify local runtime health.
-gommage verify --json
-
-# Include repository-owned fixtures when present.
-gommage verify --json --policy-test examples/policy-fixtures.yaml
-
-# Inspect the lower-level reports directly when debugging.
-gommage doctor --json
-
-# Inspect host-agent hook wiring and native-permission import state.
-gommage agent status claude --json
-gommage agent status codex --json
-
-# Inspect mapper output before writing a policy rule.
-echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' \
-  | gommage map --json --hook
-
-# Verify active mapper + policy semantics.
-gommage smoke --json
-
-# Run project-owned policy regression fixtures when present.
-gommage policy test examples/policy-fixtures.yaml --json
-
-# Print the fixture JSON Schema for agents, editors, and CI generators.
-gommage policy schema
-
-# Capture a real tool call as a policy fixture.
-echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
-  | gommage policy snapshot --name main_push_requires_picto
-
-# Validate policies before trusting a hook path.
-gommage policy check
-
-# Verify signed audit history. JSON is the automation contract; human is for review.
-gommage audit-verify --explain
-gommage audit-verify --explain --format human
+  | sh -s -- \
+      --skill-only \
+      --skill-agent codex \
+      --skill-agent claude \
+      --no-prompt
 ```
 
-`verify --json`, `doctor --json`, `agent status --json`, `map --json`,
-`smoke --json`, `policy test --json`, `audit-verify --explain` JSON, policy
-hashes, and decision JSON are the automation contracts.
-`verify --json` is the default readiness gate for installers, CI, and agents:
-it aggregates runtime health, built-in semantic smoke checks, and optional
-project fixtures. `agent status --json` is the host-integration check: it
-verifies Claude/Codex hook wiring, generated Claude permission imports, Codex
-hook feature flags, and dangerous Codex sandbox settings without parsing host
-config by hand. `map --json` is the policy-authoring microscope: it shows the
-capabilities a raw `ToolCall` emits without loading policy, touching pictos, or
-writing audit entries; add `--hook` when stdin is a real PreToolUse payload with
-`tool_name` and `tool_input`. `smoke --json` is the semantic post-install check:
-it verifies that the active mapper and policy set still produce the expected
-hard-stop, fail-closed, allow, ask-picto, web, and MCP decisions. `policy test
---json` is the project-owned regression surface: put expected decisions in
-versioned YAML fixtures and run them in CI before trusting a hook path. `policy
-schema` emits the official JSON Schema for those fixture files so agents,
-editors, and CI generators can validate the contract before running semantic
-checks. `policy snapshot` turns a real `ToolCall` JSON or `--hook` payload from stdin into a YAML fixture case so
-humans and agents do not have to hand-author the first regression. Human
-presentation output is intentionally not part of the automation contract; use
-`audit-verify --explain --format human` when manually reviewing audit anomalies.
+Run the readiness gate:
+
+```sh
+gommage verify --json
+gommage verify --json --policy-test examples/policy-fixtures.yaml
+```
+
+Inspect host-agent wiring:
+
+```sh
+gommage agent status claude --json
+gommage agent status codex --json
+```
+
+Inspect mapper output from a real hook payload:
+
+```sh
+cat <<'JSON' | gommage map --json --hook
+{
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "git push --force origin main"
+  }
+}
+JSON
+```
+
+Create and run policy regression fixtures:
+
+```sh
+gommage policy schema > gommage-policy-fixture.schema.json
+
+cat <<'JSON' | gommage policy snapshot --name main_push_requires_picto
+{
+  "tool": "Bash",
+  "input": {
+    "command": "git push origin main"
+  }
+}
+JSON
+
+gommage policy test examples/policy-fixtures.yaml --json
+```
+
+Stable automation contracts:
+
+| Surface | Use it for |
+|---|---|
+| `verify --json` | Default readiness gate for installers, CI, and agents. |
+| `doctor --json` | Lower-level runtime and install diagnostics. |
+| `agent status --json` | Claude/Codex hook wiring and native permission import state. |
+| `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
+| `smoke --json` | Built-in semantic post-install checks. |
+| `policy test --json` | Project-owned policy regression fixtures. |
+| `audit-verify --explain` | Signed audit verification JSON for automation. |
+
+Human presentation output is intentionally not part of the automation contract.
+Use `gommage audit-verify --explain --format human` only for manual forensic
+review.
 
 ## Quickstart
 
@@ -415,6 +436,9 @@ fixture contract for agents, editors, and CI fixture generators.
 Gommage ships a deterministic fixture corpus with an expected decision oracle, in-order and shuffled. CI runs the sweep repeatedly across OS and locale combinations; if any decision flips based on ordering, the build fails. See [`tests/determinism/`](tests/determinism/).
 
 ## Roadmap
+
+See [`docs/beta-readiness.md`](docs/beta-readiness.md) for the evidence
+required before public beta or launch announcements.
 
 **Current alpha line** — signed release-installer line
 - Daemon + CLI + PreToolUse hook adapter
