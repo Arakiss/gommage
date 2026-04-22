@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.14.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.14.0-alpha.1...gommage-cli-v0.14.1-alpha.1) (2026-04-22)
+
+
+### Bug fixes
+
+* preserve replaced install surfaces ([73992c0](https://github.com/Arakiss/gommage/commit/73992c0de4b2cf004a98a495d0535ec62f8f6702))
+
 ## [0.14.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.13.0-alpha.1...gommage-cli-v0.14.0-alpha.1) (2026-04-22)
 
 
