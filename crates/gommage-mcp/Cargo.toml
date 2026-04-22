@@ -1,6 +1,6 @@
 [package]
 name = "gommage-mcp"
-version = "0.2.1-alpha.1"
+version = "0.2.2-alpha.1"
 publish = false    # flip when the crate is first published to crates.io
 edition.workspace = true
 rust-version.workspace = true
