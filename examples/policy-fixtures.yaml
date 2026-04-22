@@ -1,0 +1,30 @@
+version: 1
+cases:
+  - name: main_push_requires_picto
+    description: Pushes to main should require a signed git.push:main picto.
+    tool: Bash
+    input:
+      command: git push origin main
+    expect:
+      decision: ask_picto
+      required_scope: git.push:main
+      matched_rule: gate-main-push
+
+  - name: feature_push_is_allowed
+    description: Feature branch pushes should pass without a picto.
+    tool: Bash
+    input:
+      command: git push origin chore/test-branch
+    expect:
+      decision: allow
+      matched_rule: allow-feature-push
+
+  - name: force_push_is_denied
+    description: Force pushes should be denied by policy.
+    tool: Bash
+    input:
+      command: git push --force origin main
+    expect:
+      decision: gommage
+      hard_stop: false
+      matched_rule: no-force-push

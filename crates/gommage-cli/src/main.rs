@@ -9,7 +9,7 @@ use gommage_core::{
 use gommage_stdlib::{
     CAPABILITIES as STDLIB_CAPABILITIES, POLICIES as STDLIB_POLICIES, StdlibFile,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     io::{self, IsTerminal, Read},
@@ -197,6 +197,13 @@ enum PolicyCmd {
     Check,
     /// Parse a single file.
     Lint { file: PathBuf },
+    /// Run YAML policy regression fixtures against the active home.
+    Test {
+        file: PathBuf,
+        /// Emit a stable machine-readable fixture report.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the policy version hash.
     Hash,
 }
@@ -946,6 +953,281 @@ fn decision_summary(decision: &Decision) -> String {
             format!("ask_picto scope={required_scope} reason={reason:?}")
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PolicyTestDocument {
+    Wrapped(PolicyTestFile),
+    Cases(Vec<PolicyTestCase>),
+}
+
+impl PolicyTestDocument {
+    fn into_parts(self) -> (Option<u32>, Vec<PolicyTestCase>) {
+        match self {
+            Self::Wrapped(file) => (file.version, file.cases),
+            Self::Cases(cases) => (None, cases),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyTestFile {
+    #[serde(default)]
+    version: Option<u32>,
+    cases: Vec<PolicyTestCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyTestCase {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    tool: String,
+    #[serde(default = "empty_json_object")]
+    input: serde_json::Value,
+    expect: PolicyTestExpectation,
+}
+
+fn empty_json_object() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyTestExpectation {
+    decision: PolicyTestDecision,
+    #[serde(default)]
+    hard_stop: Option<bool>,
+    #[serde(default)]
+    required_scope: Option<String>,
+    #[serde(default)]
+    matched_rule: Option<String>,
+}
+
+impl PolicyTestExpectation {
+    fn label(&self) -> String {
+        let mut parts = vec![self.decision.as_str().to_string()];
+        if let Some(hard_stop) = self.hard_stop {
+            parts.push(format!("hard_stop={hard_stop}"));
+        }
+        if let Some(scope) = &self.required_scope {
+            parts.push(format!("scope={scope}"));
+        }
+        if let Some(rule) = &self.matched_rule {
+            parts.push(format!("matched_rule={rule}"));
+        }
+        parts.join(" ")
+    }
+
+    fn mismatch_errors(&self, eval: &gommage_core::EvalResult) -> Vec<String> {
+        let mut errors = Vec::new();
+        let actual = PolicyTestDecision::from_decision(&eval.decision);
+        if self.decision != actual {
+            errors.push(format!(
+                "expected decision {}, got {}",
+                self.decision.as_str(),
+                actual.as_str()
+            ));
+        }
+
+        if let Some(expected) = self.hard_stop {
+            match &eval.decision {
+                Decision::Gommage { hard_stop, .. } if *hard_stop == expected => {}
+                Decision::Gommage { hard_stop, .. } => errors.push(format!(
+                    "expected hard_stop={expected}, got hard_stop={hard_stop}"
+                )),
+                _ => errors.push(format!(
+                    "expected hard_stop={expected}, but actual decision is {}",
+                    actual.as_str()
+                )),
+            }
+        }
+
+        if let Some(expected) = &self.required_scope {
+            match &eval.decision {
+                Decision::AskPicto { required_scope, .. } if required_scope == expected => {}
+                Decision::AskPicto { required_scope, .. } => errors.push(format!(
+                    "expected required_scope={expected}, got required_scope={required_scope}"
+                )),
+                _ => errors.push(format!(
+                    "expected required_scope={expected}, but actual decision is {}",
+                    actual.as_str()
+                )),
+            }
+        }
+
+        if let Some(expected) = &self.matched_rule {
+            match &eval.matched_rule {
+                Some(rule) if &rule.name == expected => {}
+                Some(rule) => errors.push(format!(
+                    "expected matched_rule={expected}, got matched_rule={}",
+                    rule.name
+                )),
+                None => errors.push(format!(
+                    "expected matched_rule={expected}, but no rule matched"
+                )),
+            }
+        }
+
+        errors
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PolicyTestDecision {
+    Allow,
+    Gommage,
+    AskPicto,
+}
+
+impl PolicyTestDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Gommage => "gommage",
+            Self::AskPicto => "ask_picto",
+        }
+    }
+
+    fn from_decision(decision: &Decision) -> Self {
+        match decision {
+            Decision::Allow => Self::Allow,
+            Decision::Gommage { .. } => Self::Gommage,
+            Decision::AskPicto { .. } => Self::AskPicto,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PolicyTestReport {
+    status: SmokeStatus,
+    fixture_file: String,
+    home: String,
+    policy_version: String,
+    mapper_rules: usize,
+    summary: SmokeSummary,
+    cases: Vec<PolicyTestCaseResult>,
+}
+
+impl PolicyTestReport {
+    fn exit_code(&self) -> ExitCode {
+        if self.summary.failed == 0 {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PolicyTestCaseResult {
+    name: String,
+    description: Option<String>,
+    status: SmokeStatus,
+    expected: PolicyTestExpectation,
+    actual: Decision,
+    errors: Vec<String>,
+    tool: String,
+    input: serde_json::Value,
+    input_hash: String,
+    capabilities: Vec<Capability>,
+    matched_rule: Option<MatchedRule>,
+}
+
+fn build_policy_test_report(
+    layout: &HomeLayout,
+    env: &std::collections::HashMap<String, String>,
+    file: &Path,
+) -> Result<PolicyTestReport> {
+    let raw = std::fs::read_to_string(file)
+        .with_context(|| format!("reading policy test fixture {}", file.display()))?;
+    let document: PolicyTestDocument = serde_yaml::from_str(&raw)
+        .with_context(|| format!("parsing policy test fixture {}", file.display()))?;
+    let (version, cases) = document.into_parts();
+    if let Some(version) = version
+        && version != 1
+    {
+        anyhow::bail!("unsupported policy test fixture version {version}; expected 1");
+    }
+    if cases.is_empty() {
+        anyhow::bail!("policy test fixture {} has no cases", file.display());
+    }
+
+    let mapper = gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir)
+        .context("loading capability mappers for policy test")?;
+    let policy =
+        Policy::load_from_dir(&layout.policy_dir, env).context("loading policy for policy test")?;
+
+    let mut results = Vec::new();
+    let mut summary = SmokeSummary::default();
+    for case in cases {
+        let call = ToolCall {
+            tool: case.tool,
+            input: case.input,
+        };
+        let capabilities = mapper.map(&call);
+        let eval = evaluate(&capabilities, &policy);
+        let input_hash = call.input_hash();
+        let errors = case.expect.mismatch_errors(&eval);
+        let status = if errors.is_empty() {
+            summary.passed += 1;
+            SmokeStatus::Pass
+        } else {
+            summary.failed += 1;
+            SmokeStatus::Fail
+        };
+
+        results.push(PolicyTestCaseResult {
+            name: case.name,
+            description: case.description,
+            status,
+            expected: case.expect,
+            actual: eval.decision,
+            errors,
+            tool: call.tool,
+            input: call.input,
+            input_hash,
+            capabilities: eval.capabilities,
+            matched_rule: eval.matched_rule,
+        });
+    }
+
+    Ok(PolicyTestReport {
+        status: if summary.failed == 0 {
+            SmokeStatus::Pass
+        } else {
+            SmokeStatus::Fail
+        },
+        fixture_file: path_display(file),
+        home: path_display(&layout.root),
+        policy_version: policy.version_hash,
+        mapper_rules: mapper.rule_count(),
+        summary,
+        cases: results,
+    })
+}
+
+fn print_policy_test_report(report: &PolicyTestReport) {
+    for case in &report.cases {
+        println!(
+            "{} {}: expected {}, got {}",
+            case.status.as_str(),
+            case.name,
+            case.expected.label(),
+            decision_summary(&case.actual)
+        );
+        for error in &case.errors {
+            println!("  - {error}");
+        }
+    }
+    println!(
+        "summary: {} passed, {} failed ({}; {} mapper rules)",
+        report.summary.passed, report.summary.failed, report.policy_version, report.mapper_rules
+    );
 }
 
 fn cmd_daemon(sub: DaemonCmd, layout: HomeLayout) -> Result<ExitCode> {
@@ -1873,6 +2155,15 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
             let raw = std::fs::read_to_string(&file)?;
             let _ = Policy::from_yaml_string(&raw, &env, &file.to_string_lossy())?;
             println!("ok {}", file.display());
+        }
+        PolicyCmd::Test { file, json } => {
+            let report = build_policy_test_report(&layout, &env, &file)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_policy_test_report(&report);
+            }
+            return Ok(report.exit_code());
         }
         PolicyCmd::Hash => {
             let pol = Policy::load_from_dir(&layout.policy_dir, &env)?;

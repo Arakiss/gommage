@@ -134,6 +134,44 @@ The evaluator runs rules in **declared order** (lexicographic filename, then dec
 2. Is your glob too permissive? Globs use `/` as a segment separator — `*` does NOT cross `/`. Use `**` for recursive matches.
 3. Is `${EXPEDITION_ROOT}` set? Run `gommage expedition status`.
 
+## Regression fixtures
+
+Policy behavior should be versioned next to the policies themselves. Keep a
+small fixture file in the repository and run it in CI:
+
+```yaml
+version: 1
+cases:
+  - name: main_push_requires_picto
+    tool: Bash
+    input:
+      command: git push origin main
+    expect:
+      decision: ask_picto
+      required_scope: git.push:main
+      matched_rule: gate-main-push
+
+  - name: feature_push_is_allowed
+    tool: Bash
+    input:
+      command: git push origin chore/test-branch
+    expect:
+      decision: allow
+      matched_rule: allow-feature-push
+```
+
+Run it with:
+
+```sh
+gommage policy test examples/policy-fixtures.yaml
+gommage policy test examples/policy-fixtures.yaml --json
+```
+
+`policy test --json` reports the emitted capabilities, matched rule, actual
+decision, expected decision, and mismatch errors for every case. Use
+`gommage smoke --json` to verify the shipped stdlib, then use `policy test` to
+verify the policy behavior your repository depends on.
+
 ## Debugging
 
 ```sh
