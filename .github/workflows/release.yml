@@ -33,6 +33,10 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify internal workspace dependency versions
+        run: sh scripts/check-workspace-internal-deps.sh
       - id: release
         uses: googleapis/release-please-action@v4
         with:
