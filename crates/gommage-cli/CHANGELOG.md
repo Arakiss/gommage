@@ -1,5 +1,26 @@
 # Changelog — gommage-cli
 
+## [0.5.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.4.0-alpha.1...gommage-cli-v0.5.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** add aggregated verification gate ([27b4b91](https://github.com/Arakiss/gommage/commit/27b4b91bb0a3196289eca928ef9e510887e71c02))
+* **cli:** add gestral terminal logo ([6dfc9cf](https://github.com/Arakiss/gommage/commit/6dfc9cfef691029970a57d424320cc13b88edf1d))
+* **cli:** add policy fixture tests ([cde2996](https://github.com/Arakiss/gommage/commit/cde2996829ae6bca8cff2503b984a9d0f5100635))
+* **cli:** add semantic smoke checks ([27bd698](https://github.com/Arakiss/gommage/commit/27bd698986fbf8832effc98a659ce0c66dc2d468))
+* **stdlib:** package bundled policy assets ([6e91243](https://github.com/Arakiss/gommage/commit/6e912433db6c130725ab5469195469f51b36ad3d))
+
+
+### Bug fixes
+
+* **cli:** satisfy smoke check lint ([846cb88](https://github.com/Arakiss/gommage/commit/846cb8882e000eb319463f3840f0cb156220d896))
+
+
+### Documentation
+
+* clarify skill and release hygiene ([d74c16d](https://github.com/Arakiss/gommage/commit/d74c16dbe42ca2a6e17e106364904431f03e0bd9))
+
 ## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.3.0-alpha.1...gommage-cli-v0.4.0-alpha.1) (2026-04-21)
 
 

@@ -1,5 +1,7 @@
 # Changelog — gommage-mcp
 
+## [0.2.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.2.0-alpha.1...gommage-mcp-v0.2.1-alpha.1) (2026-04-22)
+
 ## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.1.1-alpha.1...gommage-mcp-v0.2.0-alpha.1) (2026-04-21)
 
 
