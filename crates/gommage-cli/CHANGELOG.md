@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.12.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.12.0-alpha.1...gommage-cli-v0.12.1-alpha.1) (2026-04-22)
+
+
+### Refactor
+
+* **cli:** keep command modules bounded ([3374122](https://github.com/Arakiss/gommage/commit/3374122ccbbb9bb9b873b402e6aea1cb698fc80c))
+
 ## [0.12.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.11.0-alpha.1...gommage-cli-v0.12.0-alpha.1) (2026-04-22)
 
 
