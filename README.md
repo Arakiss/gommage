@@ -267,7 +267,8 @@ review.
 # - imports supported Claude permissions.deny and narrow permissions.allow entries into policy.d/
 # - installs the Claude PreToolUse hook with backups
 # - installs and starts the user-level daemon service
-gommage quickstart --agent claude --daemon
+# - runs the readiness gate after setup
+gommage quickstart --agent claude --daemon --self-test
 
 # Scriptable verification. `warn` is expected before the first audit entry
 # and `fail` means setup needs attention.
@@ -298,7 +299,7 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 gommage expedition start "refactor-auth-middleware"
 
 # CI or image builds can generate service files without starting them.
-gommage quickstart --agent claude --daemon-no-start
+gommage quickstart --agent claude --daemon-no-start --self-test
 
 # Add Codex too. Codex hooks are Bash-scoped, so keep Codex sandbox enabled.
 gommage agent install codex

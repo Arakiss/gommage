@@ -46,6 +46,20 @@ The JSON report includes top-level `status`, `summary`, `doctor`, `smoke`, and
 `policy_tests`. Use the nested reports for the exact failing check, emitted
 capabilities, matched rule, and mismatch errors.
 
+`gommage quickstart --self-test` runs the same readiness gate after setup:
+
+```sh
+gommage quickstart --agent claude --daemon --self-test
+gommage quickstart --agent codex --daemon --self-test
+```
+
+With `--dry-run`, self-test prints the planned verification step without
+creating `GOMMAGE_HOME` or writing host-agent config:
+
+```sh
+gommage quickstart --agent claude --self-test --dry-run
+```
+
 Audit verification has its own forensic JSON contract:
 
 ```sh

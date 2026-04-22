@@ -1032,6 +1032,63 @@ fn quickstart_can_install_daemon_service_without_starting() {
 }
 
 #[test]
+fn quickstart_self_test_runs_verify_gate() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, "{}").unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["quickstart", "--agent", "claude", "--self-test"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("self-test: running `gommage verify`"));
+    assert!(stdout.contains("warn doctor:"));
+    assert!(stdout.contains("pass smoke:"));
+    assert!(stdout.contains("ok self-test complete"));
+    assert!(stdout.contains("ok quickstart complete"));
+}
+
+#[test]
+fn quickstart_self_test_dry_run_only_prints_plan() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args([
+            "quickstart",
+            "--agent",
+            "claude",
+            "--self-test",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("plan self-test: run `gommage verify` after quickstart"));
+    assert!(stdout.contains("ok quickstart complete"));
+    assert!(!home.exists());
+    assert!(!settings.exists());
+}
+
+#[test]
 fn agent_install_codex_writes_hook_and_enables_feature_flag() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
