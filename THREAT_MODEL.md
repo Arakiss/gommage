@@ -112,10 +112,25 @@ This is intentional: Gommage is a decision + audit harness, not an execution med
 
 ### 2.6 Replayed approval via out-of-band channel
 
-When a `ask_picto` decision has no matching picto, the daemon (v1.0) escalates to an out-of-band approval channel (webhook, TUI, push). If an attacker intercepts the approval channel and replays a past approval, they could cause an unauthorized action.
+When a `ask_picto` decision has no matching picto, Gommage creates a local
+approval request and can notify an out-of-band channel (webhook or TUI). If an
+attacker intercepts a notification and convinces a human or script to replay a
+past approval command, they could try to authorize an unintended action.
 
-- **Mitigation today**: pictos have single-use (`max_uses: 1` by convention). A replayed picto that references a spent ID fails on consume.
-- **Mitigation v1.0**: approval responses will include a nonce bound to the specific `audit_id` they approve, and the daemon will reject approvals whose nonce does not match the current pending decision.
+- **Mitigation today**: approval requests are scoped to the request's
+  `input_hash`, required scope, and policy version. Approving mints an
+  exact-scope picto, and one-shot pictos are consumed atomically. A replayed
+  picto that references a spent ID fails on consume. The TUI requires an
+  explicit confirmation keystroke before approve/deny. Approval request,
+  resolution, webhook delivery, and picto lifecycle events are signed in the
+  audit log.
+- **Current limit**: generic, Slack-shaped, and Discord-shaped webhooks are
+  notification channels only. They do not accept remote callbacks, so approval
+  still happens locally through `gommage approval approve`, `gommage approval
+  deny`, or the confirmed TUI action.
+- **Future mitigation**: signed remote callbacks will include a nonce bound to
+  the specific pending request and policy version, and the daemon will reject
+  callbacks whose nonce does not match current pending state.
 
 ### 2.7 Clock skew / backdated TTL
 

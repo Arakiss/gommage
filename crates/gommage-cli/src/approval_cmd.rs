@@ -1,13 +1,17 @@
 use anyhow::{Context, Result};
 use clap::{Subcommand, ValueEnum};
 use gommage_audit::{AuditEvent, AuditWriter};
-use gommage_core::{
-    ApprovalRequest, ApprovalState, ApprovalStatus, ApprovalStore, PictoStore, runtime::HomeLayout,
-};
+use gommage_core::{ApprovalState, ApprovalStatus, ApprovalStore, PictoStore, runtime::HomeLayout};
 use serde::Serialize;
 use std::{
     io::Write,
+    path::PathBuf,
     process::{Command, ExitCode, Stdio},
+};
+
+use crate::approval_workflow::{
+    WebhookProvider, WebhookTemplateProvider, approval_evidence, approval_replay,
+    approval_template, webhook_payload,
 };
 
 #[derive(Debug, Clone, Subcommand)]
@@ -55,12 +59,44 @@ pub(crate) enum ApprovalCmd {
     Webhook {
         #[arg(long, env = "GOMMAGE_APPROVAL_WEBHOOK_URL")]
         url: String,
+        /// Shape payloads for a known incoming webhook provider.
+        #[arg(long, value_enum, default_value = "generic")]
+        provider: WebhookProvider,
         /// Print payloads without sending them.
         #[arg(long)]
         dry_run: bool,
         /// Maximum requests to send.
         #[arg(long)]
         limit: Option<usize>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Replay one approval request against the current policy.
+    Replay {
+        id: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export a JSON evidence bundle for one approval request.
+    Evidence {
+        id: String,
+        /// Redact the selected Gommage home path.
+        #[arg(long)]
+        redact: bool,
+        /// Output JSON file. Defaults to stdout.
+        #[arg(long, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// Replace an existing output file.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Print provider setup and payload templates.
+    Template {
+        /// Provider template to render.
+        #[arg(long, value_enum)]
+        provider: WebhookTemplateProvider,
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
@@ -85,17 +121,18 @@ impl From<ApprovalStatusArg> for ApprovalStatus {
 }
 
 #[derive(Debug, Serialize)]
-struct ApprovalActionReport {
-    status: String,
-    request_id: String,
+pub(crate) struct ApprovalActionReport {
+    pub(crate) status: String,
+    pub(crate) request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    picto_id: Option<String>,
-    message: String,
+    pub(crate) picto_id: Option<String>,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, Serialize)]
 struct WebhookReport {
     url: String,
+    provider: String,
     dry_run: bool,
     sent: usize,
     failed: usize,
@@ -126,10 +163,19 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
         ApprovalCmd::Deny { id, reason, json } => approval_deny(layout, &id, &reason, json),
         ApprovalCmd::Webhook {
             url,
+            provider,
             dry_run,
             limit,
             json,
-        } => approval_webhook(layout, &url, dry_run, limit, json),
+        } => approval_webhook(layout, &url, provider, dry_run, limit, json),
+        ApprovalCmd::Replay { id, json } => approval_replay(layout, &id, json),
+        ApprovalCmd::Evidence {
+            id,
+            redact,
+            output,
+            force,
+        } => approval_evidence(layout, &id, redact, output, force),
+        ApprovalCmd::Template { provider, json } => approval_template(provider, json),
     }
 }
 
@@ -180,6 +226,17 @@ fn approval_approve(
     reason: &str,
     json: bool,
 ) -> Result<ExitCode> {
+    let report = approve_request(&layout, id, uses, ttl, reason)?;
+    print_action(json, report)
+}
+
+pub(crate) fn approve_request(
+    layout: &HomeLayout,
+    id: &str,
+    uses: u32,
+    ttl: i64,
+    reason: &str,
+) -> Result<ApprovalActionReport> {
     layout.ensure()?;
     let store = ApprovalStore::open(&layout.approvals_log);
     let state = store
@@ -228,21 +285,27 @@ fn approval_approve(
         picto_id: resolution.picto_id.clone(),
     })?;
 
-    print_action(
-        json,
-        ApprovalActionReport {
-            status: "approved".to_string(),
-            request_id: id.to_string(),
-            picto_id: Some(picto.id),
-            message: format!(
-                "approved {id}; minted exact-scope picto for {}",
-                picto.scope
-            ),
-        },
-    )
+    Ok(ApprovalActionReport {
+        status: "approved".to_string(),
+        request_id: id.to_string(),
+        picto_id: Some(picto.id),
+        message: format!(
+            "approved {id}; minted exact-scope picto for {}",
+            picto.scope
+        ),
+    })
 }
 
 fn approval_deny(layout: HomeLayout, id: &str, reason: &str, json: bool) -> Result<ExitCode> {
+    let report = deny_request(&layout, id, reason)?;
+    print_action(json, report)
+}
+
+pub(crate) fn deny_request(
+    layout: &HomeLayout,
+    id: &str,
+    reason: &str,
+) -> Result<ApprovalActionReport> {
     layout.ensure()?;
     let store = ApprovalStore::open(&layout.approvals_log);
     let deny_reason = if reason.trim().is_empty() {
@@ -259,20 +322,18 @@ fn approval_deny(layout: HomeLayout, id: &str, reason: &str, json: bool) -> Resu
         reason: resolution.reason.clone(),
         picto_id: None,
     })?;
-    print_action(
-        json,
-        ApprovalActionReport {
-            status: "denied".to_string(),
-            request_id: id.to_string(),
-            picto_id: None,
-            message: format!("denied {id}"),
-        },
-    )
+    Ok(ApprovalActionReport {
+        status: "denied".to_string(),
+        request_id: id.to_string(),
+        picto_id: None,
+        message: format!("denied {id}"),
+    })
 }
 
 fn approval_webhook(
     layout: HomeLayout,
     url: &str,
+    provider: WebhookProvider,
     dry_run: bool,
     limit: Option<usize>,
     json: bool,
@@ -284,6 +345,7 @@ fn approval_webhook(
     }
     let mut report = WebhookReport {
         url: url.to_string(),
+        provider: provider.as_str().to_string(),
         dry_run,
         sent: 0,
         failed: 0,
@@ -296,7 +358,7 @@ fn approval_webhook(
     let mut audit = audit;
 
     for state in pending {
-        let payload = webhook_payload(&state.request);
+        let payload = webhook_payload(&state.request, provider);
         if dry_run {
             if !json {
                 println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -405,25 +467,6 @@ fn print_state_detail(state: &ApprovalState) {
             state.request.id
         );
     }
-}
-
-fn webhook_payload(request: &ApprovalRequest) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "gommage_approval_request",
-        "id": request.id,
-        "created_at": request.created_at,
-        "tool": request.tool,
-        "input_hash": request.input_hash,
-        "required_scope": request.required_scope,
-        "reason": request.reason,
-        "capabilities": request.capabilities,
-        "matched_rule": request.matched_rule,
-        "policy_version": request.policy_version,
-        "commands": {
-            "approve": format!("gommage approval approve {}", request.id),
-            "deny": format!("gommage approval deny {}", request.id)
-        }
-    })
 }
 
 fn post_json_with_curl(url: &str, payload: &serde_json::Value) -> Result<i32> {

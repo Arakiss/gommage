@@ -9,10 +9,12 @@ use std::{
 use crate::{
     agent::AgentKind,
     agent_status::build_agent_status_report,
+    approval_cmd::{approve_request, deny_request},
     doctor::{DoctorStatus, build_doctor_report},
-    gestral::{UiStatus, UiTone, color_enabled, paint, strip_ansi, truncate_plain},
+    gestral::{UiStatus, color_enabled, truncate_plain},
     smoke::{SmokeStatus, build_smoke_report},
-    tui_views::{TuiView, ViewReport, build_view_report},
+    tui_render::{RenderState, render_lines},
+    tui_views::{TuiView, build_view_report, pending_approval_ids},
     util::path_display,
 };
 
@@ -25,29 +27,46 @@ pub(crate) struct TuiOptions {
 }
 
 #[derive(Debug, Clone)]
-struct Dashboard {
-    version: &'static str,
-    home: String,
-    rows: Vec<StatusRow>,
-    next_actions: Vec<String>,
-    updated: String,
+pub(crate) struct Dashboard {
+    pub(crate) version: &'static str,
+    pub(crate) home: String,
+    pub(crate) rows: Vec<StatusRow>,
+    pub(crate) next_actions: Vec<String>,
+    pub(crate) updated: String,
 }
 
 #[derive(Debug, Clone)]
-struct StatusRow {
-    label: String,
-    status: UiStatus,
-    summary: String,
-    detail: String,
+pub(crate) struct StatusRow {
+    pub(crate) label: String,
+    pub(crate) status: UiStatus,
+    pub(crate) summary: String,
+    pub(crate) detail: String,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct DashboardSummary {
-    total: usize,
-    ok: usize,
-    warn: usize,
-    fail: usize,
-    skip: usize,
+pub(crate) struct DashboardSummary {
+    pub(crate) total: usize,
+    pub(crate) ok: usize,
+    pub(crate) warn: usize,
+    pub(crate) fail: usize,
+    pub(crate) skip: usize,
+}
+
+#[derive(Debug, Clone)]
+enum PendingTuiAction {
+    Approve(String),
+    Deny(String),
+}
+
+impl PendingTuiAction {
+    fn prompt(&self) -> String {
+        match self {
+            PendingTuiAction::Approve(id) => {
+                format!("approve {id} with ttl=10m uses=1 from the TUI?")
+            }
+            PendingTuiAction::Deny(id) => format!("deny {id} from the TUI?"),
+        }
+    }
 }
 
 pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCode> {
@@ -246,37 +265,105 @@ fn run_interactive(
     let colors = color_enabled();
     let mut dashboard = build_dashboard(layout, agents)?;
     let mut selected = dashboard.primary_row_index().unwrap_or(0);
+    let mut selected_approval = 0usize;
     let mut view = normalize_interactive_view(initial_view);
-    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
+    let mut notice: Option<String> = None;
+    let mut confirm: Option<PendingTuiAction> = None;
+    let confirm_prompt = confirm.as_ref().map(PendingTuiAction::prompt);
+    draw_dashboard(
+        &mut stdout,
+        layout,
+        &dashboard,
+        colors,
+        RenderState {
+            selected,
+            selected_approval,
+            view,
+            notice: notice.as_deref(),
+            confirm: confirm_prompt.as_deref(),
+        },
+    )?;
     let mut last_refresh = Instant::now();
     let mut input = [0_u8; 1];
 
     loop {
         match stdin.read(&mut input) {
             Ok(0) => {}
-            Ok(_) => match input[0] {
-                b'q' | 27 => break,
-                b'j' | b'J' => {
-                    selected = (selected + 1).min(dashboard.rows.len().saturating_sub(1));
-                    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
+            Ok(_) => {
+                if let Some(action) = confirm.take() {
+                    match input[0] {
+                        b'y' | b'Y' => {
+                            notice = Some(execute_tui_action(layout, action));
+                            dashboard = build_dashboard(layout, agents)?;
+                            selected = selected.min(dashboard.rows.len().saturating_sub(1));
+                            selected_approval = clamp_approval_selection(layout, selected_approval);
+                            last_refresh = Instant::now();
+                        }
+                        b'n' | b'N' | 27 => {
+                            notice = Some("cancelled approval action".to_string());
+                        }
+                        other => {
+                            confirm = Some(action);
+                            notice = Some(format!(
+                                "press y to confirm or n to cancel; ignored {:?}",
+                                other as char
+                            ));
+                        }
+                    }
+                } else {
+                    match input[0] {
+                        b'q' | 27 => break,
+                        b'j' | b'J' => {
+                            if view == TuiView::Approvals {
+                                selected_approval =
+                                    (selected_approval + 1).min(pending_approval_max(layout));
+                            } else {
+                                selected =
+                                    (selected + 1).min(dashboard.rows.len().saturating_sub(1));
+                            }
+                            notice = None;
+                        }
+                        b'k' | b'K' => {
+                            if view == TuiView::Approvals {
+                                selected_approval = selected_approval.saturating_sub(1);
+                            } else {
+                                selected = selected.saturating_sub(1);
+                            }
+                            notice = None;
+                        }
+                        b'r' | b'R' => {
+                            dashboard = build_dashboard(layout, agents)?;
+                            selected = selected.min(dashboard.rows.len().saturating_sub(1));
+                            selected_approval = clamp_approval_selection(layout, selected_approval);
+                            notice = Some("refreshed".to_string());
+                            last_refresh = Instant::now();
+                        }
+                        b'1' => view = TuiView::Dashboard,
+                        b'2' => view = TuiView::Approvals,
+                        b'3' => view = TuiView::Policies,
+                        b'4' => view = TuiView::Audit,
+                        b'5' => view = TuiView::Capabilities,
+                        b'6' => view = TuiView::Recovery,
+                        b'A' if view == TuiView::Approvals => {
+                            if let Some(id) = selected_approval_id(layout, selected_approval) {
+                                confirm = Some(PendingTuiAction::Approve(id));
+                                notice = None;
+                            } else {
+                                notice = Some("no pending approval selected".to_string());
+                            }
+                        }
+                        b'D' if view == TuiView::Approvals => {
+                            if let Some(id) = selected_approval_id(layout, selected_approval) {
+                                confirm = Some(PendingTuiAction::Deny(id));
+                                notice = None;
+                            } else {
+                                notice = Some("no pending approval selected".to_string());
+                            }
+                        }
+                        _ => {}
+                    }
                 }
-                b'k' | b'K' => {
-                    selected = selected.saturating_sub(1);
-                    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
-                }
-                b'r' | b'R' => {
-                    dashboard = build_dashboard(layout, agents)?;
-                    selected = selected.min(dashboard.rows.len().saturating_sub(1));
-                    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
-                    last_refresh = Instant::now();
-                }
-                b'1' => view = TuiView::Dashboard,
-                b'2' => view = TuiView::Policies,
-                b'3' => view = TuiView::Audit,
-                b'4' => view = TuiView::Capabilities,
-                b'5' => view = TuiView::Recovery,
-                _ => {}
-            },
+            }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) => return Err(error).context("reading terminal input"),
         }
@@ -284,10 +371,23 @@ fn run_interactive(
         if last_refresh.elapsed() >= refresh {
             dashboard = build_dashboard(layout, agents)?;
             selected = selected.min(dashboard.rows.len().saturating_sub(1));
-            draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
+            selected_approval = clamp_approval_selection(layout, selected_approval);
             last_refresh = Instant::now();
         }
-        draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
+        let confirm_prompt = confirm.as_ref().map(PendingTuiAction::prompt);
+        draw_dashboard(
+            &mut stdout,
+            layout,
+            &dashboard,
+            colors,
+            RenderState {
+                selected,
+                selected_approval,
+                view,
+                notice: notice.as_deref(),
+                confirm: confirm_prompt.as_deref(),
+            },
+        )?;
     }
 
     Ok(())
@@ -356,13 +456,12 @@ fn draw_dashboard(
     layout: &HomeLayout,
     dashboard: &Dashboard,
     colors: bool,
-    selected: usize,
-    view: TuiView,
+    state: RenderState<'_>,
 ) -> io::Result<()> {
     let (cols, rows) = terminal_size();
     let width = cols.clamp(40, 120);
     let height = rows.max(12);
-    let lines = render_lines(layout, dashboard, width, colors, selected, view);
+    let lines = render_lines(layout, dashboard, width, colors, state);
     write!(stdout, "\x1b[H\x1b[2J")?;
     for line in lines.into_iter().take(height) {
         writeln!(stdout, "{}", truncate_plain(&line, width))?;
@@ -370,166 +469,30 @@ fn draw_dashboard(
     stdout.flush()
 }
 
-fn render_lines(
-    layout: &HomeLayout,
-    dashboard: &Dashboard,
-    width: usize,
-    colors: bool,
-    selected: usize,
-    view: TuiView,
-) -> Vec<String> {
-    let mut lines = Vec::new();
-    let overall = dashboard.overall_status();
-    let summary = dashboard.summary();
-    let title = format!(
-        "{}  {}",
-        paint("GOMMAGE", UiTone::Teal, true, colors),
-        paint("operator dashboard", UiTone::Muted, false, colors)
-    );
-    lines.push(border(width, UiTone::Teal, colors));
-    lines.push(boxed(
-        format!(
-            "{}  status {}",
-            title,
-            paint(overall.marker(), overall.tone(), true, colors)
-        ),
-        width,
-    ));
-    lines.push(boxed(
-        format!("version {}  home {}", dashboard.version, dashboard.home),
-        width,
-    ));
-    lines.push(boxed(format!("updated {}", dashboard.updated), width));
-    lines.push(boxed(
-        format!(
-            "view {}  readiness {}  {}",
-            view.label(),
-            progress_bar(summary.ready_percent(), 18),
-            summary.describe()
-        ),
-        width,
-    ));
-    lines.push(border(width, UiTone::Teal, colors));
-    lines.push(String::new());
-    lines.push(format!(
-        "{}  {}",
-        paint("Views", UiTone::Gold, true, colors),
-        paint(
-            "1 readiness  2 policies  3 audit  4 capabilities  5 recovery",
-            UiTone::Muted,
-            false,
-            colors
-        )
-    ));
-    render_view_body(&mut lines, layout, dashboard, colors, selected, view);
-    lines.push(String::new());
-    lines.push(format!(
-        "{} quit   {} refresh   {} move   {} for CI and issue reports",
-        paint("q", UiTone::Gold, true, colors),
-        paint("r", UiTone::Gold, true, colors),
-        paint("j/k", UiTone::Gold, true, colors),
-        paint("--snapshot", UiTone::Muted, false, colors)
-    ));
-    lines
+fn selected_approval_id(layout: &HomeLayout, selected: usize) -> Option<String> {
+    pending_approval_ids(layout).into_iter().nth(selected)
 }
 
-fn render_view_body(
-    lines: &mut Vec<String>,
-    layout: &HomeLayout,
-    dashboard: &Dashboard,
-    colors: bool,
-    selected: usize,
-    view: TuiView,
-) {
-    match view {
-        TuiView::Dashboard | TuiView::All => {
-            render_dashboard_body(lines, dashboard, colors, selected);
+fn pending_approval_max(layout: &HomeLayout) -> usize {
+    pending_approval_ids(layout).len().saturating_sub(1)
+}
+
+fn clamp_approval_selection(layout: &HomeLayout, selected: usize) -> usize {
+    selected.min(pending_approval_max(layout))
+}
+
+fn execute_tui_action(layout: &HomeLayout, action: PendingTuiAction) -> String {
+    match action {
+        PendingTuiAction::Approve(id) => {
+            match approve_request(layout, &id, 1, 600, "approved from gommage tui") {
+                Ok(report) => report.message,
+                Err(error) => format!("approval failed: {error:#}"),
+            }
         }
-        other => match build_view_report(layout, other) {
-            Ok(report) => render_report_body(lines, &report, colors),
-            Err(error) => lines.push(format!("could not render {}: {error}", other.label())),
+        PendingTuiAction::Deny(id) => match deny_request(layout, &id, "denied from gommage tui") {
+            Ok(report) => report.message,
+            Err(error) => format!("deny failed: {error:#}"),
         },
-    }
-}
-
-fn render_dashboard_body(
-    lines: &mut Vec<String>,
-    dashboard: &Dashboard,
-    colors: bool,
-    selected: usize,
-) {
-    lines.push(paint("Readiness", UiTone::Gold, true, colors));
-    for (index, row) in dashboard.rows.iter().enumerate() {
-        let cursor = if index == selected { ">" } else { " " };
-        lines.push(format!(
-            "{} {} {:<13} {}",
-            paint(cursor, UiTone::Gold, true, colors),
-            paint(row.status.marker(), row.status.tone(), true, colors),
-            row.label,
-            row.summary
-        ));
-    }
-    lines.push(String::new());
-    if let Some(row) = dashboard.rows.get(selected) {
-        lines.push(paint("Focus", UiTone::Gold, true, colors));
-        lines.push(format!(
-            "{} [{}] {}",
-            row.label,
-            row.status.label(),
-            row.summary
-        ));
-        lines.push(format!("  {}", row.detail));
-        lines.push(String::new());
-    }
-    lines.push(paint("Next", UiTone::Gold, true, colors));
-    for (index, action) in dashboard.next_actions.iter().enumerate() {
-        lines.push(format!("{}. {action}", index + 1));
-    }
-}
-
-fn render_report_body(lines: &mut Vec<String>, report: &ViewReport, colors: bool) {
-    lines.push(paint(&report.title, UiTone::Gold, true, colors));
-    lines.extend(report.lines.iter().map(|line| format!("- {line}")));
-    lines.push(String::new());
-    lines.push(paint("Next", UiTone::Gold, true, colors));
-    for (index, action) in report.next_actions.iter().enumerate() {
-        lines.push(format!("{}. {action}", index + 1));
-    }
-}
-
-fn progress_bar(percent: usize, width: usize) -> String {
-    let filled = width.saturating_mul(percent.min(100)) / 100;
-    format!(
-        "[{}{}] {:>3}%",
-        "#".repeat(filled),
-        "-".repeat(width.saturating_sub(filled)),
-        percent.min(100)
-    )
-}
-
-fn boxed(content: String, width: usize) -> String {
-    let inner = width.saturating_sub(4);
-    format!(
-        "| {} |",
-        pad_visible(&truncate_plain(&content, inner), inner)
-    )
-}
-
-fn border(width: usize, tone: UiTone, colors: bool) -> String {
-    paint(
-        format!("+{}+", "-".repeat(width.saturating_sub(2))),
-        tone,
-        false,
-        colors,
-    )
-}
-
-fn pad_visible(input: &str, width: usize) -> String {
-    let visible = strip_ansi(input).chars().count();
-    if visible >= width {
-        input.to_string()
-    } else {
-        format!("{input}{}", " ".repeat(width - visible))
     }
 }
 
@@ -639,7 +602,7 @@ fn agent_name(agent: AgentKind) -> &'static str {
 }
 
 impl Dashboard {
-    fn overall_status(&self) -> UiStatus {
+    pub(crate) fn overall_status(&self) -> UiStatus {
         self.rows
             .iter()
             .map(|row| row.status)
@@ -647,7 +610,7 @@ impl Dashboard {
             .unwrap_or(UiStatus::Skip)
     }
 
-    fn summary(&self) -> DashboardSummary {
+    pub(crate) fn summary(&self) -> DashboardSummary {
         let mut summary = DashboardSummary {
             total: self.rows.len(),
             ok: 0,
@@ -678,14 +641,14 @@ impl Dashboard {
 }
 
 impl DashboardSummary {
-    fn ready_percent(self) -> usize {
+    pub(crate) fn ready_percent(self) -> usize {
         self.ok
             .saturating_mul(100)
             .checked_div(self.total)
             .unwrap_or(0)
     }
 
-    fn describe(self) -> String {
+    pub(crate) fn describe(self) -> String {
         format!(
             "{} check(s): {} ok, {} warn, {} fail, {} skip",
             self.total, self.ok, self.warn, self.fail, self.skip

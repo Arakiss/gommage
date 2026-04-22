@@ -113,11 +113,12 @@ Features:
     command center: live daemon status, decision stream, pending asks, active
     pictos, policy hash, audit tail, and recovery shortcuts.
 - Local picto approval flow
-  - The CLI approval path now exists. Next step is an inline TUI form for
-    approve/deny so operators do not need to copy request IDs.
+  - The CLI approval path and TUI approve/deny confirmation now exist. Next
+    step is a richer inline form with editable TTL, use count, and reason.
 - Approval provider interface
-  - The generic webhook payload now exists through `gommage approval webhook`.
-    Next step is signed callbacks and native ntfy, Slack, or Discord providers.
+  - Generic, Slack-shaped, and Discord-shaped webhook payloads now exist through
+    `gommage approval webhook`. Next step is signed callbacks and native ntfy
+    provider support.
 - Metrics endpoint
   - Local counters for decisions, denials, asks, picto outcomes, audit anomalies,
     and daemon health.
@@ -133,8 +134,8 @@ Primary code surfaces:
 
 Exit criteria:
 
-- A user can approve a one-shot picto from the TUI and verify the audit entry
-  afterward.
+- A user can approve a one-shot picto from the TUI, tune the grant parameters
+  before confirmation, and verify the audit entry afterward.
 - Webhook approval supports signed callbacks or an equivalent replay-resistant
   confirmation channel.
 - Human TUI output is never part of an automation contract.
