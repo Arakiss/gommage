@@ -1,0 +1,66 @@
+name: Beta readiness
+description: Track a beta or launch-readiness blocker with evidence.
+title: "beta: "
+labels: ["beta-readiness", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for issues that block beta, public announcement, or a
+        trusted install path. Link command output, workflow runs, releases, or
+        docs. Do not use this for speculative feature ideas.
+
+  - type: dropdown
+    id: gate
+    attributes:
+      label: Gate
+      description: Which beta-readiness gate is affected?
+      options:
+        - Installer
+        - Release assets
+        - Binary introspection
+        - Home setup
+        - Readiness gate
+        - Semantic smoke
+        - Host-agent wiring
+        - Policy fixtures
+        - Audit verification
+        - CI / release automation
+        - Documentation
+        - Publishing / crates.io
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Commands, workflow URLs, release URLs, or screenshots proving the blocker.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Why this blocks beta or public announcement.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected beta behavior
+      description: What should be true before this issue can close?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Closure checks
+      options:
+        - label: The fix has a command or workflow proving it works.
+        - label: Documentation was updated if the operator path changed.
+        - label: This issue links the release, commit, or PR that resolves it.

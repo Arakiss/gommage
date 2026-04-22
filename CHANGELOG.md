@@ -13,6 +13,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- `docs/beta-readiness.md` and a beta-readiness issue template for tracking
+  launch blockers with command, workflow, release, and documentation evidence.
 - Signed audit lifecycle events for picto create/confirm/consume/revoke/reject and policy reloads. `audit-verify` and `audit-verify --explain` now verify mixed decision/event JSONL logs.
 - `gommage policy init --stdlib` installs the bundled stdlib policies and capability mappers without requiring manual file copies.
 - `gommage quickstart` and `gommage agent install` bootstrap Claude Code/Codex integrations with config backups, stdlib install, Claude native deny-rule import, and hook installation.
@@ -73,6 +75,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- README agent guidance now uses short command blocks and stable contract
+  tables instead of an oversized all-in-one command block.
 - Picto lookup and consumption now verify ed25519 signatures before a stored row can convert `ask_picto` into `allow`; tampered rows remain unconsumed and emit `picto_rejected` audit events.
 - `gommage-mcp` daemon-absent fallback now writes signed audit entries instead of silently evaluating without audit.
 - Policy version hashes now use relative policy file paths plus substituted effective contents, making identical policy trees path-stable across homes while distinguishing different effective canvases.
