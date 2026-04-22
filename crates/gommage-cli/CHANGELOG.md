@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.13.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.12.2-alpha.1...gommage-cli-v0.13.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** self-test quickstart setup ([9acff72](https://github.com/Arakiss/gommage/commit/9acff72882ba647e063cbae1cabc1e2077f7d540))
+
 ## [0.12.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.12.1-alpha.1...gommage-cli-v0.12.2-alpha.1) (2026-04-22)
 
 
