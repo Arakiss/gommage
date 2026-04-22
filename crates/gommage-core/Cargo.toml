@@ -1,6 +1,6 @@
 [package]
 name = "gommage-core"
-version = "0.3.0-alpha.1"
+version = "0.3.1-alpha.1"
 publish = false    # flip when the crate is first published to crates.io
 edition.workspace = true
 rust-version.workspace = true

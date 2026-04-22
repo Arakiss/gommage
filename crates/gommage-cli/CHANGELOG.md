@@ -1,5 +1,24 @@
 # Changelog — gommage-cli
 
+## [0.14.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.13.0-alpha.1...gommage-cli-v0.14.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* add reversible uninstall ([d4fe299](https://github.com/Arakiss/gommage/commit/d4fe2999dee26fe9826ecd778dac630cf786b32e))
+
+
+### Bug fixes
+
+* clarify install readiness failures ([9654aa4](https://github.com/Arakiss/gommage/commit/9654aa488c181862ddeabe5f3e85ab28ac807268))
+* prevent quickstart deadlocks ([2d9c967](https://github.com/Arakiss/gommage/commit/2d9c967faff8f7b1199d08fac2a43363fa6b7e26))
+* satisfy strict clippy gate ([b5385cb](https://github.com/Arakiss/gommage/commit/b5385cb640195fa647a00ce5c00dd8b49b7fe596))
+
+
+### Documentation
+
+* lock agent command contracts ([5056758](https://github.com/Arakiss/gommage/commit/505675890ec4b3d128c2eab03615b99ace38b54e))
+
 ## [Unreleased]
 
 ### Features
