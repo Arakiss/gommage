@@ -1,5 +1,12 @@
 # Changelog — gommage-audit
 
+## [0.2.3-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.2.2-alpha.1...gommage-audit-v0.2.3-alpha.1) (2026-04-22)
+
+
+### Bug fixes
+
+* harden bypass audit semantics ([3663dc9](https://github.com/Arakiss/gommage/commit/3663dc94ef01fe94a1527bf29985a1b85942f76d))
+
 ## [0.2.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.2.1-alpha.1...gommage-audit-v0.2.2-alpha.1) (2026-04-22)
 
 ## [0.2.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.2.0-alpha.1...gommage-audit-v0.2.1-alpha.1) (2026-04-22)
