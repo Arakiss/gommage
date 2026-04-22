@@ -21,6 +21,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Sigstore keyless signing for release archives plus installer verification of both Cosign bundles and SHA-256 checksums.
 - `scripts/install.sh --with-skill`, `--skill-only`, and `--skill-agent codex|claude|all` so the verified installer can also install/update the Gommage agent skill for Codex and Claude Code.
 - `gommage doctor` diagnoses the local home, key, policy, capability mapper, audit log, and daemon socket state.
+- `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo with a Gommage Teal to Picto Gold gradient in interactive terminals and `--plain` / `NO_COLOR` support for script-safe output.
 - Structured `gommage explain <audit-id>` output with exact id matching plus `--json` for the raw verified entry shape.
 - `gommage grant --ttl` now accepts duration suffixes (`s`, `m`, `h`, `d`) as well as raw seconds.
 - Property-based robustness suite (`crates/gommage-core/tests/proptest_robustness.rs`): 4 properties covering the capability mapper, policy YAML parser, picto signature verifier, and evaluator. 1536 randomised inputs per CI run across all four properties. Asserts: no panic on arbitrary tool-call JSON, no panic on arbitrary YAML (either `Ok(Policy)` or typed error), signature verification rejects random 64-byte blobs, evaluator always returns one of the three decision variants.
@@ -55,6 +56,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - README now frames Gommage as one layer in a broader AI agent harness
   engineering stack and documents the agent skill as part of the install
   surface.
+- README now includes a dedicated agent-operator section separating stable
+  machine-readable contracts from decorative human-only CLI output.
 - `gommage-cli` now embeds bundled defaults through `gommage-stdlib` instead of
   repository-root asset paths.
 
