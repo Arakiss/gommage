@@ -76,12 +76,13 @@ The alpha distribution has two install surfaces:
 - **Runtime binaries**: `gommage`, `gommage-daemon`, and `gommage-mcp`, installed through the verified GitHub Release installer.
 - **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
 - **Operator dashboard**: `gommage tui`, a dependency-free terminal command
-  center for humans with readiness, policies, audit, capabilities, and recovery
-  views. Use `gommage tui --snapshot --view all` for issue reports and
-  non-interactive shells.
+  center for humans with readiness, approvals, policies, audit, capabilities,
+  and recovery views. Use `gommage tui --snapshot --view all` for issue reports
+  and non-interactive shells; interactive mode can resolve pending approvals
+  only after an explicit confirmation keystroke.
 
 <p align="center">
-  <img src="docs/assets/tui-dashboard.gif" alt="Animated Gommage operator dashboard TUI demo showing readiness, policies, audit, capabilities, and recovery views" width="100%" />
+  <img src="docs/assets/tui-dashboard.gif" alt="Animated Gommage operator dashboard TUI demo showing readiness, approvals, policies, audit, capabilities, and recovery views" width="100%" />
 </p>
 <p align="center"><sub>Representative animated demo of <code>gommage tui --snapshot --view all</code>. The real command prints plain text for terminals, issue reports, and agent-readable diagnostics. Static fallback: <a href="docs/assets/tui-dashboard.svg">SVG</a>.</sub></p>
 
@@ -285,6 +286,9 @@ Stable automation contracts:
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `approval list --json` | Pending out-of-band approval requests. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
+| `approval replay <id> --json` | Compare a stored approval request against the current policy. |
+| `approval evidence <id> --redact` | Export request state, relevant signed audit lines, verification summary, and next commands. |
+| `approval template --provider <name> --json` | Render generic, Slack, Discord, or ntfy notification payload templates. |
 | `agent uninstall` / `uninstall --dry-run` | Reversible cleanup and recovery. |
 
 The manifest and command contract above are checked by CI:
@@ -335,9 +339,11 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
 # One readiness gate for scripts, CI, and agent skills.
 gommage verify --json --policy-test examples/policy-fixtures.yaml
 
-# Human operator dashboard. It is read-only and never mutates GOMMAGE_HOME.
+# Human operator dashboard. Snapshot mode is read-only and issue-friendly.
+# Interactive mode can approve/deny pending requests only after y/n confirmation.
 gommage tui
 gommage tui --snapshot --view all
+gommage tui --view approvals
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
@@ -361,10 +367,15 @@ gommage grant \
 # Review an out-of-band ask and mint an exact-scope picto.
 gommage approval list
 gommage approval show <approval-id>
+gommage approval replay <approval-id>
+gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 
-# Or send pending asks to a generic webhook endpoint.
+# Or notify humans through generic, Slack, or Discord webhook payloads.
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL"
+gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
+gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL"
+gommage approval template --provider ntfy
 
 # Watch decisions live
 gommage tail
@@ -523,12 +534,15 @@ execution order.
 - Supported agents: **Claude Code** (all tool types), **OpenAI Codex CLI** (Bash tool only — limited by Codex's current hook surface)
 - YAML policy + capability mappers for Bash, filesystem tools, Grep, WebFetch, WebSearch, MCP tools, git, cloud CLIs, package managers, Vercel, Bun, and Docker
 - Pictos (signed, TTL, usage-bounded)
-- Durable out-of-band approval inbox with exact-scope picto minting
-- Generic approval webhook delivery through `gommage approval webhook`
+- Durable out-of-band approval inbox with exact-scope picto minting, replay
+  diagnostics, redacted evidence bundles, and TUI approval resolution
+- Generic approval webhook delivery plus Slack/Discord-shaped payloads through
+  `gommage approval webhook`
 - Append-only signed audit log
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
-- Dependency-free operator dashboard with `gommage tui` and `gommage tui --snapshot`
+- Dependency-free operator dashboard with `gommage tui`, `--snapshot`, and
+  approvals/policies/audit/capabilities/recovery views
 - Built-in semantic smoke checks and project-owned policy regression fixtures
 - Capability mapping inspector for policy-authoring and mapper-debugging loops
 - Packaged `gommage-stdlib` crate assets for future crates.io support
@@ -542,14 +556,13 @@ execution order.
   strict policy linting for the policy-authoring loop
 - crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
-- Inline approval form inside `gommage tui` on top of the current command
-  workflow
+- Signed callback protocol for remote approval providers
 - Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
 - Generic MCP server mode for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
-- Native Slack/Discord/ntfy approval providers on top of the generic webhook
-  payload
+- Native ntfy approval provider and richer provider templates on top of the
+  generic webhook payload
 - Browser playground for mapping, policy evaluation, explain traces, and fixture
   generation
 
@@ -564,7 +577,7 @@ execution order.
 
 ## Not in scope
 
-Gommage is a permission harness layer, not a complete security product:
+Gommage is a policy decision and audit harness layer, not a complete security product:
 
 - **Not an OS permission system.** AppArmor / SELinux operate below it; they are complementary.
 - **Does not defend the agent binary itself.** If Claude Code is compromised at binary level, Gommage cannot help.

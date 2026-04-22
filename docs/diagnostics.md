@@ -2,18 +2,20 @@
 
 `gommage verify` is the default readiness gate for scripts, installers, skills, and CI smoke tests. It aggregates `doctor`, built-in semantic `smoke`, and optional repository policy fixtures into one report.
 
-`gommage tui` is the read-only operator dashboard for humans. It renders the
-same high-level readiness model as `verify`, plus host-agent status, a readiness
-summary, focused diagnostic detail, and next actions, without mutating
-`GOMMAGE_HOME`. Use `gommage tui --snapshot` when a terminal is non-interactive,
-when filing an issue, or when an agent needs to capture a human-readable report
-without ANSI control sequences. Automation should still parse the JSON commands
-below instead of the TUI.
+`gommage tui` is the operator dashboard for humans. It renders the same
+high-level readiness model as `verify`, plus host-agent status, pending
+approvals, policy inventory, audit state, capability mapper state, recovery
+shortcuts, and next actions. Snapshot mode never mutates `GOMMAGE_HOME`; use it
+when a terminal is non-interactive, when filing an issue, or when an agent needs
+to capture a human-readable report without ANSI control sequences. Automation
+should still parse the JSON commands below instead of the TUI.
 
-`gommage tui --view dashboard|policies|audit|capabilities|recovery|all` selects
-operator views. `--view all` is the most useful issue-report snapshot: it
-includes readiness, policy inventory, signed audit summary, mapper inventory,
-and recovery shortcuts. Interactive mode switches views with `1`-`5`.
+`gommage tui --view dashboard|approvals|policies|audit|capabilities|recovery|all`
+selects operator views. `--view all` is the most useful issue-report snapshot:
+it includes readiness, pending approvals, policy inventory, signed audit
+summary, mapper inventory, and recovery shortcuts. Interactive mode switches
+views with `1`-`6`. In the approvals view, `A` and `D` stage an approve/deny
+action for the selected request and require `y` before mutating state.
 The README embeds a sanitized animated demo at `docs/assets/tui-dashboard.gif`
 and keeps `docs/assets/tui-dashboard.svg` as a static fallback; update both
 assets whenever the TUI's primary sections or vocabulary change.
@@ -119,16 +121,23 @@ Use these commands for operator triage:
 gommage approval list
 gommage approval list --json
 gommage approval show <approval-id>
+gommage approval replay <approval-id> --json
+gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 gommage approval deny <approval-id> --reason "not enough context"
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run
+gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL" --dry-run
+gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL" --dry-run
+gommage approval template --provider ntfy
 ```
 
 Approving a request mints an exact-scope picto and writes signed
 `picto_created` plus `approval_resolved` events. Denying a request writes a
 signed `approval_resolved` event with `status: denied`. Webhook delivery is
 best-effort: failures are signed as `approval_webhook_failed`, but never change
-the permission decision.
+the permission decision. Replay compares the stored request capabilities against
+the current policy; evidence bundles collect request state, relevant signed
+audit lines, verification summary, and next commands for issue reports.
 
 ## JSON shape
 

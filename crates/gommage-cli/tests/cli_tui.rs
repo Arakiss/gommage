@@ -1,7 +1,25 @@
 mod support;
 
+use std::{io::Write, process::Stdio};
 use support::gommage;
 use tempfile::tempdir;
+
+fn run_mcp(home: &std::path::Path, payload: &[u8]) -> serde_json::Value {
+    let mut child = gommage(home)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(payload).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
 
 #[test]
 fn tui_snapshot_is_plain_and_actionable_preinit() {
@@ -150,6 +168,8 @@ fn tui_snapshot_view_all_includes_operator_sections() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("policies:"));
+    assert!(stdout.contains("approvals:"));
+    assert!(stdout.contains("- requests:"));
     assert!(stdout.contains("- policy files:"));
     assert!(stdout.contains("audit:"));
     assert!(stdout.contains("- approval requests:"));
@@ -157,5 +177,46 @@ fn tui_snapshot_view_all_includes_operator_sections() {
     assert!(stdout.contains("- mapper rules:"));
     assert!(stdout.contains("recovery:"));
     assert!(stdout.contains("- pending approvals:"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn tui_approval_snapshot_lists_pending_requests() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let ask = run_mcp(&home, payload);
+    assert_eq!(
+        ask.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("ask")
+    );
+
+    let output = gommage(&home)
+        .args(["tui", "--snapshot", "--view", "approvals"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("approvals:"));
+    assert!(stdout.contains("requests: 1 pending"));
+    assert!(stdout.contains("mcp__db__write_row"));
+    assert!(stdout.contains("gommage approval approve apr_"));
+    assert!(stdout.contains("gommage approval replay apr_"));
     assert!(!stdout.contains("\x1b["));
 }

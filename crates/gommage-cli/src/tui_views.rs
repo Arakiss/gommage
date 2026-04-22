@@ -11,6 +11,7 @@ use crate::{doctor::build_doctor_report, util::path_display};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum TuiView {
     Dashboard,
+    Approvals,
     Policies,
     Audit,
     Capabilities,
@@ -22,6 +23,7 @@ impl TuiView {
     pub(crate) fn label(self) -> &'static str {
         match self {
             TuiView::Dashboard => "dashboard",
+            TuiView::Approvals => "approvals",
             TuiView::Policies => "policies",
             TuiView::Audit => "audit",
             TuiView::Capabilities => "capabilities",
@@ -30,9 +32,10 @@ impl TuiView {
         }
     }
 
-    pub(crate) fn interactive_views() -> [TuiView; 5] {
+    pub(crate) fn interactive_views() -> [TuiView; 6] {
         [
             TuiView::Dashboard,
+            TuiView::Approvals,
             TuiView::Policies,
             TuiView::Audit,
             TuiView::Capabilities,
@@ -55,11 +58,93 @@ pub(crate) fn build_view_report(layout: &HomeLayout, view: TuiView) -> Result<Vi
             lines: vec!["readiness dashboard is shown in the primary panel".to_string()],
             next_actions: vec!["gommage verify --json".to_string()],
         },
+        TuiView::Approvals => approvals_report(layout, None),
         TuiView::Policies => policies_report(layout),
         TuiView::Audit => audit_report(layout),
         TuiView::Capabilities => capabilities_report(layout),
         TuiView::Recovery => recovery_report(layout),
     })
+}
+
+pub(crate) fn build_approvals_report(
+    layout: &HomeLayout,
+    selected_pending: Option<usize>,
+) -> ViewReport {
+    approvals_report(layout, selected_pending)
+}
+
+pub(crate) fn pending_approval_ids(layout: &HomeLayout) -> Vec<String> {
+    ApprovalStore::open(&layout.approvals_log)
+        .pending()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|state| state.request.id)
+        .collect()
+}
+
+fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> ViewReport {
+    let states = ApprovalStore::open(&layout.approvals_log)
+        .list()
+        .unwrap_or_default();
+    let pending = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Pending)
+        .collect::<Vec<_>>();
+    let approved = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Approved)
+        .count();
+    let denied = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Denied)
+        .count();
+    let mut lines = vec![
+        format!("approval inbox: {}", path_display(&layout.approvals_log)),
+        format!(
+            "requests: {} pending, {} approved, {} denied, {} total",
+            pending.len(),
+            approved,
+            denied,
+            states.len()
+        ),
+    ];
+    if pending.is_empty() {
+        lines.push("pending: none".to_string());
+    } else {
+        lines.push("pending:".to_string());
+        for (index, state) in pending.iter().take(8).enumerate() {
+            let cursor = if selected_pending == Some(index) {
+                ">"
+            } else {
+                "-"
+            };
+            lines.push(format!(
+                "{} {} tool={} scope={} input={}",
+                cursor,
+                state.request.id,
+                state.request.tool,
+                state.request.required_scope,
+                short_hash(&state.request.input_hash)
+            ));
+        }
+    }
+    let mut next_actions = vec![
+        "gommage approval list --status pending".to_string(),
+        "gommage tui --view approvals".to_string(),
+    ];
+    if let Some(first) = pending.first() {
+        next_actions.push(format!("gommage approval show {} --json", first.request.id));
+        next_actions.push(format!(
+            "gommage approval approve {} --ttl 10m --uses 1",
+            first.request.id
+        ));
+        next_actions.push(format!("gommage approval replay {}", first.request.id));
+    }
+    ViewReport {
+        title: "approvals".to_string(),
+        lines,
+        next_actions,
+    }
 }
 
 fn policies_report(layout: &HomeLayout) -> ViewReport {

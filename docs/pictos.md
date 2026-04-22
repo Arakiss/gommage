@@ -26,6 +26,8 @@ Human approval is explicit:
 ```sh
 gommage approval list
 gommage approval show <approval-id>
+gommage approval replay <approval-id>
+gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 ```
 
@@ -37,11 +39,43 @@ deny instead:
 gommage approval deny <approval-id> --reason "not enough context"
 ```
 
+The operator TUI exposes the same inbox:
+
+```sh
+gommage tui --view approvals
+gommage tui --snapshot --view approvals
+```
+
+Interactive TUI approval is intentionally two-step: `A` or `D` stages the
+selected pending request, and `y` is required before Gommage mints a picto or
+records a denial.
+
+Replay and evidence commands are for debugging and support. Replay evaluates the
+stored request capabilities against the current policy, so an operator can see
+whether the policy still asks for the same scope, now allows, now denies, or now
+hard-stops. Evidence bundles are redacted JSON support artifacts containing
+request state, relevant signed audit lines, audit verification summary, and next
+commands.
+
 Generic webhook delivery is available without changing the decision path:
 
 ```sh
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL"
 ```
+
+The generic JSON payload is the stable automation contract. Slack and Discord
+incoming webhook payloads are available as presentation formats:
+
+```sh
+gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
+gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL"
+gommage approval template --provider ntfy
+```
+
+Slack incoming webhooks accept JSON with `text` and optional `blocks`; Discord
+incoming webhooks accept JSON `content` and optional `embeds`; ntfy JSON
+publishing posts to the server root URL with a `topic`, so Gommage documents an
+ntfy template but does not send ntfy directly yet.
 
 If `GOMMAGE_APPROVAL_WEBHOOK_URL` is set in the hook environment, daemon and
 MCP fallback paths attempt best-effort webhook delivery at request time. Delivery

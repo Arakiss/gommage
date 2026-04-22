@@ -44,9 +44,10 @@ issue:
 | Readiness gate | `gommage verify --json` exits with `pass` or documented `warn`. |
 | Quickstart self-test | `gommage quickstart --self-test` reaches the same readiness gate after setup. |
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
-| Operator TUI | `gommage tui --snapshot --view all` shows summary, focus, readiness rows, policy, audit, capability, recovery, and next actions on a clean pre-init home and after quickstart. |
-| Approval flow | An `ask_picto` decision creates an approval request; `gommage approval approve <id>` mints an exact-scope picto; the next matching call consumes it; `audit-verify --explain` verifies the signed evidence. |
-| Webhook flow | `gommage approval webhook --dry-run` renders pending payloads and a fake or test endpoint proves signed success/failure audit events. |
+| Operator TUI | `gommage tui --snapshot --view all` shows summary, focus, readiness rows, approvals, policy, audit, capability, recovery, and next actions on a clean pre-init home and after quickstart. |
+| Approval flow | An `ask_picto` decision creates an approval request; `gommage tui --view approvals` can approve/deny with confirmation; `gommage approval approve <id>` mints an exact-scope picto; the next matching call consumes it; `audit-verify --explain` verifies the signed evidence. |
+| Approval replay/evidence | `gommage approval replay <id> --json` compares stored request semantics with current policy; `gommage approval evidence <id> --redact` exports request state, relevant audit lines, verification summary, and next commands. |
+| Webhook flow | `gommage approval webhook --provider generic|slack|discord --dry-run` renders pending payloads and a fake or test endpoint proves signed success/failure audit events. |
 | Host wiring | `gommage agent status claude --json` and `gommage agent status codex --json` are documented for supported states. |
 | Policy fixtures | At least one repository-owned fixture file runs through `gommage policy test --json`. |
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
@@ -79,8 +80,9 @@ These can remain open for beta if they are clearly documented:
   Code and Codex.
 - crates.io may remain unpublished while GitHub Releases are the supported
   install path.
-- Native Slack/Discord/ntfy approval providers can stay on the v1.x roadmap as
-  long as the generic webhook payload and local approval commands are verified.
+- Signed remote approval callbacks and native ntfy sending can stay on the
+  v1.x roadmap as long as the generic webhook payload, Slack/Discord payload
+  shapes, local approval commands, and TUI approval confirmation are verified.
 
 ## Operator Smoke
 

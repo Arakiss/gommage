@@ -38,6 +38,20 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   TUI mode can switch views with `1`-`5`.
 - README now embeds a sanitized animated TUI demo, with a static SVG fallback,
   so new users can see the operator dashboard before installing.
+- `gommage tui --view approvals` adds a first-class approval inbox view.
+  Interactive mode now supports two-step `A` approve and `D` deny actions for
+  the selected pending request, reusing the same signed audit path as the CLI.
+- `gommage approval replay <id>` compares stored approval request capabilities
+  against the current policy and reports whether the request still asks for the
+  same scope, now allows, now denies, or now hard-stops.
+- `gommage approval evidence <id> --redact` emits a JSON support bundle with
+  request state, relevant signed audit entries, audit verification summary, and
+  operator commands.
+- `gommage approval webhook --provider generic|slack|discord` shapes pending
+  approval notifications for generic JSON, Slack incoming webhooks, or Discord
+  incoming webhooks. Generic JSON remains the stable automation contract.
+- `gommage approval template --provider generic|slack|discord|ntfy` prints
+  provider setup notes and payload templates without sending network requests.
 - The live-doc release-reference check now skips known binary asset extensions
   so README media files do not break documentation CI.
 - `ask_picto` decisions now create durable local approval requests in
@@ -207,11 +221,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Known issues
 
-- `gommage tui` is still keyboard-driven and dependency-free; it exposes
-  approval state through audit/recovery views, but does not yet provide an
-  inline approval form.
-- Webhook delivery is generic `curl`-based JSON. Native Slack, Discord, ntfy,
-  or signed callback providers remain roadmap items.
+- `gommage tui` is still keyboard-driven and dependency-free; approval
+  resolution is confirmation-based, not a full editable form for TTL/uses/reason.
+- Signed remote approval callbacks and native ntfy sending remain roadmap
+  items. Slack/Discord support is provider-shaped notification payloads, not a
+  remote approval protocol.
 
 ## [0.1.0-alpha.1] — 2026-04-21
 
