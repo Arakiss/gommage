@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.12.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.12.1-alpha.1...gommage-cli-v0.12.2-alpha.1) (2026-04-22)
+
+
+### Bug fixes
+
+* support companion binary introspection ([a2db821](https://github.com/Arakiss/gommage/commit/a2db821d2829cebf4d2083fda000a9682dab634d))
+
 ## [0.12.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.12.0-alpha.1...gommage-cli-v0.12.1-alpha.1) (2026-04-22)
 
 
