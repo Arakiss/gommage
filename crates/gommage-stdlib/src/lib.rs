@@ -63,3 +63,14 @@ pub const CAPABILITIES: &[StdlibFile] = &[
         contents: include_str!("../capabilities/web.yaml"),
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_policy_has_unambiguous_early_prefix() {
+        assert!(POLICIES.iter().any(|file| file.name == "03-recovery.yaml"));
+        assert!(!POLICIES.iter().any(|file| file.name == "05-recovery.yaml"));
+    }
+}

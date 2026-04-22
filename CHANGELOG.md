@@ -29,6 +29,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   doctor health, smoke status, Claude/Codex integration status, and next
   actions. `gommage tui --snapshot` prints a plain text dashboard for
   non-interactive terminals and issue reports.
+- `gommage tui` now adds a readiness summary, focused diagnostic detail, and
+  keyboard focus movement (`j`/`k`) in interactive mode while keeping snapshot
+  output plain and issue-friendly.
 - `gommage audit-verify --explain` reports signed bypass activity with
   `bypass_activations` and `hard_stop_bypass_attempts`.
 - `gommage uninstall --purge-backups` removes Gommage-created
@@ -73,6 +76,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   `permissions.allow` entries, including broad tool allows, into a late-order
   `90-claude-allow-import.yaml` policy file while earlier hard-stops, deny
   imports, stdlib denies, and ask rules still win.
+- Claude Code native permission import now normalizes `Tool(*)` and `Tool(**)`
+  path scopes before grouping so broad read/write rules collapse to one
+  capability rule.
 - Stdlib recovery policy keeps Gommage readiness commands, basic inspection,
   systemd daemon recovery, and Claude settings backup restore commands
   available after quickstart.

@@ -39,6 +39,15 @@ struct StatusRow {
     detail: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct DashboardSummary {
+    total: usize,
+    ok: usize,
+    warn: usize,
+    fail: usize,
+    skip: usize,
+}
+
 pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCode> {
     let agents = normalize_agents(options.agents);
     if options.snapshot || !io::stdout().is_terminal() || !io::stdin().is_terminal() {
@@ -160,6 +169,16 @@ fn print_snapshot(dashboard: &Dashboard) {
     println!("version: {}", dashboard.version);
     println!("home: {}", dashboard.home);
     println!("status: {}", dashboard.overall_status().label());
+    println!("summary: {}", dashboard.summary().describe());
+    if let Some(row) = dashboard.primary_row() {
+        println!(
+            "focus: {} [{}] {} - {}",
+            row.label,
+            row.status.label(),
+            row.summary,
+            row.detail
+        );
+    }
     println!();
     println!("readiness:");
     for row in &dashboard.rows {
@@ -186,7 +205,8 @@ fn run_interactive(layout: &HomeLayout, agents: &[AgentKind], refresh: Duration)
     let mut stdout = io::stdout();
     let colors = color_enabled();
     let mut dashboard = build_dashboard(layout, agents)?;
-    draw_dashboard(&mut stdout, &dashboard, colors)?;
+    let mut selected = dashboard.primary_row_index().unwrap_or(0);
+    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
     let mut last_refresh = Instant::now();
     let mut input = [0_u8; 1];
 
@@ -195,9 +215,18 @@ fn run_interactive(layout: &HomeLayout, agents: &[AgentKind], refresh: Duration)
             Ok(0) => {}
             Ok(_) => match input[0] {
                 b'q' | 27 => break,
+                b'j' | b'J' => {
+                    selected = (selected + 1).min(dashboard.rows.len().saturating_sub(1));
+                    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
+                }
+                b'k' | b'K' => {
+                    selected = selected.saturating_sub(1);
+                    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
+                }
                 b'r' | b'R' => {
                     dashboard = build_dashboard(layout, agents)?;
-                    draw_dashboard(&mut stdout, &dashboard, colors)?;
+                    selected = selected.min(dashboard.rows.len().saturating_sub(1));
+                    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
                     last_refresh = Instant::now();
                 }
                 _ => {}
@@ -208,7 +237,8 @@ fn run_interactive(layout: &HomeLayout, agents: &[AgentKind], refresh: Duration)
 
         if last_refresh.elapsed() >= refresh {
             dashboard = build_dashboard(layout, agents)?;
-            draw_dashboard(&mut stdout, &dashboard, colors)?;
+            selected = selected.min(dashboard.rows.len().saturating_sub(1));
+            draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
             last_refresh = Instant::now();
         }
     }
@@ -269,11 +299,16 @@ impl Drop for TerminalSession {
     }
 }
 
-fn draw_dashboard(stdout: &mut impl Write, dashboard: &Dashboard, colors: bool) -> io::Result<()> {
+fn draw_dashboard(
+    stdout: &mut impl Write,
+    dashboard: &Dashboard,
+    colors: bool,
+    selected: usize,
+) -> io::Result<()> {
     let (cols, rows) = terminal_size();
     let width = cols.clamp(40, 120);
     let height = rows.max(12);
-    let lines = render_lines(dashboard, width, colors);
+    let lines = render_lines(dashboard, width, colors, selected);
     write!(stdout, "\x1b[H\x1b[2J")?;
     for line in lines.into_iter().take(height) {
         writeln!(stdout, "{}", truncate_plain(&line, width))?;
@@ -281,9 +316,10 @@ fn draw_dashboard(stdout: &mut impl Write, dashboard: &Dashboard, colors: bool) 
     stdout.flush()
 }
 
-fn render_lines(dashboard: &Dashboard, width: usize, colors: bool) -> Vec<String> {
+fn render_lines(dashboard: &Dashboard, width: usize, colors: bool, selected: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let overall = dashboard.overall_status();
+    let summary = dashboard.summary();
     let title = format!(
         "{}  {}",
         paint("GOMMAGE", UiTone::Teal, true, colors),
@@ -303,31 +339,66 @@ fn render_lines(dashboard: &Dashboard, width: usize, colors: bool) -> Vec<String
         width,
     ));
     lines.push(boxed(format!("updated {}", dashboard.updated), width));
+    lines.push(boxed(
+        format!(
+            "readiness {}  {}",
+            progress_bar(summary.ready_percent(), 18),
+            summary.describe()
+        ),
+        width,
+    ));
     lines.push(border(width, UiTone::Teal, colors));
     lines.push(String::new());
-    lines.push(paint("Readiness", UiTone::Gold, true, colors));
-    for row in &dashboard.rows {
+    lines.push(format!(
+        "{}  {}",
+        paint("Readiness", UiTone::Gold, true, colors),
+        paint("j/k moves focus", UiTone::Muted, false, colors)
+    ));
+    for (index, row) in dashboard.rows.iter().enumerate() {
+        let cursor = if index == selected { ">" } else { " " };
         lines.push(format!(
-            "{} {}  {}",
+            "{} {} {:<13} {}",
+            paint(cursor, UiTone::Gold, true, colors),
             paint(row.status.marker(), row.status.tone(), true, colors),
             row.label,
             row.summary
         ));
-        lines.push(format!("    {}", row.detail));
     }
     lines.push(String::new());
+    if let Some(row) = dashboard.rows.get(selected) {
+        lines.push(paint("Focus", UiTone::Gold, true, colors));
+        lines.push(format!(
+            "{} [{}] {}",
+            row.label,
+            row.status.label(),
+            row.summary
+        ));
+        lines.push(format!("  {}", row.detail));
+        lines.push(String::new());
+    }
     lines.push(paint("Next", UiTone::Gold, true, colors));
     for (index, action) in dashboard.next_actions.iter().enumerate() {
         lines.push(format!("{}. {action}", index + 1));
     }
     lines.push(String::new());
     lines.push(format!(
-        "{} quit   {} refresh   {} for CI and issue reports",
+        "{} quit   {} refresh   {} move   {} for CI and issue reports",
         paint("q", UiTone::Gold, true, colors),
         paint("r", UiTone::Gold, true, colors),
+        paint("j/k", UiTone::Gold, true, colors),
         paint("--snapshot", UiTone::Muted, false, colors)
     ));
     lines
+}
+
+fn progress_bar(percent: usize, width: usize) -> String {
+    let filled = width.saturating_mul(percent.min(100)) / 100;
+    format!(
+        "[{}{}] {:>3}%",
+        "#".repeat(filled),
+        "-".repeat(width.saturating_sub(filled)),
+        percent.min(100)
+    )
 }
 
 fn boxed(content: String, width: usize) -> String {
@@ -460,5 +531,50 @@ impl Dashboard {
             .map(|row| row.status)
             .max_by_key(|status| status.rank())
             .unwrap_or(UiStatus::Skip)
+    }
+
+    fn summary(&self) -> DashboardSummary {
+        let mut summary = DashboardSummary {
+            total: self.rows.len(),
+            ok: 0,
+            warn: 0,
+            fail: 0,
+            skip: 0,
+        };
+        for row in &self.rows {
+            match row.status {
+                UiStatus::Ok => summary.ok += 1,
+                UiStatus::Warn => summary.warn += 1,
+                UiStatus::Fail => summary.fail += 1,
+                UiStatus::Skip => summary.skip += 1,
+            }
+        }
+        summary
+    }
+
+    fn primary_row(&self) -> Option<&StatusRow> {
+        self.primary_row_index()
+            .and_then(|index| self.rows.get(index))
+    }
+
+    fn primary_row_index(&self) -> Option<usize> {
+        let overall = self.overall_status();
+        self.rows.iter().position(|row| row.status == overall)
+    }
+}
+
+impl DashboardSummary {
+    fn ready_percent(self) -> usize {
+        self.ok
+            .saturating_mul(100)
+            .checked_div(self.total)
+            .unwrap_or(0)
+    }
+
+    fn describe(self) -> String {
+        format!(
+            "{} check(s): {} ok, {} warn, {} fail, {} skip",
+            self.total, self.ok, self.warn, self.fail, self.skip
+        )
     }
 }

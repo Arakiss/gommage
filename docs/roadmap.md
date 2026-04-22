@@ -217,6 +217,47 @@ Exit criteria:
 6. Ship package-manager integrations only after the signed release installer has
    stayed green through multiple alpha releases.
 
+## 1.0 Bar
+
+Version 1.0 is the point where Gommage should feel like a product people can
+recommend without caveats beyond the documented threat model. The release does
+not need every deferred idea, but it does need excellence in the core loop.
+
+Required product qualities:
+
+- Install, quickstart, verify, TUI inspection, report bundle, and uninstall are
+  a complete loop on macOS and Linux without hand-written recovery shell.
+- `gommage tui` is a polished local command center: readable on small terminals,
+  keyboard navigable, useful without docs, and explicitly separate from stable
+  JSON automation contracts.
+- Policy authoring has a flywheel: capture or replay observed calls, explain
+  the decision trace, generate candidate fixtures, and review before writing.
+- Approval flows are out-of-band and auditable. A picto can be created,
+  confirmed, consumed, revoked, and explained without relying on chat memory.
+- Recovery behavior is boring: every command that mutates host config has a
+  dry-run, backup, restore, and purge story.
+
+Required trust qualities:
+
+- Hard-stops, bypass semantics, picto lifecycle, audit verification, and release
+  signing all have regression tests and public docs.
+- `audit-verify --explain` is good enough for forensics: it reports bypasses,
+  anomalies, policy versions, expeditions, and signed lifecycle events.
+- Host support claims are narrow and evidence-backed. Unsupported hook timing is
+  named as unsupported instead of hidden behind roadmap language.
+- Release assets include archives, checksums, Sigstore bundles, and provenance
+  evidence for every supported platform.
+
+Required ecosystem qualities:
+
+- GitHub Releases remain the source of truth for signed binaries.
+- crates.io publication is either complete for the public crates or explicitly
+  deferred with current gate evidence.
+- Homebrew/AUR/native packages verify the same trust boundary or document their
+  weaker boundary clearly.
+- Skills, README, command manifest, and CI command-contract tests are generated
+  or checked from one stable source of truth.
+
 ## Deferred ideas
 
 - Team-shared encrypted picto store.

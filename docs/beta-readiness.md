@@ -44,6 +44,7 @@ issue:
 | Readiness gate | `gommage verify --json` exits with `pass` or documented `warn`. |
 | Quickstart self-test | `gommage quickstart --self-test` reaches the same readiness gate after setup. |
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
+| Operator TUI | `gommage tui --snapshot` shows summary, focus, readiness rows, and next actions on a clean pre-init home and after quickstart. |
 | Host wiring | `gommage agent status claude --json` and `gommage agent status codex --json` are documented for supported states. |
 | Policy fixtures | At least one repository-owned fixture file runs through `gommage policy test --json`. |
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
@@ -76,7 +77,8 @@ These can remain open for beta if they are clearly documented:
   Code and Codex.
 - crates.io may remain unpublished while GitHub Releases are the supported
   install path.
-- The TUI dashboard and webhook approvals can stay on the v1.x roadmap.
+- Live webhook approvals can stay on the v1.x roadmap as long as the read-only
+  TUI dashboard is beta-grade for local diagnosis and issue reports.
 
 ## Operator Smoke
 

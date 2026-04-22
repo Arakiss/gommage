@@ -75,7 +75,7 @@ The alpha distribution has two install surfaces:
 
 - **Runtime binaries**: `gommage`, `gommage-daemon`, and `gommage-mcp`, installed through the verified GitHub Release installer.
 - **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
-- **Operator dashboard**: `gommage tui`, a read-only terminal dashboard for humans. Use `gommage tui --snapshot` for issue reports and non-interactive shells.
+- **Operator dashboard**: `gommage tui`, a read-only terminal dashboard for humans with readiness summary, focused diagnostics, and next actions. Use `gommage tui --snapshot` for issue reports and non-interactive shells.
 
 ## Positioning
 
