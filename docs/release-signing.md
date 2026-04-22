@@ -38,7 +38,7 @@ Manual verification:
 
 ```sh
 asset=gommage-x86_64-darwin.tar.gz
-tag=gommage-cli-v0.1.2-alpha.1
+tag=gommage-cli-vX.Y.Z-alpha.N
 
 cosign verify-blob "$asset" \
   --bundle "$asset.sigstore.json" \
@@ -52,7 +52,7 @@ Installer flags:
 
 ```sh
 sh scripts/install.sh --help
-sh scripts/install.sh --version gommage-cli-v0.4.0-alpha.1
+sh scripts/install.sh --version gommage-cli-vX.Y.Z-alpha.N
 sh scripts/install.sh --bin-dir "$HOME/.local/bin"
 sh scripts/install.sh --with-skill --skill-agent codex --skill-agent claude
 sh scripts/install.sh --skill-only --skill-agent codex --skill-agent claude

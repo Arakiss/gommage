@@ -54,6 +54,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   into CI and release-please, so internal workspace dependency version
   constraints must match the crate versions they point at before alpha tags are
   cut.
+- Release-reference drift guard `scripts/check-doc-release-refs.sh`, wired into
+  CI and release-please, so living README/docs/script/skill examples use
+  `latest` or placeholder tags instead of stale concrete alpha release tags.
 
 ### Changed
 
