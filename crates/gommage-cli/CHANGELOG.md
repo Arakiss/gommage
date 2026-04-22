@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.18.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.17.0-alpha.1...gommage-cli-v0.18.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* add out-of-band approval workflow ([159aa6c](https://github.com/Arakiss/gommage/commit/159aa6c19706ef0a2ea6db92f2407b002fedcf1f))
+
 ## [0.17.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.16.1-alpha.1...gommage-cli-v0.17.0-alpha.1) (2026-04-22)
 
 
