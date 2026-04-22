@@ -591,6 +591,7 @@ dependencies = [
  "anyhow",
  "gommage-audit",
  "gommage-core",
+ "gommage-stdlib",
  "serde",
  "serde_json",
  "tempfile",

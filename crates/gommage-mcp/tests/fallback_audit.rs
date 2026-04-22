@@ -1,4 +1,4 @@
-use gommage_audit::verify_log;
+use gommage_audit::{explain_log, verify_log};
 use gommage_core::runtime::HomeLayout;
 use std::{
     fs,
@@ -82,4 +82,75 @@ fn bypass_env_allows_without_home_or_valid_hook_json() {
     assert!(stdout.contains(r#""permissionDecision":"allow""#));
     assert!(stdout.contains("GOMMAGE_BYPASS=1"));
     assert!(!temp.path().join("missing-home").exists());
+}
+
+#[test]
+fn bypass_env_does_not_bypass_hard_stops() {
+    let temp = tempdir().unwrap();
+    let layout = HomeLayout::at(&temp.path().join(".gommage"));
+    layout.ensure().unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gommage-mcp"))
+        .env("GOMMAGE_HOME", &layout.root)
+        .env("GOMMAGE_BYPASS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(r#""permissionDecision":"deny""#));
+    assert!(stdout.contains("hard-stops cannot be bypassed"));
+    assert_eq!(
+        verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
+        1
+    );
+    let report = explain_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap();
+    assert_eq!(report.bypass_activations, 1);
+    assert_eq!(report.hard_stop_bypass_attempts, 1);
+    assert!(report.anomalies.is_empty());
+}
+
+#[test]
+fn bypass_env_allows_non_hardstop_and_audits_when_home_has_key() {
+    let temp = tempdir().unwrap();
+    let layout = HomeLayout::at(&temp.path().join(".gommage"));
+    layout.ensure().unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gommage-mcp"))
+        .env("GOMMAGE_HOME", &layout.root)
+        .env("GOMMAGE_BYPASS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls -la"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(r#""permissionDecision":"allow""#));
+    assert!(stdout.contains("hard-stop check"));
+    let report = explain_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap();
+    assert_eq!(report.entries_verified, 1);
+    assert_eq!(report.bypass_activations, 1);
+    assert_eq!(report.hard_stop_bypass_attempts, 0);
+    assert!(report.anomalies.is_empty());
 }

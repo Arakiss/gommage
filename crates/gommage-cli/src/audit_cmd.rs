@@ -107,6 +107,11 @@ fn print_audit_verify_report(report: &AuditVerifyReport) {
         report.entries_total, report.entries_verified
     );
     println!("key_fingerprint: {}", report.key_fingerprint);
+    println!("bypass_activations: {}", report.bypass_activations);
+    println!(
+        "hard_stop_bypass_attempts: {}",
+        report.hard_stop_bypass_attempts
+    );
     print_string_list("policy_versions", &report.policy_versions_seen);
     print_string_list("expeditions", &report.expeditions_seen);
 
@@ -150,6 +155,13 @@ fn format_anomaly(anomaly: &Anomaly) -> String {
         Anomaly::PolicyVersionChanged { line, from, to } => {
             format!("line {line}: policy_version_changed from={from} to={to}")
         }
+        Anomaly::HardStopBypassAttempt {
+            line,
+            tool,
+            original_reason,
+        } => format!(
+            "line {line}: hard_stop_bypass_attempt tool={tool} original_reason={original_reason}"
+        ),
     }
 }
 
