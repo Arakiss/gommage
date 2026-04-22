@@ -676,6 +676,44 @@ cases:
 }
 
 #[test]
+fn verify_json_preinit_reports_hint_and_skips_smoke() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home).args(["verify", "--json"]).output().unwrap();
+
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("fail")
+    );
+    assert_eq!(
+        report.get("hint").and_then(|value| value.as_str()),
+        Some("run 'gommage init' or 'gommage quickstart' first")
+    );
+    assert_eq!(
+        report
+            .pointer("/summary/failures")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        report
+            .pointer("/smoke/status")
+            .and_then(|value| value.as_str()),
+        Some("skip")
+    );
+    assert!(
+        report
+            .pointer("/smoke/error")
+            .and_then(|value| value.as_str())
+            .unwrap()
+            .contains("skipped: doctor failed")
+    );
+}
+
+#[test]
 fn doctor_json_reports_missing_home_as_failure() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
