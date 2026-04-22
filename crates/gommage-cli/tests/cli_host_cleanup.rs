@@ -115,6 +115,64 @@ fn agent_uninstall_claude_can_restore_latest_valid_backup() {
 }
 
 #[test]
+fn agent_uninstall_dry_run_uses_plan_language_without_mutating() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::create_dir_all(hooks.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"gommage-mcp"}]}]}}"#,
+    )
+    .unwrap();
+    fs::write(
+        &hooks,
+        r#"{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"gommage-mcp"}]}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\ncodex_hooks = true\n",
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["agent", "uninstall", "all", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("plan claude: remove"));
+    assert!(stdout.contains("plan codex: remove"));
+    assert!(stdout.contains("plan codex: disable features.codex_hooks"));
+    assert!(!stdout.contains("ok claude: removed"));
+    assert!(!stdout.contains("ok codex: removed"));
+    assert!(!stdout.contains("ok codex: disabled"));
+    assert!(
+        fs::read_to_string(&settings)
+            .unwrap()
+            .contains("gommage-mcp")
+    );
+    assert!(fs::read_to_string(&hooks).unwrap().contains("gommage-mcp"));
+    assert!(
+        fs::read_to_string(&config)
+            .unwrap()
+            .contains("codex_hooks = true")
+    );
+}
+
+#[test]
 fn uninstall_all_dry_run_lists_every_surface() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

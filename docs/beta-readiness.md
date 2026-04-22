@@ -47,6 +47,7 @@ issue:
 | Host wiring | `gommage agent status claude --json` and `gommage agent status codex --json` are documented for supported states. |
 | Policy fixtures | At least one repository-owned fixture file runs through `gommage policy test --json`. |
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
+| Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host. |
 | CI | `ci`, `release`, `audit`, and `scorecard` are green on the release commit. |
 | Docs | README, diagnostics, agent compatibility, publishing, and release-signing docs match the current CLI. |
 | Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
@@ -77,29 +78,12 @@ These can remain open for beta if they are clearly documented:
   install path.
 - The TUI dashboard and webhook approvals can stay on the v1.x roadmap.
 
-## Operator smoke script
+## Operator Smoke
 
-Use this as the manual baseline for CI images and already-initialized homes.
-For a fresh host setup, prefer `gommage quickstart --agent claude --daemon
---self-test` or the equivalent Codex command.
-
-```sh
-set -euo pipefail
-
-home="$(mktemp -d)"
-export GOMMAGE_HOME="$home"
-
-gommage init
-gommage policy init --stdlib
-gommage doctor --json
-gommage smoke --json
-gommage verify --json
-gommage audit-verify --explain || true
-```
-
-`audit-verify` may fail before the first audited daemon or MCP decision because
-there is no audit log yet. That is a warning-level install state, not proof that
-policy evaluation is broken.
+Use [`host-smoke.md`](host-smoke.md) and `scripts/host-smoke.sh` for host
+evidence. The default mode runs against a temporary `HOME`, applies quickstart
+without starting the daemon, captures `verify`, `agent status`, semantic smoke,
+the redacted report bundle, and an uninstall dry-run rollback plan.
 
 ## Tracking issue checklist
 
