@@ -184,6 +184,7 @@ The beta-readiness checklist lives in [`docs/beta-readiness.md`](docs/beta-readi
 | Export the fixture schema | `gommage policy schema` |
 | Capture a policy fixture | `gommage policy snapshot --name <case_name>` |
 | Verify signed audit history | `gommage audit-verify --explain` |
+| Check crates.io publish readiness | `sh scripts/check-crates-publish-readiness.sh` |
 
 Install or update only the skill:
 
