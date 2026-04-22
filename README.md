@@ -186,8 +186,8 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 gommage doctor --json
 
 # Inspect mapper output before writing a policy rule.
-echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' \
-  | gommage map --json
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' \
+  | gommage map --json --hook
 
 # Verify active mapper + policy semantics.
 gommage smoke --json
@@ -217,14 +217,15 @@ decision JSON are the automation contracts.
 it aggregates runtime health, built-in semantic smoke checks, and optional
 project fixtures. `map --json` is the policy-authoring microscope: it shows the
 capabilities a raw `ToolCall` emits without loading policy, touching pictos, or
-writing audit entries. `smoke --json` is the semantic post-install check: it
-verifies that the active mapper and policy set still produce the expected
+writing audit entries; add `--hook` when stdin is a real PreToolUse payload with
+`tool_name` and `tool_input`. `smoke --json` is the semantic post-install check:
+it verifies that the active mapper and policy set still produce the expected
 hard-stop, fail-closed, allow, ask-picto, web, and MCP decisions. `policy test
 --json` is the project-owned regression surface: put expected decisions in
 versioned YAML fixtures and run them in CI before trusting a hook path. `policy
 schema` emits the official JSON Schema for those fixture files so agents,
 editors, and CI generators can validate the contract before running semantic
-checks. `policy snapshot` turns a real `ToolCall` JSON from stdin into a YAML fixture case so
+checks. `policy snapshot` turns a real `ToolCall` JSON or `--hook` payload from stdin into a YAML fixture case so
 humans and agents do not have to hand-author the first regression. Human
 presentation output is intentionally not part of the automation contract; use
 `audit-verify --explain --format human` when manually reviewing audit anomalies.
@@ -254,8 +255,8 @@ gommage policy test examples/policy-fixtures.yaml --json
 gommage policy schema > gommage-policy-fixture.schema.json
 
 # Inspect raw mapper output before writing or reviewing a rule.
-echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' \
-  | gommage map --json
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' \
+  | gommage map --json --hook
 
 # Generate the first fixture from an observed tool call.
 echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
@@ -296,7 +297,7 @@ gommage expedition end
 
 ## Diagnostics
 
-Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. Use `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
+Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. Use `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is a real PreToolUse payload, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
 
 - `ok`: all checks passed.
 - `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.

@@ -107,6 +107,9 @@
   agents, editors, and CI generators when creating policy fixture files.
 - `gommage map` / `gommage map --json` for inspecting raw capability mapper
   output without evaluating policy, reading pictos, or writing audit entries.
+- `--hook` input mode for `gommage map`, `gommage decide`, and
+  `gommage policy snapshot`, allowing policy-authoring tools to consume real
+  PreToolUse payloads with `tool_name`, `tool_input`, and optional `cwd`.
 - `gommage audit-verify --explain --format human` for manual signed-audit
   forensic review. Plain `audit-verify --explain` remains JSON for automation.
 - `gommage mascot` / `gommage logo` for the Gommage Gestral terminal logo, with an interactive Gommage Teal to Picto Gold gradient and `--plain` / `NO_COLOR` script-safe output.

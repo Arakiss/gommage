@@ -33,6 +33,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage map` and `gommage map --json` inspect `ToolCall -> capabilities`
   mapper output without evaluating policy, reading pictos, or writing audit
   entries.
+- `--hook` input mode for `gommage map`, `gommage decide`, and
+  `gommage policy snapshot`, allowing policy-authoring tools to consume real
+  PreToolUse payloads with `tool_name`, `tool_input`, and optional `cwd`.
 - `gommage audit-verify --explain --format human` renders the signed audit
   forensic report as a compact human-readable anomaly summary. Plain
   `audit-verify --explain` remains the JSON automation contract.
