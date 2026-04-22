@@ -32,6 +32,7 @@ check() {
 
 check "init" gommage_cmd init
 check "policy init" gommage_cmd policy init --stdlib
+check "quickstart dry-run json" gommage_cmd quickstart --agent claude --daemon --daemon-manager systemd --dry-run --json
 check "quickstart claude" gommage_cmd quickstart --agent claude --no-self-test
 check "agent install codex" gommage_cmd agent install codex
 

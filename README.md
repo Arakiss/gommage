@@ -187,6 +187,7 @@ curl --proto '=https' --tlsv1.2 -sSf \
 Primary setup and readiness commands:
 
 ```sh
+gommage quickstart --agent claude --daemon --dry-run --json
 gommage quickstart --agent claude --daemon --self-test
 gommage quickstart --agent codex --daemon --self-test
 gommage verify --json
@@ -253,6 +254,7 @@ Stable automation contracts:
 
 | Surface | Use it for |
 |---|---|
+| `quickstart --dry-run --json` | Inspect planned setup mutations, backups, hooks, imports, daemon service files, and self-test checks before touching a real home. |
 | `verify --json` | Default readiness gate for installers, CI, and agents. |
 | `doctor --json` | Lower-level runtime and install diagnostics. |
 | `agent status --json` | Claude/Codex hook wiring and native permission import state. |

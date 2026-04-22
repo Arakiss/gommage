@@ -10,6 +10,7 @@ use crate::{
     daemon::{ServiceManager, daemon_install, resolve_service_manager},
     input::bash_call,
     policy_cmd::install_stdlib,
+    quickstart_plan::build_quickstart_dry_run_report,
     util::env_path_or_home,
     verify::cmd_verify,
 };
@@ -24,6 +25,7 @@ pub(crate) struct QuickstartOptions {
     pub(crate) daemon_no_start: bool,
     pub(crate) self_test: bool,
     pub(crate) dry_run: bool,
+    pub(crate) json: bool,
 }
 
 pub(crate) fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> Result<ExitCode> {
@@ -37,7 +39,24 @@ pub(crate) fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> 
         daemon_no_start,
         self_test,
         dry_run,
+        json,
     } = options;
+
+    if json {
+        let report = build_quickstart_dry_run_report(
+            &layout,
+            agents,
+            replace_hooks,
+            import_native_permissions,
+            install_daemon,
+            daemon_manager,
+            daemon_force,
+            daemon_no_start,
+            self_test,
+        )?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(ExitCode::SUCCESS);
+    }
 
     if dry_run {
         println!("dry-run: no files will be written");
