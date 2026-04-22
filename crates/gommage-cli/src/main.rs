@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use gommage_audit::{
-    Anomaly, AuditEntry, AuditEvent, AuditEventEntry, AuditWriter, VerifyReport, verify_log,
+    Anomaly, AuditEntry, AuditEvent, AuditEventEntry, AuditWriter,
+    VerifyReport as AuditVerifyReport, verify_log,
 };
 use gommage_core::{
     Capability, Decision, MatchedRule, PictoConsume, PictoLookup, Policy, ToolCall, evaluate,
@@ -2616,7 +2617,7 @@ fn print_event_explain(entry: &AuditEventEntry) -> Result<()> {
     Ok(())
 }
 
-fn print_audit_verify_report(report: &VerifyReport) {
+fn print_audit_verify_report(report: &AuditVerifyReport) {
     let status = if report.anomalies.is_empty() {
         "ok"
     } else {
