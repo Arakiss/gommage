@@ -475,7 +475,9 @@ Gommage ships a deterministic fixture corpus with an expected decision oracle, i
 ## Roadmap
 
 See [`docs/beta-readiness.md`](docs/beta-readiness.md) for the evidence
-required before public beta or launch announcements.
+required before public beta or launch announcements. See
+[`docs/roadmap.md`](docs/roadmap.md) for the detailed feature sequence and
+execution order.
 
 **Current alpha line** — signed release-installer line
 - Daemon + CLI + PreToolUse hook adapter
@@ -492,6 +494,10 @@ required before public beta or launch announcements.
 - Determinism-critical deps pinned with `=x.y.z`, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
 
 **v1.0** — hackable by others
+- Dry-run quickstart planning, redacted support bundles, and a host E2E smoke
+  matrix for beta-grade operator safety
+- Audit replay, policy diff, policy suggestions, richer explain traces, and
+  strict policy linting for the policy-authoring loop
 - crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
 - TUI dashboard (`gommage watch`) with live approvals
@@ -500,6 +506,8 @@ required before public beta or launch announcements.
 - Generic MCP server mode for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
 - Webhook out-of-band
+- Browser playground for mapping, policy evaluation, explain traces, and fixture
+  generation
 
 **Not planned** — either no hook API or known permission-bypass bugs in the hook layer: Aider, Zed, Continue, Cline. Revisited when upstream matures.
 
@@ -508,6 +516,7 @@ required before public beta or launch announcements.
 - Prometheus metrics endpoint
 - Team-shared picto store (encrypted on S3)
 - Policy inheritance (org → project → user)
+- Homebrew tap, AUR package, SBOM assets, and release provenance commands
 
 ## Not in scope
 
