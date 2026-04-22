@@ -16,7 +16,10 @@ use gommage_core::{
 };
 use serde::Deserialize;
 use serde_json::Value;
-use std::io::{self, Read, Write};
+use std::{
+    env,
+    io::{self, Read, Write},
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixStream,
@@ -39,6 +42,10 @@ struct HookInput {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if handle_info_flag()? {
+        return Ok(());
+    }
+
     let mut buf = String::new();
     io::stdin()
         .read_to_string(&mut buf)
@@ -90,6 +97,36 @@ async fn main() -> Result<()> {
     stdout.write_all(s.as_bytes())?;
     stdout.write_all(b"\n")?;
     Ok(())
+}
+
+fn handle_info_flag() -> Result<bool> {
+    let mut args = env::args().skip(1);
+    let Some(arg) = args.next() else {
+        return Ok(false);
+    };
+
+    if let Some(extra) = args.next() {
+        anyhow::bail!("unexpected argument {extra:?}; try --help");
+    }
+
+    match arg.as_str() {
+        "-V" | "--version" => {
+            println!("gommage-mcp {}", env!("CARGO_PKG_VERSION"));
+            Ok(true)
+        }
+        "-h" | "--help" => {
+            print_help();
+            Ok(true)
+        }
+        _ => anyhow::bail!("unexpected argument {arg:?}; try --help"),
+    }
+}
+
+fn print_help() {
+    println!(
+        "gommage-mcp {}\n\nUSAGE:\n    gommage-mcp < hook.json\n\nReads one Claude Code PreToolUse hook payload from stdin and writes one permission response JSON object to stdout.\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version",
+        env!("CARGO_PKG_VERSION")
+    );
 }
 
 fn enrich_tool_input(tool: &str, mut input: Value, cwd: Option<&str>) -> Value {

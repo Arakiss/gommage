@@ -5,7 +5,11 @@ use gommage_core::{
     runtime::{Expedition, HomeLayout, default_policy_env},
 };
 use serde::Serialize;
-use std::{path::Path, process::ExitCode};
+use std::{
+    env,
+    path::Path,
+    process::{Command, ExitCode},
+};
 
 use crate::util::{path_details, path_display};
 
@@ -253,6 +257,9 @@ pub(crate) fn build_doctor_report(layout: &HomeLayout) -> DoctorReport {
         );
     }
 
+    push_companion_binary_check(&mut report, "gommage-daemon");
+    push_companion_binary_check(&mut report, "gommage-mcp");
+
     report
 }
 
@@ -272,6 +279,71 @@ fn push_path_check(report: &mut DoctorReport, name: &str, path: &Path) {
             Some(path_details(path)),
         );
     }
+}
+
+fn push_companion_binary_check(report: &mut DoctorReport, binary: &str) {
+    let check_name = format!("companion_{}", binary.replace('-', "_"));
+    let Some(path) = current_exe_sibling(binary) else {
+        report.push(
+            check_name,
+            DoctorStatus::Warn,
+            format!("could not resolve installed {binary} path"),
+            None,
+        );
+        return;
+    };
+
+    if !path.exists() {
+        report.push(
+            check_name,
+            DoctorStatus::Warn,
+            format!("{binary} not found next to gommage"),
+            Some(path_details(&path)),
+        );
+        return;
+    }
+
+    match Command::new(&path).arg("--version").output() {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            report.push(
+                check_name,
+                DoctorStatus::Ok,
+                format!("{binary} responds: {version}"),
+                Some(serde_json::json!({
+                    "path": path_display(&path),
+                    "version": version,
+                })),
+            );
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            report.push(
+                check_name,
+                DoctorStatus::Fail,
+                format!("{binary} --version failed"),
+                Some(serde_json::json!({
+                    "path": path_display(&path),
+                    "status": output.status.code(),
+                    "stderr": stderr,
+                })),
+            );
+        }
+        Err(e) => {
+            report.push(
+                check_name,
+                DoctorStatus::Fail,
+                format!("could not run {binary} --version: {e}"),
+                Some(path_details(&path)),
+            );
+        }
+    }
+}
+
+fn current_exe_sibling(binary: &str) -> Option<std::path::PathBuf> {
+    env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join(binary)))
 }
 
 fn print_doctor_report(report: &DoctorReport) {
