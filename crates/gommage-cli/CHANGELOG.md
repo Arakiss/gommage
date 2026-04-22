@@ -77,6 +77,8 @@
 - `gommage policy test <file>` / `--json` for user-owned YAML policy regression fixtures with per-case capabilities, matched rule, actual decision, expected decision, and mismatch errors.
 - `gommage policy snapshot` / `capture` for turning a tool-call JSON object
   from stdin into a YAML policy regression fixture.
+- `gommage audit-verify --explain --format human` for manual signed-audit
+  forensic review. Plain `audit-verify --explain` remains JSON for automation.
 - `gommage mascot` / `gommage logo` for the Gommage Gestral terminal logo, with an interactive Gommage Teal to Picto Gold gradient and `--plain` / `NO_COLOR` script-safe output.
 - Claude quickstart now includes `Grep`, `WebFetch`, `WebSearch`, and MCP matcher coverage when native allow rules permit those tools.
 - `gommage doctor`.

@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
-use gommage_audit::{AuditEntry, AuditEvent, AuditEventEntry, AuditWriter, verify_log};
+use gommage_audit::{
+    Anomaly, AuditEntry, AuditEvent, AuditEventEntry, AuditWriter, VerifyReport, verify_log,
+};
 use gommage_core::{
     Capability, Decision, MatchedRule, PictoConsume, PictoLookup, Policy, ToolCall, evaluate,
     runtime::{Expedition, HomeLayout, Runtime, default_policy_env},
@@ -123,12 +125,15 @@ enum Cmd {
     /// Verify the full audit log signature chain.
     #[command(name = "audit-verify")]
     AuditVerify {
-        /// Produce a detailed forensic report (JSON) instead of a simple count.
+        /// Produce a detailed forensic report instead of a simple count.
         /// Includes per-line signature verification, key fingerprint, policy
         /// version history, expeditions seen, and any anomalies (tamper, bad
         /// signature, timestamp out of order, mid-log policy change).
         #[arg(long)]
         explain: bool,
+        /// Report format for --explain. Defaults to JSON for automation compatibility.
+        #[arg(long, value_enum, requires = "explain")]
+        format: Option<AuditExplainFormat>,
     },
 
     /// Evaluate a tool call JSON from stdin. Useful for tests and MCP adapters.
@@ -275,6 +280,12 @@ enum AgentKind {
 enum ServiceManager {
     Launchd,
     Systemd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum AuditExplainFormat {
+    Json,
+    Human,
 }
 
 #[derive(Subcommand)]
@@ -458,12 +469,17 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             }
         }
         Cmd::Explain { id, json } => return cmd_explain(layout, &id, json),
-        Cmd::AuditVerify { explain } => {
+        Cmd::AuditVerify { explain, format } => {
             let vk = layout.load_verifying_key()?;
             if explain {
                 let report = gommage_audit::explain_log(&layout.audit_log, &vk)
                     .context("explaining audit log")?;
-                println!("{}", serde_json::to_string_pretty(&report)?);
+                match format.unwrap_or(AuditExplainFormat::Json) {
+                    AuditExplainFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    }
+                    AuditExplainFormat::Human => print_audit_verify_report(&report),
+                }
                 if !report.anomalies.is_empty() {
                     return Ok(ExitCode::from(1));
                 }
@@ -2598,6 +2614,66 @@ fn print_event_explain(entry: &AuditEventEntry) -> Result<()> {
     println!("kind: event");
     println!("event: {}", serde_json::to_string(&entry.event)?);
     Ok(())
+}
+
+fn print_audit_verify_report(report: &VerifyReport) {
+    let status = if report.anomalies.is_empty() {
+        "ok"
+    } else {
+        "anomaly"
+    };
+
+    println!("audit verification report");
+    println!("status: {status}");
+    println!(
+        "entries: {} total, {} verified",
+        report.entries_total, report.entries_verified
+    );
+    println!("key_fingerprint: {}", report.key_fingerprint);
+    print_string_list("policy_versions", &report.policy_versions_seen);
+    print_string_list("expeditions", &report.expeditions_seen);
+
+    if report.anomalies.is_empty() {
+        println!("anomalies: none");
+    } else {
+        println!("anomalies:");
+        for anomaly in &report.anomalies {
+            println!("  - {}", format_anomaly(anomaly));
+        }
+    }
+}
+
+fn print_string_list(label: &str, values: &[String]) {
+    if values.is_empty() {
+        println!("{label}: none");
+        return;
+    }
+
+    println!("{label}:");
+    for value in values {
+        println!("  - {value}");
+    }
+}
+
+fn format_anomaly(anomaly: &Anomaly) -> String {
+    match anomaly {
+        Anomaly::MalformedEntry { line, error } => {
+            format!("line {line}: malformed_entry error={error}")
+        }
+        Anomaly::BadSignature { line, entry_id } => {
+            format!("line {line}: bad_signature entry_id={entry_id}")
+        }
+        Anomaly::TimestampOutOfOrder {
+            line,
+            previous_ts,
+            current_ts,
+        } => format!(
+            "line {line}: timestamp_out_of_order previous_ts={previous_ts} current_ts={current_ts}"
+        ),
+        Anomaly::PolicyVersionChanged { line, from, to } => {
+            format!("line {line}: policy_version_changed from={from} to={to}")
+        }
+    }
 }
 
 fn cmd_doctor(layout: HomeLayout, json: bool) -> Result<ExitCode> {

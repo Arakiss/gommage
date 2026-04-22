@@ -8,6 +8,12 @@
 
 `gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
 
+`gommage audit-verify --explain` is the signed audit forensic report. The
+default format is JSON for agent and CI automation. Use
+`gommage audit-verify --explain --format human` when a person needs a compact
+status, verified-entry count, key fingerprint, policy-version list, expedition
+list, and anomaly list.
+
 ## Exit codes
 
 | Status | Exit code | Meaning |
@@ -34,6 +40,16 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 The JSON report includes top-level `status`, `summary`, `doctor`, `smoke`, and
 `policy_tests`. Use the nested reports for the exact failing check, emitted
 capabilities, matched rule, and mismatch errors.
+
+Audit verification has its own forensic JSON contract:
+
+```sh
+gommage audit-verify --explain
+gommage audit-verify --explain --format human
+```
+
+The JSON form is stable for agents. The human form is intentionally optimized
+for review and should not be parsed by automation.
 
 ## JSON shape
 

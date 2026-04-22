@@ -198,12 +198,14 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
 # Validate policies before trusting a hook path.
 gommage policy check
 
-# Verify signed audit history.
+# Verify signed audit history. JSON is the automation contract; human is for review.
 gommage audit-verify --explain
+gommage audit-verify --explain --format human
 ```
 
-`verify --json`, `doctor --json`, `smoke --json`, `policy test --json`, policy
-hashes, audit verification, and decision JSON are the automation contracts.
+`verify --json`, `doctor --json`, `smoke --json`, `policy test --json`,
+`audit-verify --explain` JSON, policy hashes, and decision JSON are the
+automation contracts.
 `verify --json` is the default readiness gate for installers, CI, and agents:
 it aggregates runtime health, built-in semantic smoke checks, and optional
 project fixtures. `smoke --json` is the semantic post-install check: it verifies
@@ -213,7 +215,8 @@ the project-owned regression surface: put expected decisions in versioned YAML
 fixtures and run them in CI before trusting a hook path. `policy snapshot`
 turns a real `ToolCall` JSON from stdin into a YAML fixture case so humans and
 agents do not have to hand-author the first regression. Human presentation
-output is intentionally not part of the automation contract.
+output is intentionally not part of the automation contract; use
+`audit-verify --explain --format human` when manually reviewing audit anomalies.
 
 ## Quickstart
 
