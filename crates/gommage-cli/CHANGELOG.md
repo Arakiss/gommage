@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.16.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.15.0-alpha.1...gommage-cli-v0.16.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* add operator dashboard tui ([36fadbe](https://github.com/Arakiss/gommage/commit/36fadbe3c113309e015304b6854d9cb8a6a85972))
+
 ## [0.15.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.14.1-alpha.1...gommage-cli-v0.15.0-alpha.1) (2026-04-22)
 
 
