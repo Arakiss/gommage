@@ -40,6 +40,8 @@
 - The installer now logs token source, gives OS-aware cosign hints, makes
   non-TTY skill defaults explicit, supports `--verify`, and uses fixed-string
   PATH matching.
+- Repeated CLI writes now create collision-safe `.gommage-bak-<timestamp>`
+  backups, and the installer backs up replaced binaries and skill files.
 
 ## [0.13.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.12.2-alpha.1...gommage-cli-v0.13.0-alpha.1) (2026-04-22)
 
