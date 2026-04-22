@@ -4,6 +4,11 @@
 
 `gommage doctor` is the lower-level operator installation health check. Use the default text output for humans and `gommage doctor --json` when you need only filesystem/runtime diagnostics.
 
+`gommage agent status <claude|codex>` is the host-agent integration check. Use
+`--json` when an installer, skill, or CI script needs to prove that the host
+hook is actually wired, that generated Claude native-permission imports are
+present when applicable, and that Codex hooks are enabled.
+
 `gommage smoke` is the semantic health check. It runs built-in tool-call fixtures against the active capability mappers and policy set without writing audit entries or consuming pictos. Use `gommage smoke --json` after installing policies or changing policy packs.
 
 `gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
@@ -50,6 +55,22 @@ gommage audit-verify --explain --format human
 
 The JSON form is stable for agents. The human form is intentionally optimized
 for review and should not be parsed by automation.
+
+Agent integration status is separate because it reads host config, not the
+Gommage home health model:
+
+```sh
+gommage agent status claude --json
+gommage agent status codex --json
+```
+
+The JSON report includes `agent`, top-level `status`, `summary`, and `checks`.
+Claude checks cover the settings file, `PreToolUse` hook group, generated deny
+imports, and generated narrow allow imports. Codex checks cover `hooks.json`,
+`config.toml`, the `PreToolUse` hook group, `features.codex_hooks`, and the
+configured sandbox mode. A missing hook or disabled hook feature is `fail`; a
+dangerous Codex sandbox is `warn` because Gommage currently governs only the
+Bash hook surface under Codex.
 
 ## JSON shape
 

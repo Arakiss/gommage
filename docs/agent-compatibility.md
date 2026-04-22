@@ -38,6 +38,16 @@ deny and ask rules so Gommage guardrails still win. Broad native allow rules
 such as `Bash` or `*` stay in Claude's config; Gommage remains fail-closed
 unless a policy rule allows the mapped capability.
 
+Verify the host wiring after quickstart with:
+
+```sh
+gommage agent status claude --json
+```
+
+This checks the Claude settings file, the installed `PreToolUse` hook group,
+and generated native permission import files without parsing the JSON settings
+by hand.
+
 ### Bypasses Gommage under Claude Code
 
 - Tool calls that Claude Code chooses to route below the hook (extremely unusual).
@@ -107,6 +117,16 @@ See [`examples/codex-setup.md`](../examples/codex-setup.md).
 `features.codex_hooks = true`, but it does not convert Codex's OS sandbox or
 approval policy into Gommage YAML. Those native controls remain authoritative
 for non-Bash surfaces.
+
+Verify the host wiring after quickstart with:
+
+```sh
+gommage agent status codex --json
+```
+
+This checks `hooks.json`, `config.toml`, `features.codex_hooks`, the installed
+`PreToolUse` hook group, and warns when `sandbox_mode = "danger-full-access"`
+because Codex file and MCP tools remain outside Gommage's current hook coverage.
 
 ---
 
