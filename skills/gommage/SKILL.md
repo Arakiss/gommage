@@ -77,6 +77,7 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
 - Agent skill install destinations:
   - Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
   - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
+- Agent automation should prefer `gommage doctor --json`, `gommage policy check`, and `gommage audit-verify --explain`. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
 - Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook and imports supported `permissions.deny` entries from `~/.claude/settings.json`.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
@@ -103,6 +104,7 @@ Current alpha distribution:
 - GitHub Releases provide prebuilt `gommage`, `gommage-daemon`, and `gommage-mcp` archives.
 - The installer verifies Sigstore bundle identity and SHA-256 before extracting.
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
+- `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.
 - crates.io is not the supported install path yet.
 
 Before claiming crates.io support, check `docs/publishing.md` and require the package gates there to pass.

@@ -22,6 +22,58 @@ fn doctor_check<'a>(report: &'a serde_json::Value, name: &str) -> &'a serde_json
 }
 
 #[test]
+fn mascot_plain_is_script_safe() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home).args(["mascot", "--plain"]).output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Gestral signature"));
+    assert!(stdout.contains("Gommage Gestral"));
+    assert!(stdout.contains("Gommage Teal #00B3A4"));
+    assert!(stdout.contains("tool call -> typed capabilities -> signed audit"));
+    assert!(stdout.contains("██████"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn mascot_compact_plain_is_single_line() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home)
+        .args(["mascot", "--plain", "--compact"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1);
+    assert!(stdout.contains("[Gestral]"));
+    assert!(stdout.contains("GOMMAGE policy sentinel"));
+    assert!(stdout.contains("signed audit"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn logo_alias_prints_the_same_signature() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home)
+        .args(["logo", "--plain", "--compact"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("[Gestral]"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
 fn grant_rejects_invalid_uses_without_panic() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

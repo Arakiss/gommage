@@ -165,6 +165,52 @@ curl --proto '=https' --tlsv1.2 -sSf \
   | sh -s -- --skill-only --skill-agent codex --skill-agent claude --no-prompt
 ```
 
+## For agents
+
+When an agent operates Gommage, prefer stable machine-readable surfaces and
+avoid parsing decorative output:
+
+```sh
+# Install or update only the skill.
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  | sh -s -- --skill-only --skill-agent codex --skill-agent claude --no-prompt
+
+# Verify local runtime health.
+gommage doctor --json
+
+# Validate policies before trusting a hook path.
+gommage policy check
+
+# Verify signed audit history.
+gommage audit-verify --explain
+
+# Human-only brand surface. Do not parse this in automation.
+gommage logo --plain
+```
+
+`doctor --json`, policy hashes, audit verification, and decision JSON are the
+automation contracts. The terminal logo and colored text are intentionally
+presentation only.
+
+## Terminal logo and Gestral vocabulary
+
+Gommage has its own human-facing terminal identity: **Gommage Gestral**, the
+policy sentinel. The vocabulary follows the Gestrals from *Clair Obscur:
+Expedition 33*; the terminal artwork itself is original to Gommage and is a
+typographic logo, not a copied character asset.
+
+The logo uses the project color **Gommage Teal** (`#00B3A4`) with **Picto Gold**
+(`#F2C94C`) accents when stdout is a terminal. Set `NO_COLOR=1` or pass
+`--plain` for script-safe output.
+
+```sh
+gommage logo
+gommage logo --plain
+gommage logo --compact
+gommage mascot
+```
+
 ## Quickstart
 
 ```sh
@@ -341,7 +387,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Acknowledgements — a tribute to Expedition 33
 
-Gommage borrows its vocabulary — _gommage_, _picto_, _canvas_, _expedition_ — from **[Clair Obscur: Expedition 33](https://expedition33.com/)**, the 2025 game by [Sandfall Interactive](https://www.sandfall.co/). The game's central act — the _gommage_, where the Paintress writes a number on her canvas and the marked are erased — gave this project the precise metaphor it needed for what a policy engine does to tool calls that have no business running. The banner artwork, the picto pendants, the "canvas" naming of the active policy set: all of it is a fan's homage to the world they built.
+Gommage borrows its vocabulary — _gommage_, _picto_, _canvas_, _expedition_, and _Gestral_ — from **[Clair Obscur: Expedition 33](https://expedition33.com/)**, the 2025 game by [Sandfall Interactive](https://www.sandfall.co/). The game's central act — the _gommage_, where the Paintress writes a number on her canvas and the marked are erased — gave this project the precise metaphor it needed for what a policy engine does to tool calls that have no business running. The terminal logo, the picto naming, the "canvas" naming of the active policy set: all of it is a fan's homage to the world they built.
 
 This project is not affiliated with, endorsed by, or sponsored by **Sandfall Interactive**, **Kepler Interactive**, or any of their partners. _Clair Obscur: Expedition 33_, its characters, logos, artwork, and music remain the sole property of their respective rights holders. The usage of shared terms in this codebase is purely tributary and made with respect for the creators.
 
