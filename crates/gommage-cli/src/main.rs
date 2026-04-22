@@ -143,6 +143,9 @@ enum Cmd {
     Decide {
         #[arg(long)]
         pretty: bool,
+        /// Read a PreToolUse hook payload (`tool_name` / `tool_input`) instead of a ToolCall.
+        #[arg(long)]
+        hook: bool,
     },
 
     /// Map a tool call JSON from stdin into capabilities without evaluating policy.
@@ -150,6 +153,9 @@ enum Cmd {
         /// Emit a stable machine-readable mapper report.
         #[arg(long)]
         json: bool,
+        /// Read a PreToolUse hook payload (`tool_name` / `tool_input`) instead of a ToolCall.
+        #[arg(long)]
+        hook: bool,
     },
 
     /// Diagnose the local Gommage installation and runtime state.
@@ -243,6 +249,9 @@ enum PolicyCmd {
         /// Emit only the YAML case list, useful when appending to an existing file.
         #[arg(long)]
         case_only: bool,
+        /// Read a PreToolUse hook payload (`tool_name` / `tool_input`) instead of a ToolCall.
+        #[arg(long)]
+        hook: bool,
     },
     /// Print the policy version hash.
     Hash,
@@ -500,10 +509,8 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                 println!("ok {n} entries verified");
             }
         }
-        Cmd::Decide { pretty } => {
-            let mut buf = String::new();
-            io::stdin().read_to_string(&mut buf)?;
-            let call: ToolCall = serde_json::from_str(&buf).context("parsing stdin as ToolCall")?;
+        Cmd::Decide { pretty, hook } => {
+            let call = read_tool_call_from_stdin(hook)?;
             let rt = Runtime::open(layout)?;
             let eval = evaluate_only(&rt, &call);
             let out = if pretty {
@@ -513,7 +520,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             };
             println!("{out}");
         }
-        Cmd::Map { json } => return cmd_map(layout, json),
+        Cmd::Map { json, hook } => return cmd_map(layout, json, hook),
         Cmd::Doctor { json } => return cmd_doctor(layout, json),
         Cmd::Verify { json, policy_tests } => return cmd_verify(layout, json, policy_tests),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
@@ -702,6 +709,34 @@ fn evaluate_only(rt: &Runtime, call: &ToolCall) -> gommage_core::EvalResult {
     evaluate(&caps, &rt.policy)
 }
 
+fn read_tool_call_from_stdin(hook: bool) -> Result<ToolCall> {
+    let mut buf = String::new();
+    io::stdin().read_to_string(&mut buf)?;
+    if hook {
+        let input: serde_json::Value =
+            serde_json::from_str(&buf).context("parsing stdin as hook payload")?;
+        tool_call_from_hook_payload(input)
+    } else {
+        serde_json::from_str(&buf).context("parsing stdin as ToolCall")
+    }
+}
+
+fn tool_call_from_hook_payload(input: serde_json::Value) -> Result<ToolCall> {
+    let tool_name = input
+        .get("tool_name")
+        .and_then(|v| v.as_str())
+        .context("missing tool_name")?;
+    let tool_input = input
+        .get("tool_input")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let cwd = input.get("cwd").and_then(|v| v.as_str());
+    Ok(ToolCall {
+        tool: tool_name.to_string(),
+        input: enrich_hook_tool_input(tool_name, tool_input, cwd),
+    })
+}
+
 #[derive(Debug, Serialize)]
 struct MapReport {
     input_hash: String,
@@ -724,10 +759,8 @@ fn build_map_report(layout: &HomeLayout, call: ToolCall) -> Result<MapReport> {
     })
 }
 
-fn cmd_map(layout: HomeLayout, json: bool) -> Result<ExitCode> {
-    let mut buf = String::new();
-    io::stdin().read_to_string(&mut buf)?;
-    let call: ToolCall = serde_json::from_str(&buf).context("parsing stdin as ToolCall")?;
+fn cmd_map(layout: HomeLayout, json: bool, hook: bool) -> Result<ExitCode> {
+    let call = read_tool_call_from_stdin(hook)?;
     let report = build_map_report(&layout, call)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2581,10 +2614,9 @@ fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
             name,
             description,
             case_only,
+            hook,
         } => {
-            let mut buf = String::new();
-            io::stdin().read_to_string(&mut buf)?;
-            let call: ToolCall = serde_json::from_str(&buf).context("parsing stdin as ToolCall")?;
+            let call = read_tool_call_from_stdin(hook)?;
             let case = build_policy_snapshot_case(&layout, &env, name, description, call)?;
             if case_only {
                 println!("{}", serde_yaml::to_string(&[case])?.trim_end());
@@ -3065,19 +3097,7 @@ fn run_mcp(layout: HomeLayout) -> Result<ExitCode> {
     let mut buf = String::new();
     io::stdin().read_to_string(&mut buf)?;
     let input: serde_json::Value = serde_json::from_str(&buf).context("parsing hook input")?;
-    let tool_name = input
-        .get("tool_name")
-        .and_then(|v| v.as_str())
-        .context("missing tool_name")?;
-    let tool_input = input
-        .get("tool_input")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    let cwd = input.get("cwd").and_then(|v| v.as_str());
-    let call = ToolCall {
-        tool: tool_name.to_string(),
-        input: enrich_hook_tool_input(tool_name, tool_input, cwd),
-    };
+    let call = tool_call_from_hook_payload(input)?;
 
     let sk: SigningKey = layout.load_key()?;
     let vk = sk.verifying_key();

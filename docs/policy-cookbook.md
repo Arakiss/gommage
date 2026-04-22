@@ -185,12 +185,14 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
 Inspect mapper output alone before deciding which policy rule to write:
 
 ```sh
-echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' \
-  | gommage map --json
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' \
+  | gommage map --json --hook
 ```
 
 `gommage map` reports `input_hash`, the active `capabilities_dir`, mapper rule
 count, and emitted capabilities without loading policy or writing audit entries.
+Use `--hook` for real PreToolUse payloads; omit it for canonical `ToolCall`
+JSON.
 
 The generated YAML includes the observed decision, `hard_stop` or
 `required_scope` when relevant, and the matched policy rule if one matched.
@@ -208,7 +210,7 @@ with `version: 1` plus `cases`, or a top-level list of cases.
 
 ```sh
 # Show mapper output without policy evaluation
-echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' | gommage map
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' | gommage map --hook
 
 # Show which rule matched a given call
 echo '{"tool":"Bash","input":{"command":"git push origin main"}}' | gommage decide --pretty

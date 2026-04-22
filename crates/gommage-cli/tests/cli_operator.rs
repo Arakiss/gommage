@@ -215,6 +215,42 @@ fn map_json_reports_capabilities_without_policy_files() {
     assert!(report.get("decision").is_none());
     assert!(!home.join("policy.d").exists());
     assert!(!home.join("audit.log").exists());
+
+    let mut child = gommage(&home)
+        .args(["map", "--json", "--hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let capabilities = report
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"proc.exec:git push --force origin main"));
+    assert!(capabilities.contains(&"git.push:refs/heads/main"));
+    assert!(capabilities.contains(&"net.out:github.com"));
+    assert!(capabilities.contains(&"git.push.force:<any>"));
+    assert!(!home.join("policy.d").exists());
+    assert!(!home.join("audit.log").exists());
 }
 
 #[test]
