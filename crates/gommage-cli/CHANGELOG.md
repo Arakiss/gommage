@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.9.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.8.0-alpha.1...gommage-cli-v0.9.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** inspect capability mapping ([147d2b4](https://github.com/Arakiss/gommage/commit/147d2b420d97f619b7833d974db6fc734c1df398))
+
 ## [0.8.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.7.0-alpha.1...gommage-cli-v0.8.0-alpha.1) (2026-04-22)
 
 
