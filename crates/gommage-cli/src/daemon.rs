@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Subcommand, ValueEnum};
 use gommage_core::runtime::HomeLayout;
+use serde::Serialize;
 use std::{
     path::{Path, PathBuf},
     process::{Command, ExitCode},
@@ -42,10 +43,24 @@ pub(crate) enum DaemonCmd {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum ServiceManager {
     Launchd,
     Systemd,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct DaemonDryRunPlan {
+    pub(crate) manager: ServiceManager,
+    pub(crate) service_file: String,
+    pub(crate) daemon_binary: Option<String>,
+    pub(crate) daemon_binary_error: Option<String>,
+    pub(crate) no_start: bool,
+    pub(crate) force: bool,
+    pub(crate) backup_existing_service_file: bool,
+    pub(crate) start_commands: Vec<Vec<String>>,
+    pub(crate) stop_commands: Vec<Vec<String>>,
 }
 
 pub(crate) fn cmd_daemon(sub: DaemonCmd, layout: HomeLayout) -> Result<ExitCode> {
@@ -104,6 +119,41 @@ pub(crate) fn daemon_install(
     run_service_commands(service_start_commands(manager, &spec.path))?;
     println!("ok daemon: service enabled and started");
     Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn daemon_dry_run_plan(
+    manager: ServiceManager,
+    force: bool,
+    no_start: bool,
+) -> Result<DaemonDryRunPlan> {
+    let path = service_file_path(manager)?;
+    let daemon_binary = match find_daemon_binary() {
+        Ok(path) => (Some(path.display().to_string()), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
+    let start_commands = if no_start {
+        Vec::new()
+    } else {
+        service_start_commands(manager, &path)
+    };
+    let stop_commands = if no_start {
+        Vec::new()
+    } else if manager == ServiceManager::Launchd {
+        service_stop_commands(manager, &path)
+    } else {
+        Vec::new()
+    };
+    Ok(DaemonDryRunPlan {
+        manager,
+        service_file: path.display().to_string(),
+        daemon_binary: daemon_binary.0,
+        daemon_binary_error: daemon_binary.1,
+        no_start,
+        force,
+        backup_existing_service_file: path.exists() && force,
+        start_commands,
+        stop_commands,
+    })
 }
 
 pub(crate) fn daemon_uninstall(manager: ServiceManager, dry_run: bool) -> Result<ExitCode> {

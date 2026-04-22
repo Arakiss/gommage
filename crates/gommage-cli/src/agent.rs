@@ -412,7 +412,7 @@ fn normalize_bash_permission_pattern(raw: &str) -> String {
     raw.replace(":*", "*")
 }
 
-fn claude_gommage_matcher(settings: &serde_json::Value) -> String {
+pub(crate) fn claude_gommage_matcher(settings: &serde_json::Value) -> String {
     const MAPPED: &[&str] = &[
         "Bash",
         "Read",

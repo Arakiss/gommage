@@ -19,6 +19,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   setup planning, redacted report bundles, audit replay, policy suggestions,
   live approvals, MCP gateway mode, policy packs, browser playground, and
   distribution work.
+- `gommage quickstart --dry-run --json` emits a stable machine-readable setup
+  plan covering home paths, stdlib files, agent hooks, native permission
+  imports, daemon service plans, backup expectations, and self-test checks.
 - `scripts/check-crates-publish-readiness.sh` and refreshed publishing docs
   with current crates.io evidence, package-gate status, and the explicit
   no-billing/no-publish alpha decision.

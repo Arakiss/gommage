@@ -20,6 +20,7 @@ mod mascot;
 mod mcp;
 mod policy_cmd;
 mod quickstart;
+mod quickstart_plan;
 mod smoke;
 mod uninstall;
 mod util;
@@ -92,6 +93,9 @@ enum Cmd {
         /// Show planned file edits without writing them.
         #[arg(long)]
         dry_run: bool,
+        /// Emit a machine-readable dry-run plan. Requires --dry-run.
+        #[arg(long, requires = "dry_run")]
+        json: bool,
     },
 
     /// Install or inspect host-agent integrations.
@@ -313,6 +317,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             self_test,
             no_self_test,
             dry_run,
+            json,
         } => {
             return cmd_quickstart(
                 layout,
@@ -326,6 +331,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     daemon_no_start,
                     self_test: self_test || !no_self_test,
                     dry_run,
+                    json,
                 },
             );
         }
