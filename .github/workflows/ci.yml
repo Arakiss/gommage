@@ -55,6 +55,7 @@ jobs:
     # contract violation, not a flake.
     name: determinism sweep (x10) — ${{ matrix.os }} / ${{ matrix.locale }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     needs: test
     strategy:
       fail-fast: false
@@ -79,9 +80,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install non-default locale (Linux)
         if: runner.os == 'Linux' && matrix.locale != 'C'
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y locales
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo timeout 180s apt-get update && \
+               sudo timeout 180s apt-get install -y --no-install-recommends locales; then
+              break
+            fi
+
+            if [[ "$attempt" == "3" ]]; then
+              echo "locale package installation failed after $attempt attempts"
+              exit 1
+            fi
+
+            sleep $((attempt * 10))
+          done
           sudo locale-gen "${{ matrix.locale }}"
       - name: 10× forward + shuffled
         run: |
