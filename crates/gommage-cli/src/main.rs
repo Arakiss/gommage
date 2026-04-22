@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    Decision, PictoConsume, PictoLookup, Policy, ToolCall, evaluate,
-    runtime::{Expedition, HomeLayout, Runtime, default_policy_env},
+    Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
+    runtime::{Expedition, HomeLayout, Runtime},
 };
 use std::{path::PathBuf, process::ExitCode};
 use time::OffsetDateTime;
@@ -18,19 +18,21 @@ mod map;
 mod mascot;
 mod mcp;
 mod policy_cmd;
+mod quickstart;
 mod smoke;
 mod util;
 mod verify;
 
-use agent::{AgentCmd, AgentKind, cmd_agent, install_agent};
+use agent::{AgentCmd, AgentKind, cmd_agent};
 use audit_cmd::{AuditExplainFormat, cmd_audit_verify, cmd_explain, print_log};
-use daemon::{DaemonCmd, ServiceManager, cmd_daemon, daemon_install, resolve_service_manager};
+use daemon::{DaemonCmd, ServiceManager, cmd_daemon};
 use doctor::cmd_doctor;
 use input::{evaluate_only, read_tool_call_from_stdin};
 use map::cmd_map;
 use mascot::{MascotOptions, print_mascot};
 use mcp::run_mcp;
-use policy_cmd::{PolicyCmd, cmd_policy, install_stdlib};
+use policy_cmd::{PolicyCmd, cmd_policy};
+use quickstart::{QuickstartOptions, cmd_quickstart};
 use smoke::cmd_smoke;
 use verify::cmd_verify;
 
@@ -77,9 +79,12 @@ enum Cmd {
         /// Write the daemon service file without starting it. Implies --daemon.
         #[arg(long)]
         daemon_no_start: bool,
-        /// Run the readiness gate after setup completes.
+        /// Run the readiness gate after setup completes. Default; kept for scripts.
         #[arg(long)]
         self_test: bool,
+        /// Skip the post-install readiness gate. Use only when recovering manually.
+        #[arg(long, conflicts_with = "self_test")]
+        no_self_test: bool,
         /// Show planned file edits without writing them.
         #[arg(long)]
         dry_run: bool,
@@ -268,6 +273,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             daemon_force,
             daemon_no_start,
             self_test,
+            no_self_test,
             dry_run,
         } => {
             return cmd_quickstart(
@@ -280,7 +286,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     daemon_manager,
                     daemon_force,
                     daemon_no_start,
-                    self_test,
+                    self_test: self_test || !no_self_test,
                     dry_run,
                 },
             );
@@ -419,18 +425,6 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-struct QuickstartOptions {
-    agents: Vec<AgentKind>,
-    replace_hooks: bool,
-    import_native_permissions: bool,
-    install_daemon: bool,
-    daemon_manager: Option<ServiceManager>,
-    daemon_force: bool,
-    daemon_no_start: bool,
-    self_test: bool,
-    dry_run: bool,
-}
-
 fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
     let raw = raw.trim();
     if raw.is_empty() {
@@ -507,111 +501,6 @@ pub(crate) fn decide_with_pictos(
         }
     }
     Ok((eval, events))
-}
-
-fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> Result<ExitCode> {
-    let QuickstartOptions {
-        agents,
-        replace_hooks,
-        import_native_permissions,
-        install_daemon,
-        daemon_manager,
-        daemon_force,
-        daemon_no_start,
-        self_test,
-        dry_run,
-    } = options;
-
-    if dry_run {
-        println!("dry-run: no files will be written");
-    }
-    if !dry_run {
-        layout.ensure().context("initializing home")?;
-    } else {
-        println!("plan home: ensure {}", layout.root.display());
-    }
-
-    let installed = if dry_run {
-        (0, 0)
-    } else {
-        install_stdlib(&layout, false)?
-    };
-    if dry_run {
-        println!("plan stdlib: install bundled policy and capability defaults if missing");
-    } else {
-        println!(
-            "ok stdlib: {} policy files, {} capability files installed",
-            installed.0, installed.1
-        );
-        let env = Expedition::load(&layout.expedition_file)?
-            .map(|e| e.policy_env())
-            .unwrap_or_else(default_policy_env);
-        let policy = Policy::load_from_dir(&layout.policy_dir, &env)?;
-        println!(
-            "ok policy: {} rules ({})",
-            policy.rules.len(),
-            policy.version_hash
-        );
-    }
-
-    let agents = if agents.is_empty() {
-        vec![AgentKind::Claude]
-    } else {
-        agents
-    };
-    for agent in agents {
-        install_agent(
-            agent,
-            &layout,
-            replace_hooks,
-            import_native_permissions,
-            dry_run,
-        )?;
-    }
-
-    if install_daemon {
-        daemon_install(
-            HomeLayout::at(&layout.root),
-            resolve_service_manager(daemon_manager)?,
-            daemon_force,
-            daemon_no_start,
-            dry_run,
-        )?;
-    }
-
-    if !dry_run {
-        let env = Expedition::load(&layout.expedition_file)?
-            .map(|e| e.policy_env())
-            .unwrap_or_else(default_policy_env);
-        let policy = Policy::load_from_dir(&layout.policy_dir, &env)?;
-        println!(
-            "ok final policy: {} rules ({})",
-            policy.rules.len(),
-            policy.version_hash
-        );
-    }
-
-    if self_test {
-        if dry_run {
-            println!("plan self-test: run `gommage verify` after quickstart");
-        } else {
-            println!("self-test: running `gommage verify`");
-            let code = cmd_verify(HomeLayout::at(&layout.root), false, Vec::new())?;
-            if code != ExitCode::SUCCESS {
-                return Ok(code);
-            }
-            println!("ok self-test complete");
-        }
-    }
-
-    println!("ok quickstart complete");
-    println!("next: start an expedition with `gommage expedition start <name>`");
-    if install_daemon {
-        println!("next: inspect runtime health with `gommage doctor`");
-    } else {
-        println!("optional: run `gommage daemon install` for long sessions");
-    }
-    Ok(ExitCode::SUCCESS)
 }
 
 fn cmd_expedition(sub: ExpeditionCmd, layout: HomeLayout) -> Result<ExitCode> {

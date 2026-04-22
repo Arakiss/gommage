@@ -230,7 +230,7 @@ fn import_claude_permissions(
         }
         if !skipped_allows.is_empty() {
             println!(
-                "warn claude: skipped {} broad native allow rule(s); keep them as hook matcher input or review manually",
+                "warn claude: skipped {} native allow rule(s) that need manual policy review",
                 skipped_allows.len()
             );
         }
@@ -338,27 +338,44 @@ pub(crate) fn translate_claude_permission_deny(raw: &str) -> Option<String> {
 }
 
 pub(crate) fn translate_claude_permission_allow(raw: &str) -> Option<String> {
-    if !raw.contains('(') {
-        return None;
-    }
     translate_claude_permission_specifier(raw)
 }
 
 fn translate_claude_permission_specifier(raw: &str) -> Option<String> {
-    let (tool, value) = raw.split_once('(')?;
-    let value = value.strip_suffix(')')?;
-    let capability = match tool {
-        "Read" | "Glob" => format!("fs.read:{}", normalize_native_path_pattern(value)),
-        "Grep" => format!("fs.search:{}", normalize_native_path_pattern(value)),
-        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
-            format!("fs.write:{}", normalize_native_path_pattern(value))
+    if let Some((tool, value)) = raw.split_once('(') {
+        let value = value.strip_suffix(')')?;
+        let capability = match tool {
+            "Read" | "Glob" => format!("fs.read:{}", normalize_native_path_pattern(value)),
+            "Grep" => format!("fs.search:{}", normalize_native_path_pattern(value)),
+            "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => {
+                format!("fs.write:{}", normalize_native_path_pattern(value))
+            }
+            "Bash" => format!("proc.exec:{}", normalize_bash_permission_pattern(value)),
+            "WebFetch" => format!(
+                "net.fetch:{}",
+                value.strip_prefix("domain:").unwrap_or(value)
+            ),
+            tool if tool.starts_with("mcp__") => format!("mcp.call:{tool}"),
+            _ => return None,
+        };
+        return Some(capability);
+    }
+
+    let capability = match raw {
+        "*" => "**".to_string(),
+        "Read" | "Glob" => "fs.read:**".to_string(),
+        "Grep" => "fs.search:**".to_string(),
+        "Write" | "Edit" | "MultiEdit" | "NotebookEdit" => "fs.write:**".to_string(),
+        "Bash" => "proc.exec:*".to_string(),
+        "WebFetch" => "net.fetch:*".to_string(),
+        "WebSearch" => "net.search:web".to_string(),
+        tool if tool.starts_with("mcp__") => {
+            if tool.matches("__").count() >= 2 {
+                format!("mcp.call:{tool}")
+            } else {
+                return None;
+            }
         }
-        "Bash" => format!("proc.exec:{}", normalize_bash_permission_pattern(value)),
-        "WebFetch" => format!(
-            "net.fetch:{}",
-            value.strip_prefix("domain:").unwrap_or(value)
-        ),
-        tool if tool.starts_with("mcp__") => format!("mcp.call:{tool}"),
         _ => return None,
     };
     Some(capability)

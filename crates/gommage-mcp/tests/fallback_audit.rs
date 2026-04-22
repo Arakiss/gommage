@@ -63,3 +63,23 @@ fn version_flag_does_not_read_hook_json_from_stdin() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.starts_with("gommage-mcp "));
 }
+
+#[test]
+fn bypass_env_allows_without_home_or_valid_hook_json() {
+    let temp = tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_gommage-mcp"))
+        .env("GOMMAGE_HOME", temp.path().join("missing-home"))
+        .env("GOMMAGE_BYPASS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(r#""permissionDecision":"allow""#));
+    assert!(stdout.contains("GOMMAGE_BYPASS=1"));
+    assert!(!temp.path().join("missing-home").exists());
+}

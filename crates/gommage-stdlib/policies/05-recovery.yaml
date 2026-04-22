@@ -1,0 +1,93 @@
+# Recovery policy defaults.
+#
+# These rules intentionally load after hard-stops and native deny imports, but
+# before broader stdlib policies. They keep an agent able to inspect and repair
+# a Gommage installation without turning the shell into a blanket allow-list.
+
+- name: allow-gommage-readiness-commands
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:gommage --help*"
+      - "proc.exec:gommage -h*"
+      - "proc.exec:gommage --version*"
+      - "proc.exec:gommage -V*"
+      - "proc.exec:gommage init*"
+      - "proc.exec:gommage verify*"
+      - "proc.exec:gommage doctor*"
+      - "proc.exec:gommage smoke*"
+      - "proc.exec:gommage policy check*"
+      - "proc.exec:gommage policy init --stdlib*"
+      - "proc.exec:gommage agent status*"
+      - "proc.exec:gommage quickstart*"
+      - "proc.exec:gommage daemon status*"
+      - "proc.exec:gommage daemon uninstall*"
+      - "proc.exec:gommage agent uninstall*"
+      - "proc.exec:gommage uninstall*"
+  reason: "Gommage readiness and recovery commands must remain available after quickstart"
+
+- name: allow-absolute-gommage-readiness-commands
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:*/gommage --help*"
+      - "proc.exec:*/gommage -h*"
+      - "proc.exec:*/gommage --version*"
+      - "proc.exec:*/gommage -V*"
+      - "proc.exec:*/gommage init*"
+      - "proc.exec:*/gommage verify*"
+      - "proc.exec:*/gommage doctor*"
+      - "proc.exec:*/gommage smoke*"
+      - "proc.exec:*/gommage policy check*"
+      - "proc.exec:*/gommage policy init --stdlib*"
+      - "proc.exec:*/gommage agent status*"
+      - "proc.exec:*/gommage quickstart*"
+      - "proc.exec:*/gommage daemon status*"
+      - "proc.exec:*/gommage daemon uninstall*"
+      - "proc.exec:*/gommage agent uninstall*"
+      - "proc.exec:*/gommage uninstall*"
+  reason: "absolute Gommage binary paths are valid recovery commands"
+
+- name: allow-basic-shell-inspection
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:pwd"
+      - "proc.exec:pwd *"
+      - "proc.exec:ls"
+      - "proc.exec:ls *"
+      - "proc.exec:command -v gommage*"
+      - "proc.exec:which gommage*"
+  reason: "basic shell inspection must stay available for recovery"
+
+- name: allow-gommage-systemd-recovery
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:systemctl --user status gommage-daemon.service*"
+      - "proc.exec:systemctl --user stop gommage-daemon.service*"
+      - "proc.exec:systemctl --user disable --now gommage-daemon.service*"
+      - "proc.exec:systemctl --user daemon-reload"
+  reason: "user-level daemon inspection and rollback must stay available"
+
+- name: allow-claude-settings-backup-inspection
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:cat ~/.claude/settings.json"
+      - "proc.exec:cat ~/.claude/settings.json.gommage-bak-*"
+      - "proc.exec:cat ${HOME}/.claude/settings.json"
+      - "proc.exec:cat ${HOME}/.claude/settings.json.gommage-bak-*"
+      - "proc.exec:ls ~/.claude/settings.json.gommage-bak-*"
+      - "proc.exec:ls ${HOME}/.claude/settings.json.gommage-bak-*"
+  reason: "Claude settings backups must be inspectable during recovery"
+
+- name: allow-claude-settings-backup-restore
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:cp ~/.claude/settings.json.gommage-bak-* ~/.claude/settings.json"
+      - "proc.exec:mv ~/.claude/settings.json.gommage-bak-* ~/.claude/settings.json"
+      - "proc.exec:cp ${HOME}/.claude/settings.json.gommage-bak-* ${HOME}/.claude/settings.json"
+      - "proc.exec:mv ${HOME}/.claude/settings.json.gommage-bak-* ${HOME}/.claude/settings.json"
+  reason: "a validated Claude settings backup must be restorable from inside the session"
