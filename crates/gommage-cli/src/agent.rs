@@ -1,5 +1,6 @@
 use crate::{
     agent_status::cmd_agent_status,
+    agent_uninstall::{AgentUninstallTarget, cmd_agent_uninstall},
     util::{env_path_or_home, read_json_object, read_toml_document, write_json, write_text},
 };
 use anyhow::{Context, Result};
@@ -31,6 +32,17 @@ pub enum AgentCmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Remove a supported agent integration.
+    Uninstall {
+        #[arg(value_enum)]
+        agent: AgentUninstallTarget,
+        /// Restore the newest validated .gommage-bak-* backup instead of only removing the hook.
+        #[arg(long)]
+        restore_backup: bool,
+        /// Show planned file edits without writing them.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Inspect whether a supported agent integration is wired correctly.
     Status {
         #[arg(value_enum)]
@@ -58,6 +70,11 @@ pub fn cmd_agent(sub: AgentCmd, layout: HomeLayout) -> Result<ExitCode> {
             )?;
             Ok(ExitCode::SUCCESS)
         }
+        AgentCmd::Uninstall {
+            agent,
+            restore_backup,
+            dry_run,
+        } => cmd_agent_uninstall(agent, restore_backup, dry_run),
         AgentCmd::Status { agent, json } => cmd_agent_status(agent, &layout, json),
     }
 }

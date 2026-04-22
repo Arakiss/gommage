@@ -1181,6 +1181,219 @@ fn quickstart_self_test_dry_run_only_prints_plan() {
 }
 
 #[test]
+fn agent_uninstall_claude_removes_only_gommage_hook() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/tmp/protect-files.sh" }
+        ]
+      },
+      {
+        "matcher": "Bash|Read",
+        "hooks": [
+          { "type": "command", "command": "gommage-mcp" }
+        ]
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["agent", "uninstall", "claude"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let settings_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    let pre_tool_use = settings_json
+        .pointer("/hooks/PreToolUse")
+        .and_then(|value| value.as_array())
+        .unwrap();
+    assert_eq!(pre_tool_use.len(), 1);
+    assert!(
+        pre_tool_use[0]
+            .get("hooks")
+            .and_then(|value| value.as_array())
+            .unwrap()
+            .iter()
+            .any(|hook| hook.get("command").and_then(|value| value.as_str())
+                == Some("/tmp/protect-files.sh"))
+    );
+}
+
+#[test]
+fn agent_uninstall_claude_can_restore_latest_valid_backup() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    let original = "{\n  \"language\": \"spanish\"\n}\n";
+    fs::write(&settings, original).unwrap();
+    fs::write(
+        settings.with_file_name("settings.json.gommage-bak-100"),
+        original,
+    )
+    .unwrap();
+    fs::write(
+        settings.with_file_name("settings.json.gommage-bak-not-a-timestamp"),
+        "{}\n",
+    )
+    .unwrap();
+    fs::write(
+        &settings,
+        r#"{
+  "language": "spanish",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "gommage-mcp" }
+        ]
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["agent", "uninstall", "claude", "--restore-backup"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(&settings).unwrap(), original);
+}
+
+#[test]
+fn uninstall_all_dry_run_lists_every_surface() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    let systemd = temp.path().join("systemd-user");
+    let bin_dir = temp.path().join("bin");
+    let codex_home = temp.path().join("codex-home");
+    let claude_home = temp.path().join("claude-home");
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .env("GOMMAGE_SYSTEMD_USER_DIR", &systemd)
+        .env("GOMMAGE_BIN_DIR", &bin_dir)
+        .env("CODEX_HOME", &codex_home)
+        .env("CLAUDE_HOME", &claude_home)
+        .args([
+            "uninstall",
+            "--all",
+            "--dry-run",
+            "--daemon-manager",
+            "systemd",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("plan remove"));
+    assert!(stdout.contains("gommage-daemon.service"));
+    assert!(stdout.contains("skills/gommage"));
+    assert!(stdout.contains("gommage-mcp"));
+    assert!(stdout.contains(home.to_string_lossy().as_ref()));
+    assert!(!home.exists());
+}
+
+#[test]
+fn uninstall_requires_yes_for_home_removal() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = gommage(&home)
+        .args(["uninstall", "--purge-home"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("rerun with --yes"));
+    assert!(home.exists());
+}
+
+#[test]
+fn uninstall_removes_selected_local_surfaces() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let bin_dir = temp.path().join("bin");
+    let codex_home = temp.path().join("codex-home");
+    let claude_home = temp.path().join("claude-home");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(codex_home.join("skills/gommage")).unwrap();
+    fs::create_dir_all(claude_home.join("skills/gommage")).unwrap();
+    for name in ["gommage", "gommage-daemon", "gommage-mcp"] {
+        fs::write(bin_dir.join(name), "").unwrap();
+    }
+
+    let output = gommage(&home)
+        .env("GOMMAGE_BIN_DIR", &bin_dir)
+        .env("CODEX_HOME", &codex_home)
+        .env("CLAUDE_HOME", &claude_home)
+        .args([
+            "uninstall",
+            "--binaries",
+            "--skills",
+            "--purge-home",
+            "--yes",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home.exists());
+    assert!(!bin_dir.join("gommage").exists());
+    assert!(!bin_dir.join("gommage-daemon").exists());
+    assert!(!bin_dir.join("gommage-mcp").exists());
+    assert!(!codex_home.join("skills/gommage").exists());
+    assert!(!claude_home.join("skills/gommage").exists());
+}
+
+#[test]
 fn agent_install_codex_writes_hook_and_enables_feature_flag() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
