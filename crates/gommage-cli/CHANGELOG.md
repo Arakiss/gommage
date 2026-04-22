@@ -1,5 +1,14 @@
 # Changelog — gommage-cli
 
+## [0.15.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.14.1-alpha.1...gommage-cli-v0.15.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* add host smoke evidence script ([ec5dd56](https://github.com/Arakiss/gommage/commit/ec5dd56537a122257f5f0afca01d36bfbc091cc6))
+* add redacted report bundles ([b32c1f5](https://github.com/Arakiss/gommage/commit/b32c1f5b64c2c9efde7d0f42347961e28c8e7dcb))
+* plan quickstart dry runs ([aa35045](https://github.com/Arakiss/gommage/commit/aa3504549082ad32fe4292e919162ee2321f5341))
+
 ## [0.14.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.14.0-alpha.1...gommage-cli-v0.14.1-alpha.1) (2026-04-22)
 
 
