@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.6.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.5.1-alpha.1...gommage-cli-v0.6.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** capture policy fixture snapshots ([be1d1e7](https://github.com/Arakiss/gommage/commit/be1d1e73acb25900e7bf61a82448e5338da296de))
+
 ## [0.5.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.5.0-alpha.1...gommage-cli-v0.5.1-alpha.1) (2026-04-22)
 
 
