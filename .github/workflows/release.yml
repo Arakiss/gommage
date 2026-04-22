@@ -152,7 +152,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - uses: sigstore/cosign-installer@v4.1.1
-      - name: Install cross-linker (linux-aarch64)
+      - name: Install cross toolchain (linux-aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         timeout-minutes: 10
         shell: bash
@@ -161,12 +161,12 @@ jobs:
 
           for attempt in 1 2 3; do
             if sudo env DEBIAN_FRONTEND=noninteractive timeout 300s apt-get update \
-              && sudo env DEBIAN_FRONTEND=noninteractive timeout 300s apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu; then
+              && sudo env DEBIAN_FRONTEND=noninteractive timeout 300s apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross; then
               break
             fi
 
             if [[ "${attempt}" == "3" ]]; then
-              echo "::error::Failed to install gcc-aarch64-linux-gnu after 3 attempts."
+              echo "::error::Failed to install Linux aarch64 cross toolchain after 3 attempts."
               exit 1
             fi
 
