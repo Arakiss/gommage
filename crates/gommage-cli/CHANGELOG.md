@@ -1,5 +1,17 @@
 # Changelog — gommage-cli
 
+## [0.7.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.6.0-alpha.1...gommage-cli-v0.7.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** render audit verify reports ([5807f08](https://github.com/Arakiss/gommage/commit/5807f080600f39871b47fd67b21b84ddf7d7a2fc))
+
+
+### Bug fixes
+
+* **cli:** avoid verify report type collision ([26421b3](https://github.com/Arakiss/gommage/commit/26421b3876bead33989891728b383bfc7c29e759))
+
 ## [0.6.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.5.1-alpha.1...gommage-cli-v0.6.0-alpha.1) (2026-04-22)
 
 
