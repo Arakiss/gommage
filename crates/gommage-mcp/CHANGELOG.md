@@ -1,5 +1,18 @@
 # Changelog — gommage-mcp
 
+## [0.2.3-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.2.2-alpha.1...gommage-mcp-v0.2.3-alpha.1) (2026-04-22)
+
+
+### Bug fixes
+
+* prevent quickstart deadlocks ([2d9c967](https://github.com/Arakiss/gommage/commit/2d9c967faff8f7b1199d08fac2a43363fa6b7e26))
+* satisfy strict clippy gate ([b5385cb](https://github.com/Arakiss/gommage/commit/b5385cb640195fa647a00ce5c00dd8b49b7fe596))
+
+
+### Documentation
+
+* lock agent command contracts ([5056758](https://github.com/Arakiss/gommage/commit/505675890ec4b3d128c2eab03615b99ace38b54e))
+
 ## [Unreleased]
 
 ### Added
