@@ -11,7 +11,8 @@
 use anyhow::{Context, Result};
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
+    Capability, CapabilityMapper, Decision, EvalResult, MatchedRule, PictoConsume, PictoLookup,
+    ToolCall, evaluate, hardstop,
     runtime::{HomeLayout, Runtime},
 };
 use serde::Deserialize;
@@ -46,25 +47,15 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    if bypass_enabled() {
-        write_hook_response(
-            "allow",
-            "gommage bypass: GOMMAGE_BYPASS=1 was set by the host environment",
-        )?;
-        return Ok(());
-    }
-
     let mut buf = String::new();
     io::stdin()
         .read_to_string(&mut buf)
         .context("reading stdin")?;
-    let input: HookInput = serde_json::from_str(&buf).context("parsing hook JSON")?;
-    let tool = input.tool_name;
-    let tool_input = enrich_tool_input(&tool, input.tool_input, input.cwd.as_deref());
-    let call = ToolCall {
-        tool,
-        input: tool_input,
-    };
+    if bypass_enabled() {
+        return handle_bypass(&buf);
+    }
+
+    let call = parse_hook_tool_call(&buf)?;
 
     let layout = HomeLayout::default();
     layout.ensure()?;
@@ -101,6 +92,120 @@ fn bypass_enabled() -> bool {
     env::var("GOMMAGE_BYPASS")
         .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false)
+}
+
+fn parse_hook_tool_call(buf: &str) -> Result<ToolCall> {
+    let input: HookInput = serde_json::from_str(buf).context("parsing hook JSON")?;
+    let tool = input.tool_name;
+    let tool_input = enrich_tool_input(&tool, input.tool_input, input.cwd.as_deref());
+    Ok(ToolCall {
+        tool,
+        input: tool_input,
+    })
+}
+
+fn handle_bypass(buf: &str) -> Result<()> {
+    let Ok(call) = parse_hook_tool_call(buf) else {
+        write_hook_response(
+            "allow",
+            "gommage bypass: GOMMAGE_BYPASS=1 was set, but the hook payload could not be parsed; policy evaluation skipped for hook recovery",
+        )?;
+        return Ok(());
+    };
+
+    let layout = HomeLayout::default();
+    let caps = bypass_capabilities(&call);
+    if let Some(hit) = hardstop::check(&caps) {
+        let reason = format!(
+            "hard-stop {}: pattern {:?} matched {}",
+            hit.name, hit.pattern, hit.capability
+        );
+        let eval = EvalResult {
+            decision: Decision::Gommage {
+                reason: reason.clone(),
+                hard_stop: true,
+            },
+            matched_rule: Some(MatchedRule {
+                name: format!("<hardcoded:{}>", hit.name),
+                file: "<compiled-in>".to_string(),
+                index: 0,
+            }),
+            capabilities: caps,
+            policy_version: "bypass:compiled-hardstop".to_string(),
+        };
+        append_bypass_event_best_effort(&layout, &call, &eval, "deny");
+        write_hook_response(
+            "deny",
+            &format!("gommage bypass refused: {reason}; hard-stops cannot be bypassed"),
+        )?;
+        return Ok(());
+    }
+
+    let eval = EvalResult {
+        decision: Decision::Allow,
+        matched_rule: None,
+        capabilities: caps,
+        policy_version: "bypass:policy-skipped".to_string(),
+    };
+    append_bypass_event_best_effort(&layout, &call, &eval, "allow");
+    write_hook_response(
+        "allow",
+        "gommage bypass: GOMMAGE_BYPASS=1 was set by the host environment; policy evaluation skipped after hard-stop check",
+    )?;
+    Ok(())
+}
+
+fn bypass_capabilities(call: &ToolCall) -> Vec<Capability> {
+    let yaml = gommage_stdlib::CAPABILITIES
+        .iter()
+        .map(|file| file.contents)
+        .collect::<Vec<_>>()
+        .join("\n");
+    match CapabilityMapper::from_yaml_string(&yaml, "<compiled-stdlib-capabilities>") {
+        Ok(mapper) => mapper.map(call),
+        Err(_) => fallback_capabilities(call),
+    }
+}
+
+fn fallback_capabilities(call: &ToolCall) -> Vec<Capability> {
+    if call.tool == "Bash"
+        && let Some(command) = call.input.get("command").and_then(Value::as_str)
+    {
+        return vec![Capability::new(format!("proc.exec:{command}"))];
+    }
+    Vec::new()
+}
+
+fn append_bypass_event_best_effort(
+    layout: &HomeLayout,
+    call: &ToolCall,
+    eval: &EvalResult,
+    bypass_decision: &str,
+) {
+    let Ok(sk) = layout.load_key() else {
+        return;
+    };
+    let Ok(mut writer) = AuditWriter::open(&layout.audit_log, sk) else {
+        return;
+    };
+    let (original_decision, original_reason, hard_stop) = match &eval.decision {
+        Decision::Allow => (
+            "allow".to_string(),
+            "policy evaluation skipped".to_string(),
+            false,
+        ),
+        Decision::Gommage { reason, hard_stop } => ("deny".to_string(), reason.clone(), *hard_stop),
+        Decision::AskPicto { reason, .. } => ("ask".to_string(), reason.clone(), false),
+    };
+    let _ = writer.append_event(AuditEvent::BypassActivated {
+        tool: call.tool.clone(),
+        input_hash: call.input_hash(),
+        capabilities: eval.capabilities.clone(),
+        original_decision,
+        original_reason,
+        hard_stop,
+        bypass_decision: bypass_decision.to_string(),
+    });
 }
 
 fn write_hook_response(decision: &str, reason: &str) -> Result<()> {

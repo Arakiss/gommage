@@ -104,6 +104,15 @@ pub enum AuditEvent {
         mapper_rules: usize,
         policy_version: String,
     },
+    BypassActivated {
+        tool: String,
+        input_hash: String,
+        capabilities: Vec<Capability>,
+        original_decision: String,
+        original_reason: String,
+        hard_stop: bool,
+        bypass_decision: String,
+    },
 }
 
 pub struct AuditWriter {
@@ -349,8 +358,12 @@ pub struct VerifyReport {
     pub entries_total: usize,
     pub entries_verified: usize,
     pub key_fingerprint: String,
+    pub bypass_activations: usize,
+    pub hard_stop_bypass_attempts: usize,
     pub anomalies: Vec<Anomaly>,
+    #[serde(rename = "policy_versions")]
     pub policy_versions_seen: Vec<String>,
+    #[serde(rename = "expeditions")]
     pub expeditions_seen: Vec<String>,
 }
 
@@ -375,6 +388,11 @@ pub enum Anomaly {
         line: usize,
         from: String,
         to: String,
+    },
+    HardStopBypassAttempt {
+        line: usize,
+        tool: String,
+        original_reason: String,
     },
 }
 
@@ -402,6 +420,8 @@ pub fn explain_log(path: &Path, vk: &VerifyingKey) -> Result<VerifyReport, Audit
     let mut last_policy_version: Option<String> = None;
     let mut policy_versions: Vec<String> = Vec::new();
     let mut expeditions: Vec<String> = Vec::new();
+    let mut bypass_activations = 0usize;
+    let mut hard_stop_bypass_attempts = 0usize;
 
     for (i, line) in reader.lines().enumerate() {
         let line = line?;
@@ -466,12 +486,36 @@ pub fn explain_log(path: &Path, vk: &VerifyingKey) -> Result<VerifyReport, Audit
         {
             expeditions.push(e.to_string());
         }
+
+        if let ParsedRecord::Event(entry) = &record
+            && let AuditEvent::BypassActivated {
+                tool,
+                original_reason,
+                hard_stop,
+                bypass_decision,
+                ..
+            } = &entry.event
+        {
+            bypass_activations += 1;
+            if *hard_stop {
+                hard_stop_bypass_attempts += 1;
+                if bypass_decision == "allow" {
+                    anomalies.push(Anomaly::HardStopBypassAttempt {
+                        line: i + 1,
+                        tool: tool.clone(),
+                        original_reason: original_reason.clone(),
+                    });
+                }
+            }
+        }
     }
 
     Ok(VerifyReport {
         entries_total: total,
         entries_verified: verified,
         key_fingerprint: key_fingerprint(vk),
+        bypass_activations,
+        hard_stop_bypass_attempts,
         anomalies,
         policy_versions_seen: policy_versions,
         expeditions_seen: expeditions,
@@ -530,6 +574,37 @@ mod tests {
 
         let n = verify_log(&path, &sk.verifying_key()).unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn explain_counts_bypass_events_and_flags_hard_stop_allows() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("audit.log");
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut w = AuditWriter::open(&path, sk.clone()).unwrap();
+        w.append_event(AuditEvent::BypassActivated {
+            tool: "Bash".into(),
+            input_hash: "sha256:test".into(),
+            capabilities: vec![Capability::new("proc.exec:rm -rf /")],
+            original_decision: "deny".into(),
+            original_reason: "hard-stop hs.rm-rf-root".into(),
+            hard_stop: true,
+            bypass_decision: "allow".into(),
+        })
+        .unwrap();
+        drop(w);
+
+        let report = explain_log(&path, &sk.verifying_key()).unwrap();
+        assert_eq!(report.entries_total, 1);
+        assert_eq!(report.entries_verified, 1);
+        assert_eq!(report.bypass_activations, 1);
+        assert_eq!(report.hard_stop_bypass_attempts, 1);
+        assert!(
+            report
+                .anomalies
+                .iter()
+                .any(|a| matches!(a, Anomaly::HardStopBypassAttempt { .. }))
+        );
     }
 
     #[test]
