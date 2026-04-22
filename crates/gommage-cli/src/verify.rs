@@ -26,7 +26,7 @@ pub(crate) fn cmd_verify(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum VerifyStatus {
+pub(crate) enum VerifyStatus {
     Pass,
     Warn,
     Skip,
@@ -60,7 +60,7 @@ impl VerifyStatus {
 }
 
 #[derive(Debug, Serialize)]
-struct VerifyReport {
+pub(crate) struct VerifyReport {
     status: VerifyStatus,
     home: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,7 +107,10 @@ struct VerifyPolicyTestSection {
     error: Option<String>,
 }
 
-fn build_verify_report(layout: &HomeLayout, policy_test_files: &[PathBuf]) -> VerifyReport {
+pub(crate) fn build_verify_report(
+    layout: &HomeLayout,
+    policy_test_files: &[PathBuf],
+) -> VerifyReport {
     let mut summary = VerifySummary {
         policy_tests: policy_test_files.len(),
         ..VerifySummary::default()

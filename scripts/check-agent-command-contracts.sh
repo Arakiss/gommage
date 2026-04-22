@@ -38,6 +38,7 @@ check "agent install codex" gommage_cmd agent install codex
 
 check "verify json" gommage_cmd verify --json
 check "verify policy fixtures" gommage_cmd verify --json --policy-test examples/policy-fixtures.yaml
+check "report bundle" gommage_cmd report bundle --redact --output "$tmp/report-bundle.json"
 check "doctor json" gommage_cmd doctor --json
 check "agent status claude" gommage_cmd agent status claude --json
 check "agent status codex" gommage_cmd agent status codex --json
