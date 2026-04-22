@@ -1,5 +1,7 @@
 # Changelog — gommage-audit
 
+## [0.2.4-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.2.3-alpha.1...gommage-audit-v0.2.4-alpha.1) (2026-04-22)
+
 ## [0.2.3-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.2.2-alpha.1...gommage-audit-v0.2.3-alpha.1) (2026-04-22)
 
 

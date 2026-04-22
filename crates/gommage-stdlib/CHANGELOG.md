@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.3.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.2.2-alpha.1...gommage-stdlib-v0.3.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* polish beta operator experience ([ce4e33c](https://github.com/Arakiss/gommage/commit/ce4e33cb41dca1da6a87b0f9eadcd92752cbb6fe))
+
 ## [0.2.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.2.1-alpha.1...gommage-stdlib-v0.2.2-alpha.1) (2026-04-22)
 
 
