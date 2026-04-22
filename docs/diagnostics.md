@@ -1,6 +1,8 @@
 # Diagnostics
 
-`gommage doctor` is the operator installation health check. Use the default text output for humans and `gommage doctor --json` for scripts, installers, skills, and CI smoke tests.
+`gommage verify` is the default readiness gate for scripts, installers, skills, and CI smoke tests. It aggregates `doctor`, built-in semantic `smoke`, and optional repository policy fixtures into one report.
+
+`gommage doctor` is the lower-level operator installation health check. Use the default text output for humans and `gommage doctor --json` when you need only filesystem/runtime diagnostics.
 
 `gommage smoke` is the semantic health check. It runs built-in tool-call fixtures against the active capability mappers and policy set without writing audit entries or consuming pictos. Use `gommage smoke --json` after installing policies or changing policy packs.
 
@@ -13,6 +15,25 @@
 | `ok` | 0 | The local home, key, policy, capability mappers, audit log, and daemon socket checks all passed. |
 | `warn` | 0 | Gommage can operate, but one or more optional runtime paths are absent. This is expected before the first audited decision or when the daemon is not installed. |
 | `fail` | 1 | A required path or contract is broken. Fix before trusting the hook. |
+
+`verify` uses `pass`, `warn`, and `fail`:
+
+| Status | Exit code | Meaning |
+|---|---:|---|
+| `pass` | 0 | Doctor has no warnings, smoke passed, and every requested policy fixture passed. |
+| `warn` | 0 | No hard failure, but doctor reported an operational warning such as a missing first audit log or daemon socket. |
+| `fail` | 1 | Doctor failed, smoke failed, or at least one requested policy fixture failed. |
+
+Run the aggregated gate with:
+
+```sh
+gommage verify --json
+gommage verify --json --policy-test examples/policy-fixtures.yaml
+```
+
+The JSON report includes top-level `status`, `summary`, `doctor`, `smoke`, and
+`policy_tests`. Use the nested reports for the exact failing check, emitted
+capabilities, matched rule, and mismatch errors.
 
 ## JSON shape
 

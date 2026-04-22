@@ -21,6 +21,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Sigstore keyless signing for release archives plus installer verification of both Cosign bundles and SHA-256 checksums.
 - `scripts/install.sh --with-skill`, `--skill-only`, and `--skill-agent codex|claude|all` so the verified installer can also install/update the Gommage agent skill for Codex and Claude Code.
 - `gommage doctor` diagnoses the local home, key, policy, capability mapper, audit log, and daemon socket state.
+- `gommage verify` and `gommage verify --json` aggregate doctor, semantic smoke checks, and repeated `--policy-test <file>` fixtures into one readiness gate for installers, CI, and agent skills.
 - `gommage smoke` and `gommage smoke --json` run semantic post-install fixtures against the active mapper and policy set, covering hard-stop, fail-closed, allow, ask-picto, web, and MCP paths.
 - `gommage policy test <file>` and `--json` run repository-owned YAML policy regression fixtures against the active mapper and policy set, with per-case capabilities, matched rule, actual decision, expected decision, and mismatch errors.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo with a Gommage Teal to Picto Gold gradient in interactive terminals and `--plain` / `NO_COLOR` support for script-safe output.

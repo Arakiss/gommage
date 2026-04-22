@@ -328,6 +328,126 @@ cases:
 }
 
 #[test]
+fn verify_json_reports_doctor_smoke_and_policy_tests() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let fixture = temp.path().join("policy-fixtures.yaml");
+    fs::write(
+        &fixture,
+        r#"version: 1
+cases:
+  - name: ask_main_push
+    tool: Bash
+    input:
+      command: git push origin main
+    expect:
+      decision: ask_picto
+      required_scope: git.push:main
+      matched_rule: gate-main-push
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .args([
+            "verify",
+            "--json",
+            "--policy-test",
+            fixture.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert_eq!(
+        report
+            .pointer("/doctor/status")
+            .and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert_eq!(
+        report
+            .pointer("/smoke/status")
+            .and_then(|value| value.as_str()),
+        Some("pass")
+    );
+    assert_eq!(
+        report
+            .pointer("/policy_tests/0/status")
+            .and_then(|value| value.as_str()),
+        Some("pass")
+    );
+}
+
+#[test]
+fn verify_exits_nonzero_when_policy_test_fails() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let fixture = temp.path().join("policy-fixtures.yaml");
+    fs::write(
+        &fixture,
+        r#"version: 1
+cases:
+  - name: wrong_main_push_expectation
+    tool: Bash
+    input:
+      command: git push origin main
+    expect:
+      decision: allow
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .args([
+            "verify",
+            "--json",
+            "--policy-test",
+            fixture.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("fail")
+    );
+    assert_eq!(
+        report
+            .pointer("/summary/failures")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+}
+
+#[test]
 fn doctor_json_reports_missing_home_as_failure() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
