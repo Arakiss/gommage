@@ -1,5 +1,13 @@
 # Changelog — gommage-cli
 
+## [0.16.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.16.0-alpha.1...gommage-cli-v0.16.1-alpha.1) (2026-04-22)
+
+
+### Bug fixes
+
+* harden bypass audit semantics ([3663dc9](https://github.com/Arakiss/gommage/commit/3663dc94ef01fe94a1527bf29985a1b85942f76d))
+* polish recovery diagnostics ([1b7e7c1](https://github.com/Arakiss/gommage/commit/1b7e7c1e55ee90dc6d91218df7896e44e33b940b))
+
 ## [0.16.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.15.0-alpha.1...gommage-cli-v0.16.0-alpha.1) (2026-04-22)
 
 
