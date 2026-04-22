@@ -12,6 +12,10 @@ pub const POLICIES: &[StdlibFile] = &[
         contents: include_str!("../policies/00-hard-stops.yaml"),
     },
     StdlibFile {
+        name: "05-recovery.yaml",
+        contents: include_str!("../policies/05-recovery.yaml"),
+    },
+    StdlibFile {
         name: "10-filesystem.yaml",
         contents: include_str!("../policies/10-filesystem.yaml"),
     },

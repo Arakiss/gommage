@@ -177,9 +177,12 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             },
         },
         SmokeFixture {
-            name: "fail_closed_unmapped_shell",
-            description: "ordinary shell command denies when no policy rule matches",
-            call: bash_call("ls -la"),
+            name: "fail_closed_unmapped_tool",
+            description: "unmapped tools deny when no capability or policy rule matches",
+            call: ToolCall {
+                tool: "UnknownTool".to_string(),
+                input: serde_json::json!({}),
+            },
             expectation: SmokeExpectation::Gommage {
                 hard_stop: Some(false),
             },

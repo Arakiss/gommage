@@ -46,6 +46,14 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
+    if bypass_enabled() {
+        write_hook_response(
+            "allow",
+            "gommage bypass: GOMMAGE_BYPASS=1 was set by the host environment",
+        )?;
+        return Ok(());
+    }
+
     let mut buf = String::new();
     io::stdin()
         .read_to_string(&mut buf)
@@ -85,10 +93,21 @@ async fn main() -> Result<()> {
             format!("gommage: requires picto scope {required_scope:?} — {reason}"),
         ),
     };
+    write_hook_response(&decision_str, &reason)?;
+    Ok(())
+}
+
+fn bypass_enabled() -> bool {
+    env::var("GOMMAGE_BYPASS")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
+fn write_hook_response(decision: &str, reason: &str) -> Result<()> {
     let out = serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": decision_str,
+            "permissionDecision": decision,
             "permissionDecisionReason": reason,
         }
     });
