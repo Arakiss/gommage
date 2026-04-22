@@ -386,12 +386,8 @@ fn translate_claude_permission_specifier(raw: &str) -> Option<String> {
         "Bash" => "proc.exec:*".to_string(),
         "WebFetch" => "net.fetch:*".to_string(),
         "WebSearch" => "net.search:web".to_string(),
-        tool if tool.starts_with("mcp__") => {
-            if tool.matches("__").count() >= 2 {
-                format!("mcp.call:{tool}")
-            } else {
-                return None;
-            }
+        tool if tool.starts_with("mcp__") && tool.matches("__").count() >= 2 => {
+            format!("mcp.call:{tool}")
         }
         _ => return None,
     };

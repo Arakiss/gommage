@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
             format!("gommage: requires picto scope {required_scope:?} — {reason}"),
         ),
     };
-    write_hook_response(&decision_str, &reason)?;
+    write_hook_response(decision_str, &reason)?;
     Ok(())
 }
 
