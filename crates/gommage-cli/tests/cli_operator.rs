@@ -874,7 +874,14 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
         &settings,
         r#"{
   "permissions": {
-    "allow": ["Bash", "Read", "MultiEdit", "WebSearch"],
+    "allow": [
+      "Bash",
+      "Bash(git status *)",
+      "Read(./docs/**)",
+      "MultiEdit(./src/**)",
+      "WebFetch(domain:example.com)",
+      "WebSearch"
+    ],
     "deny": [
       "Read(./secrets/**)",
       "Read(~/.ssh/id_*)",
@@ -910,6 +917,14 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
     assert!(imported.contains("fs.read:${EXPEDITION_ROOT}/secrets/**"));
     assert!(imported.contains("fs.read:${HOME}/.ssh/id_*"));
     assert!(imported.contains("proc.exec:sudo rm -rf*"));
+    let imported_allows =
+        fs::read_to_string(home.join("policy.d/90-claude-allow-import.yaml")).unwrap();
+    assert!(imported_allows.contains("proc.exec:git status *"));
+    assert!(imported_allows.contains("fs.read:${EXPEDITION_ROOT}/docs/**"));
+    assert!(imported_allows.contains("fs.write:${EXPEDITION_ROOT}/src/**"));
+    assert!(imported_allows.contains("net.fetch:example.com"));
+    assert!(!imported_allows.contains("proc.exec:*"));
+    assert!(!imported_allows.contains("net.search:web"));
 
     let settings: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
@@ -920,7 +935,7 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
     assert_eq!(pre_tool_use.len(), 1);
     assert_eq!(
         pre_tool_use[0].get("matcher").and_then(|v| v.as_str()),
-        Some("Bash|Read|MultiEdit|WebSearch")
+        Some("Bash|Read|MultiEdit|WebFetch|WebSearch")
     );
     assert!(
         pre_tool_use[0]

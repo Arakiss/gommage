@@ -97,7 +97,7 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
   - Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
   - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
 - Agent automation should prefer `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage doctor --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, and `gommage audit-verify --explain` JSON. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
-- Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook and imports supported `permissions.deny` entries from `~/.claude/settings.json`.
+- Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook, imports supported `permissions.deny` entries into `05-claude-import.yaml`, and imports narrow supported `permissions.allow` entries into `90-claude-allow-import.yaml`. Broad allow entries such as `Bash` or `*` are hook matcher input only and must be reviewed manually before becoming Gommage allow policy.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
 
