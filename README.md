@@ -177,6 +177,12 @@ curl --proto '=https' --tlsv1.2 -sSf \
   | sh -s -- --skill-only --skill-agent codex --skill-agent claude --no-prompt
 
 # Verify local runtime health.
+gommage verify --json
+
+# Include repository-owned fixtures when present.
+gommage verify --json --policy-test examples/policy-fixtures.yaml
+
+# Inspect the lower-level reports directly when debugging.
 gommage doctor --json
 
 # Verify active mapper + policy semantics.
@@ -192,14 +198,16 @@ gommage policy check
 gommage audit-verify --explain
 ```
 
-`doctor --json`, `smoke --json`, `policy test --json`, policy hashes, audit
-verification, and decision JSON are the automation contracts. `smoke --json` is
-the semantic post-install check: it verifies that the active mapper and policy
-set still produce the expected hard-stop, fail-closed, allow, ask-picto, web,
-and MCP decisions. `policy test --json` is the project-owned regression surface:
-put expected decisions in versioned YAML fixtures and run them in CI before
-trusting a hook path. Human presentation output is intentionally not part of the
-automation contract.
+`verify --json`, `doctor --json`, `smoke --json`, `policy test --json`, policy
+hashes, audit verification, and decision JSON are the automation contracts.
+`verify --json` is the default readiness gate for installers, CI, and agents:
+it aggregates runtime health, built-in semantic smoke checks, and optional
+project fixtures. `smoke --json` is the semantic post-install check: it verifies
+that the active mapper and policy set still produce the expected hard-stop,
+fail-closed, allow, ask-picto, web, and MCP decisions. `policy test --json` is
+the project-owned regression surface: put expected decisions in versioned YAML
+fixtures and run them in CI before trusting a hook path. Human presentation
+output is intentionally not part of the automation contract.
 
 ## Quickstart
 
@@ -221,6 +229,9 @@ gommage smoke --json
 
 # Optional project regression fixtures. Keep these in the repo and run in CI.
 gommage policy test examples/policy-fixtures.yaml --json
+
+# One readiness gate for scripts, CI, and agent skills.
+gommage verify --json --policy-test examples/policy-fixtures.yaml
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
@@ -253,7 +264,7 @@ gommage expedition end
 
 ## Diagnostics
 
-Use `gommage doctor` for human-readable installation checks and `gommage doctor --json` for installers, skills, CI smoke tests, and agent setup scripts. Use `gommage smoke --json` after policy installation to verify the active mapper + policy semantics end to end. Use `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
+Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. Use `gommage doctor` for lower-level installation checks, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
 
 - `ok`: all checks passed.
 - `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.

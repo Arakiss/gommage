@@ -51,13 +51,20 @@ gommage quickstart --agent codex --daemon
 
 ```sh
 gommage doctor
+gommage verify --json
 gommage doctor --json
 gommage smoke --json
 # Optional, when the repository includes policy fixtures.
-gommage policy test path/to/policy-fixtures.yaml --json
+gommage verify --json --policy-test path/to/policy-fixtures.yaml
 ```
 
-Treat `doctor --json` status as:
+Treat `verify --json` status as:
+
+- `pass`: doctor, built-in smoke checks, and requested policy fixtures passed.
+- `warn`: operable, commonly before the first audit entry or without a daemon socket.
+- `fail`: do not trust the hook path until fixed.
+
+Treat lower-level `doctor --json` status as:
 
 - `ok`: healthy.
 - `warn`: operable, commonly before the first audit entry or without a daemon socket.
@@ -68,9 +75,9 @@ Treat `smoke --json` status as:
 - `pass`: active mapper + policy semantics match the built-in harness fixtures.
 - `fail`: do not trust the hook path until the unexpected decision is understood.
 
-Use `gommage policy test <file> --json` when the repository provides its own
-policy fixtures. Treat `status: "fail"` as a policy regression until the policy
-or capability mapper change is reviewed.
+Use `gommage verify --json --policy-test <file>` when the repository provides
+its own policy fixtures. Treat `status: "fail"` as a policy regression until
+the policy or capability mapper change is reviewed.
 
 ## Source Checkout
 
@@ -89,7 +96,7 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
 - Agent skill install destinations:
   - Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
   - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
-- Agent automation should prefer `gommage doctor --json`, `gommage smoke --json`, `gommage policy test <file> --json`, `gommage policy check`, and `gommage audit-verify --explain`. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
+- Agent automation should prefer `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage doctor --json`, `gommage smoke --json`, `gommage policy test <file> --json`, `gommage policy check`, and `gommage audit-verify --explain`. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
 - Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook and imports supported `permissions.deny` entries from `~/.claude/settings.json`.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
@@ -102,6 +109,8 @@ Useful commands:
 gommage expedition start "<task-name>"
 gommage expedition end
 gommage policy check
+gommage verify --json
+gommage verify --json --policy-test path/to/policy-fixtures.yaml
 gommage smoke --json
 gommage policy test path/to/policy-fixtures.yaml --json
 gommage grant --scope "git.push:main" --uses 1 --ttl 10m --reason "<reason>"
