@@ -1,6 +1,8 @@
 # Diagnostics
 
-`gommage doctor` is the operator health check. Use the default text output for humans and `gommage doctor --json` for scripts, installers, skills, and CI smoke tests.
+`gommage doctor` is the operator installation health check. Use the default text output for humans and `gommage doctor --json` for scripts, installers, skills, and CI smoke tests.
+
+`gommage smoke` is the semantic health check. It runs built-in tool-call fixtures against the active capability mappers and policy set without writing audit entries or consuming pictos. Use `gommage smoke --json` after installing policies or changing policy packs.
 
 ## Exit codes
 
@@ -72,3 +74,31 @@ Expect top-level `status: "warn"` until either:
 - `gommage daemon install` has started the user-level daemon.
 
 Treat any `fail` check as a setup error. For example, `policy` failures usually mean a malformed YAML rule under `~/.gommage/policy.d/`, while `capabilities` failures point to a malformed mapper under `~/.gommage/capabilities.d/`.
+
+## Semantic smoke test
+
+After the policy files and capability mappers are installed, run:
+
+```sh
+gommage smoke --json
+```
+
+The report has a top-level `status`:
+
+| Status | Exit code | Meaning |
+|---|---:|---|
+| `pass` | 0 | Every built-in semantic fixture produced the expected decision. |
+| `fail` | 1 | At least one fixture produced an unexpected decision. Do not trust the hook until the policy or mapper change is understood. |
+
+The built-in fixtures cover:
+
+- compiled hard-stop behavior for destructive shell commands;
+- fail-closed behavior for unmapped shell commands;
+- stdlib allow and ask-picto behavior for Git pushes;
+- stdlib web-tool gating for `WebFetch`;
+- stdlib MCP gating for write-like `mcp__*` tools.
+
+Each check includes the tool call, canonical `input_hash`, emitted
+capabilities, matched rule, expected decision, and actual decision. This makes
+`smoke --json` suitable for installer verification, CI images, and agent skills
+that need to prove semantic readiness instead of only checking that files exist.

@@ -138,6 +138,64 @@ fn policy_init_stdlib_installs_loadable_defaults() {
 }
 
 #[test]
+fn smoke_json_reports_semantic_passes() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home).args(["smoke", "--json"]).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("pass")
+    );
+    assert_eq!(
+        report
+            .pointer("/summary/failed")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert!(
+        report
+            .pointer("/summary/passed")
+            .and_then(|value| value.as_u64())
+            .unwrap()
+            >= 7
+    );
+    let checks = report
+        .get("checks")
+        .and_then(|value| value.as_array())
+        .unwrap();
+    assert!(checks.iter().any(|check| {
+        check.get("name").and_then(|value| value.as_str()) == Some("ask_mcp_write")
+            && check
+                .pointer("/actual/kind")
+                .and_then(|value| value.as_str())
+                == Some("ask_picto")
+    }));
+    assert!(checks.iter().any(|check| {
+        check.get("name").and_then(|value| value.as_str()) == Some("allow_feature_push")
+            && check
+                .pointer("/actual/kind")
+                .and_then(|value| value.as_str())
+                == Some("allow")
+    }));
+}
+
+#[test]
 fn doctor_json_reports_missing_home_as_failure() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
