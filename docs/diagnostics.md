@@ -14,6 +14,9 @@ below instead of the TUI.
 operator views. `--view all` is the most useful issue-report snapshot: it
 includes readiness, policy inventory, signed audit summary, mapper inventory,
 and recovery shortcuts. Interactive mode switches views with `1`-`5`.
+The README embeds a sanitized animated demo at `docs/assets/tui-dashboard.gif`
+and keeps `docs/assets/tui-dashboard.svg` as a static fallback; update both
+assets whenever the TUI's primary sections or vocabulary change.
 
 `gommage doctor` is the lower-level operator installation health check. Use the default text output for humans and `gommage doctor --json` when you need only filesystem/runtime diagnostics.
 
