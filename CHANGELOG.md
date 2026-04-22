@@ -27,6 +27,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage policy snapshot` / `capture` reads a tool-call JSON object from
   stdin and emits a YAML regression fixture with the observed decision,
   relevant scope or hard-stop value, and matched rule.
+- `gommage audit-verify --explain --format human` renders the signed audit
+  forensic report as a compact human-readable anomaly summary. Plain
+  `audit-verify --explain` remains the JSON automation contract.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo with a Gommage Teal to Picto Gold gradient in interactive terminals and `--plain` / `NO_COLOR` support for script-safe output.
 - Structured `gommage explain <audit-id>` output with exact id matching plus `--json` for the raw verified entry shape.
 - `gommage grant --ttl` now accepts duration suffixes (`s`, `m`, `h`, `d`) as well as raw seconds.
