@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.20.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.19.0-alpha.1...gommage-cli-v0.20.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* refine operator tui feedback loop ([4704688](https://github.com/Arakiss/gommage/commit/47046884faf746f39d983b3dc73d932e75e8ad3b))
+
 ## [0.19.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.18.0-alpha.1...gommage-cli-v0.19.0-alpha.1) (2026-04-22)
 
 
