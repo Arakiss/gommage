@@ -41,6 +41,10 @@ jobs:
         run: sh scripts/check-doc-release-refs.sh
       - id: release
         uses: googleapis/release-please-action@v4
+        env:
+          # release-please-action v4.4.1 still declares node20; opt in early to
+          # GitHub's Node 24 runtime before the hosted-runner default changes.
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
