@@ -68,6 +68,8 @@
 - `gommage verify` / `--json` for one readiness gate that aggregates doctor, semantic smoke checks, and repeated `--policy-test <file>` fixtures.
 - `gommage smoke` / `gommage smoke --json` for semantic post-install fixtures covering hard-stop, fail-closed, allow, ask-picto, web, and MCP policy paths.
 - `gommage policy test <file>` / `--json` for user-owned YAML policy regression fixtures with per-case capabilities, matched rule, actual decision, expected decision, and mismatch errors.
+- `gommage policy snapshot` / `capture` for turning a tool-call JSON object
+  from stdin into a YAML policy regression fixture.
 - `gommage mascot` / `gommage logo` for the Gommage Gestral terminal logo, with an interactive Gommage Teal to Picto Gold gradient and `--plain` / `NO_COLOR` script-safe output.
 - Claude quickstart now includes `Grep`, `WebFetch`, `WebSearch`, and MCP matcher coverage when native allow rules permit those tools.
 - `gommage doctor`.

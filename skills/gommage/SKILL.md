@@ -113,12 +113,14 @@ gommage verify --json
 gommage verify --json --policy-test path/to/policy-fixtures.yaml
 gommage smoke --json
 gommage policy test path/to/policy-fixtures.yaml --json
+echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
+  | gommage policy snapshot --name main_push_requires_picto
 gommage grant --scope "git.push:main" --uses 1 --ttl 10m --reason "<reason>"
 gommage audit-verify
 gommage explain <audit-id>
 ```
 
-Policies live in `~/.gommage/policy.d/`; capability mappers live in `~/.gommage/capabilities.d/`. Keep policies and `policy test` fixtures reviewed and versioned. Gommage is fail-closed when no rule matches.
+Policies live in `~/.gommage/policy.d/`; capability mappers live in `~/.gommage/capabilities.d/`. Keep policies and `policy test` fixtures reviewed and versioned. Use `policy snapshot` to capture a real tool call as a starter fixture, then review the generated expected decision before committing it. Gommage is fail-closed when no rule matches.
 
 ## Publishing And Releases
 

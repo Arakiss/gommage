@@ -191,6 +191,10 @@ gommage smoke --json
 # Run project-owned policy regression fixtures when present.
 gommage policy test examples/policy-fixtures.yaml --json
 
+# Capture a real tool call as a policy fixture.
+echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
+  | gommage policy snapshot --name main_push_requires_picto
+
 # Validate policies before trusting a hook path.
 gommage policy check
 
@@ -206,7 +210,9 @@ project fixtures. `smoke --json` is the semantic post-install check: it verifies
 that the active mapper and policy set still produce the expected hard-stop,
 fail-closed, allow, ask-picto, web, and MCP decisions. `policy test --json` is
 the project-owned regression surface: put expected decisions in versioned YAML
-fixtures and run them in CI before trusting a hook path. Human presentation
+fixtures and run them in CI before trusting a hook path. `policy snapshot`
+turns a real `ToolCall` JSON from stdin into a YAML fixture case so humans and
+agents do not have to hand-author the first regression. Human presentation
 output is intentionally not part of the automation contract.
 
 ## Quickstart
@@ -229,6 +235,11 @@ gommage smoke --json
 
 # Optional project regression fixtures. Keep these in the repo and run in CI.
 gommage policy test examples/policy-fixtures.yaml --json
+
+# Generate the first fixture from an observed tool call.
+echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
+  | gommage policy snapshot --name main_push_requires_picto \
+  > examples/policy-fixtures.yaml
 
 # One readiness gate for scripts, CI, and agent skills.
 gommage verify --json --policy-test examples/policy-fixtures.yaml

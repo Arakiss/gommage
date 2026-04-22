@@ -274,6 +274,85 @@ cases:
 }
 
 #[test]
+fn policy_snapshot_outputs_fixture_that_policy_test_accepts() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let mut child = gommage(&home)
+        .args([
+            "policy",
+            "snapshot",
+            "--name",
+            "ask_main_push",
+            "--description",
+            "captured main push fixture",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"tool":"Bash","input":{"command":"git push origin main"}}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let fixture_value: serde_json::Value = serde_yaml::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        fixture_value
+            .pointer("/cases/0/name")
+            .and_then(|value| value.as_str()),
+        Some("ask_main_push")
+    );
+    assert_eq!(
+        fixture_value
+            .pointer("/cases/0/expect/decision")
+            .and_then(|value| value.as_str()),
+        Some("ask_picto")
+    );
+    assert_eq!(
+        fixture_value
+            .pointer("/cases/0/expect/required_scope")
+            .and_then(|value| value.as_str()),
+        Some("git.push:main")
+    );
+    assert_eq!(
+        fixture_value
+            .pointer("/cases/0/expect/matched_rule")
+            .and_then(|value| value.as_str()),
+        Some("gate-main-push")
+    );
+
+    let fixture = temp.path().join("captured-policy-fixtures.yaml");
+    fs::write(&fixture, output.stdout).unwrap();
+    let test_output = gommage(&home)
+        .args(["policy", "test", fixture.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        test_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&test_output.stderr)
+    );
+}
+
+#[test]
 fn policy_test_exits_nonzero_on_fixture_failure() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

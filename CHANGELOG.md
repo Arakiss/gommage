@@ -24,6 +24,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage verify` and `gommage verify --json` aggregate doctor, semantic smoke checks, and repeated `--policy-test <file>` fixtures into one readiness gate for installers, CI, and agent skills.
 - `gommage smoke` and `gommage smoke --json` run semantic post-install fixtures against the active mapper and policy set, covering hard-stop, fail-closed, allow, ask-picto, web, and MCP paths.
 - `gommage policy test <file>` and `--json` run repository-owned YAML policy regression fixtures against the active mapper and policy set, with per-case capabilities, matched rule, actual decision, expected decision, and mismatch errors.
+- `gommage policy snapshot` / `capture` reads a tool-call JSON object from
+  stdin and emits a YAML regression fixture with the observed decision,
+  relevant scope or hard-stop value, and matched rule.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo with a Gommage Teal to Picto Gold gradient in interactive terminals and `--plain` / `NO_COLOR` support for script-safe output.
 - Structured `gommage explain <audit-id>` output with exact id matching plus `--json` for the raw verified entry shape.
 - `gommage grant --ttl` now accepts duration suffixes (`s`, `m`, `h`, `d`) as well as raw seconds.
