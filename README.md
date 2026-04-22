@@ -185,6 +185,10 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 # Inspect the lower-level reports directly when debugging.
 gommage doctor --json
 
+# Inspect host-agent hook wiring and native-permission import state.
+gommage agent status claude --json
+gommage agent status codex --json
+
 # Inspect mapper output before writing a policy rule.
 echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}' \
   | gommage map --json --hook
@@ -210,12 +214,15 @@ gommage audit-verify --explain
 gommage audit-verify --explain --format human
 ```
 
-`verify --json`, `doctor --json`, `map --json`, `smoke --json`,
-`policy test --json`, `audit-verify --explain` JSON, policy hashes, and
-decision JSON are the automation contracts.
+`verify --json`, `doctor --json`, `agent status --json`, `map --json`,
+`smoke --json`, `policy test --json`, `audit-verify --explain` JSON, policy
+hashes, and decision JSON are the automation contracts.
 `verify --json` is the default readiness gate for installers, CI, and agents:
 it aggregates runtime health, built-in semantic smoke checks, and optional
-project fixtures. `map --json` is the policy-authoring microscope: it shows the
+project fixtures. `agent status --json` is the host-integration check: it
+verifies Claude/Codex hook wiring, generated Claude permission imports, Codex
+hook feature flags, and dangerous Codex sandbox settings without parsing host
+config by hand. `map --json` is the policy-authoring microscope: it shows the
 capabilities a raw `ToolCall` emits without loading policy, touching pictos, or
 writing audit entries; add `--hook` when stdin is a real PreToolUse payload with
 `tool_name` and `tool_input`. `smoke --json` is the semantic post-install check:

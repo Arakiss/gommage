@@ -945,6 +945,34 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
             .iter()
             .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp"))
     );
+
+    let status = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["agent", "status", "claude", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("ok")
+    );
+    assert_eq!(
+        doctor_check(&report, "pre_tool_use")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("ok")
+    );
+    assert_eq!(
+        doctor_check(&report, "allow_import")
+            .pointer("/details/importable_rules")
+            .and_then(|value| value.as_u64()),
+        Some(4)
+    );
 }
 
 #[test]
@@ -1046,6 +1074,38 @@ fn agent_install_codex_writes_hook_and_enables_feature_flag() {
     let config = fs::read_to_string(config).unwrap();
     assert!(config.contains("codex_hooks = true"));
     assert!(config.contains("foo = true"));
+
+    let status = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env(
+            "GOMMAGE_CODEX_CONFIG",
+            temp.path().join("codex").join("config.toml"),
+        )
+        .args(["agent", "status", "codex", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("ok")
+    );
+    assert_eq!(
+        doctor_check(&report, "pre_tool_use")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("ok")
+    );
+    assert_eq!(
+        doctor_check(&report, "codex_hooks")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("ok")
+    );
 }
 
 #[test]

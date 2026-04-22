@@ -20,6 +20,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   `permissions.allow` entries into a late-order
   `90-claude-allow-import.yaml` policy file, while broad allow entries remain
   manual-review only so bundled Gommage guardrails still win.
+- `gommage agent status <claude|codex>` reports host-agent hook wiring,
+  generated Claude native-permission imports, Codex hook feature flags, and
+  Codex sandbox warnings in human and JSON formats.
 - `gommage daemon install|status|uninstall` manages user-level launchd/systemd services so long sessions no longer require a foreground daemon process.
 - Stdlib capability coverage for Claude `Grep`, `WebFetch`, `WebSearch`, and MCP tool names (`mcp__<server>__<tool>`), with conservative picto defaults for web/MCP surfaces.
 - Sigstore keyless signing for release archives plus installer verification of both Cosign bundles and SHA-256 checksums.
