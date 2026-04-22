@@ -4,7 +4,7 @@
 //! `~/.gommage/`. This module deliberately does *not* do policy evaluation —
 //! that stays pure in `evaluator.rs`.
 
-use crate::{CapabilityMapper, PictoStore, Policy, error::GommageError};
+use crate::{ApprovalStore, CapabilityMapper, PictoStore, Policy, error::GommageError};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,7 @@ pub struct HomeLayout {
     pub policy_dir: PathBuf,
     pub capabilities_dir: PathBuf,
     pub pictos_db: PathBuf,
+    pub approvals_log: PathBuf,
     pub audit_log: PathBuf,
     pub key_file: PathBuf,
     pub expedition_file: PathBuf,
@@ -53,6 +54,7 @@ impl HomeLayout {
             policy_dir: root.join("policy.d"),
             capabilities_dir: root.join("capabilities.d"),
             pictos_db: root.join("pictos.sqlite"),
+            approvals_log: root.join("approvals.jsonl"),
             audit_log: root.join("audit.log"),
             key_file: root.join("key.ed25519"),
             expedition_file: root.join("expedition.json"),
@@ -160,6 +162,7 @@ pub struct Runtime {
     pub mapper: CapabilityMapper,
     pub policy: Policy,
     pub pictos: PictoStore,
+    pub approvals: ApprovalStore,
     pub expedition: Option<Expedition>,
     pub layout: HomeLayout,
 }
@@ -175,10 +178,12 @@ impl Runtime {
         let mapper = CapabilityMapper::load_from_dir(&layout.capabilities_dir)?;
         let policy = Policy::load_from_dir(&layout.policy_dir, &env)?;
         let pictos = PictoStore::open(&layout.pictos_db)?;
+        let approvals = ApprovalStore::open(&layout.approvals_log);
         Ok(Runtime {
             mapper,
             policy,
             pictos,
+            approvals,
             expedition,
             layout,
         })

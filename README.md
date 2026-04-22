@@ -75,7 +75,10 @@ The alpha distribution has two install surfaces:
 
 - **Runtime binaries**: `gommage`, `gommage-daemon`, and `gommage-mcp`, installed through the verified GitHub Release installer.
 - **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
-- **Operator dashboard**: `gommage tui`, a read-only terminal dashboard for humans with readiness summary, focused diagnostics, and next actions. Use `gommage tui --snapshot` for issue reports and non-interactive shells.
+- **Operator dashboard**: `gommage tui`, a dependency-free terminal command
+  center for humans with readiness, policies, audit, capabilities, and recovery
+  views. Use `gommage tui --snapshot --view all` for issue reports and
+  non-interactive shells.
 
 ## Positioning
 
@@ -275,6 +278,8 @@ Stable automation contracts:
 | `smoke --json` | Built-in semantic post-install checks. |
 | `policy test --json` | Project-owned policy regression fixtures. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
+| `approval list --json` | Pending out-of-band approval requests. |
+| `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `agent uninstall` / `uninstall --dry-run` | Reversible cleanup and recovery. |
 
 The manifest and command contract above are checked by CI:
@@ -327,7 +332,7 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 
 # Human operator dashboard. It is read-only and never mutates GOMMAGE_HOME.
 gommage tui
-gommage tui --snapshot
+gommage tui --snapshot --view all
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
@@ -347,6 +352,14 @@ gommage grant \
   --uses 1 \
   --ttl 10m \
   --reason "hotfix for INC-2461"
+
+# Review an out-of-band ask and mint an exact-scope picto.
+gommage approval list
+gommage approval show <approval-id>
+gommage approval approve <approval-id> --ttl 10m --uses 1
+
+# Or send pending asks to a generic webhook endpoint.
+gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL"
 
 # Watch decisions live
 gommage tail
@@ -398,7 +411,7 @@ Details are documented in [`docs/diagnostics.md`](docs/diagnostics.md).
 │          │                   │                     │
 │ Claude   │ ◄─── decision ─── │  • Capability mapper│
 │ Code     │                   │  • Policy evaluator │
-│ Cursor…  │                   │  • Picto store      │
+│ Cursor…  │                   │  • Picto/approval   │
 └──────────┘                   │  • Audit writer     │
                                └──────────┬──────────┘
                                           │
@@ -407,6 +420,7 @@ Details are documented in [`docs/diagnostics.md`](docs/diagnostics.md).
                                │ ~/.gommage/         │
                                │  ├─ policy.d/*.yaml │
                                │  ├─ capabilities.d/ │
+                               │  ├─ approvals.jsonl │
                                │  ├─ pictos.sqlite   │
                                │  ├─ audit.log       │
                                │  └─ key.ed25519     │
@@ -504,6 +518,8 @@ execution order.
 - Supported agents: **Claude Code** (all tool types), **OpenAI Codex CLI** (Bash tool only — limited by Codex's current hook surface)
 - YAML policy + capability mappers for Bash, filesystem tools, Grep, WebFetch, WebSearch, MCP tools, git, cloud CLIs, package managers, Vercel, Bun, and Docker
 - Pictos (signed, TTL, usage-bounded)
+- Durable out-of-band approval inbox with exact-scope picto minting
+- Generic approval webhook delivery through `gommage approval webhook`
 - Append-only signed audit log
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
@@ -521,12 +537,14 @@ execution order.
   strict policy linting for the policy-authoring loop
 - crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
-- Live approval TUI flow on top of the current read-only `gommage tui` dashboard
+- Inline approval form inside `gommage tui` on top of the current command
+  workflow
 - Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
 - Generic MCP server mode for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
-- Webhook out-of-band
+- Native Slack/Discord/ntfy approval providers on top of the generic webhook
+  payload
 - Browser playground for mapping, policy evaluation, explain traces, and fixture
   generation
 

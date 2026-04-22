@@ -17,6 +17,24 @@ fn copy_yaml_files(from: &std::path::Path, to: &std::path::Path) {
     }
 }
 
+#[cfg(unix)]
+fn fake_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = temp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let capture = temp.path().join("webhook.json");
+    let script = bin.join("curl");
+    fs::write(
+        &script,
+        "#!/bin/sh\ncat > \"$GOMMAGE_FAKE_CURL_CAPTURE\"\nprintf 204\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    (bin, capture)
+}
+
 #[test]
 fn fallback_path_writes_signed_audit_entry_when_daemon_is_absent() {
     let temp = tempdir().unwrap();
@@ -46,9 +64,59 @@ fn fallback_path_writes_signed_audit_entry_when_daemon_is_absent() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains(r#""permissionDecision":"ask""#));
+    assert!(stdout.contains("approval request apr_"));
     assert_eq!(
         verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
-        1
+        2
+    );
+    let approvals = fs::read_to_string(&layout.approvals_log).unwrap();
+    assert!(approvals.contains(r#""required_scope":"git.push:main""#));
+}
+
+#[test]
+#[cfg(unix)]
+fn fallback_path_can_notify_approval_webhook_best_effort() {
+    let temp = tempdir().unwrap();
+    let layout = HomeLayout::at(&temp.path().join(".gommage"));
+    layout.ensure().unwrap();
+
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    copy_yaml_files(&repo_root.join("policies"), &layout.policy_dir);
+    copy_yaml_files(&repo_root.join("capabilities"), &layout.capabilities_dir);
+    let (fake_bin, capture) = fake_curl(&temp);
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gommage-mcp"))
+        .env("GOMMAGE_HOME", &layout.root)
+        .env("GOMMAGE_APPROVAL_WEBHOOK_URL", "https://example.test/hook")
+        .env("GOMMAGE_FAKE_CURL_CAPTURE", &capture)
+        .env("PATH", path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(output.status.success());
+    let captured = fs::read_to_string(capture).unwrap();
+    assert!(captured.contains(r#""kind":"gommage_approval_request""#));
+    let audit = fs::read_to_string(&layout.audit_log).unwrap();
+    assert!(audit.contains(r#""type":"approval_webhook_delivered""#));
+    assert_eq!(
+        verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
+        3
     );
 }
 

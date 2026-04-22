@@ -4,6 +4,7 @@
 //! beyond SQLite for the picto store). Its job is to be a pure, testable kernel:
 //! `(ToolCall, Policy) → Decision` with deterministic semantics.
 
+pub mod approval;
 pub mod capability;
 pub mod error;
 pub mod evaluator;
@@ -14,6 +15,9 @@ pub mod policy;
 pub mod runtime;
 pub mod toolcall;
 
+pub use approval::{
+    ApprovalRequest, ApprovalResolution, ApprovalState, ApprovalStatus, ApprovalStore,
+};
 pub use capability::Capability;
 pub use error::GommageError;
 pub use evaluator::{Decision, EvalResult, MatchedRule, evaluate};

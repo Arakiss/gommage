@@ -12,12 +12,14 @@ use crate::{
     doctor::{DoctorStatus, build_doctor_report},
     gestral::{UiStatus, UiTone, color_enabled, paint, strip_ansi, truncate_plain},
     smoke::{SmokeStatus, build_smoke_report},
+    tui_views::{TuiView, ViewReport, build_view_report},
     util::path_display,
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct TuiOptions {
     pub(crate) agents: Vec<AgentKind>,
+    pub(crate) view: TuiView,
     pub(crate) snapshot: bool,
     pub(crate) refresh_ms: u64,
 }
@@ -52,17 +54,22 @@ pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCod
     let agents = normalize_agents(options.agents);
     if options.snapshot || !io::stdout().is_terminal() || !io::stdin().is_terminal() {
         let dashboard = build_dashboard(&layout, &agents)?;
-        print_snapshot(&dashboard);
+        print_snapshot(&layout, &dashboard, options.view)?;
         return Ok(ExitCode::SUCCESS);
     }
 
-    match run_interactive(&layout, &agents, Duration::from_millis(options.refresh_ms)) {
+    match run_interactive(
+        &layout,
+        &agents,
+        options.view,
+        Duration::from_millis(options.refresh_ms),
+    ) {
         Ok(()) => Ok(ExitCode::SUCCESS),
         Err(error) => {
             eprintln!("gommage tui: interactive mode unavailable: {error:#}");
             eprintln!("gommage tui: printing snapshot instead.");
             let dashboard = build_dashboard(&layout, &agents)?;
-            print_snapshot(&dashboard);
+            print_snapshot(&layout, &dashboard, options.view)?;
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -164,7 +171,7 @@ fn first_agent_detail(value: &serde_json::Value) -> String {
         .to_string()
 }
 
-fn print_snapshot(dashboard: &Dashboard) {
+fn print_snapshot(layout: &HomeLayout, dashboard: &Dashboard, view: TuiView) -> Result<()> {
     println!("Gommage dashboard");
     println!("version: {}", dashboard.version);
     println!("home: {}", dashboard.home);
@@ -195,10 +202,43 @@ fn print_snapshot(dashboard: &Dashboard) {
     for (index, action) in dashboard.next_actions.iter().enumerate() {
         println!("{}. {action}", index + 1);
     }
+    if view != TuiView::Dashboard {
+        println!();
+        print_view_snapshot(layout, view)?;
+    }
+    Ok(())
+}
+
+fn print_view_snapshot(layout: &HomeLayout, view: TuiView) -> Result<()> {
+    let views = if view == TuiView::All {
+        TuiView::interactive_views().to_vec()
+    } else {
+        vec![view]
+    };
+    for view in views.into_iter().filter(|view| *view != TuiView::Dashboard) {
+        let report = build_view_report(layout, view)?;
+        println!("{}:", report.title);
+        for line in report.lines {
+            println!("- {line}");
+        }
+        if !report.next_actions.is_empty() {
+            println!("next {}:", report.title);
+            for (index, action) in report.next_actions.iter().enumerate() {
+                println!("{}. {action}", index + 1);
+            }
+        }
+        println!();
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
-fn run_interactive(layout: &HomeLayout, agents: &[AgentKind], refresh: Duration) -> Result<()> {
+fn run_interactive(
+    layout: &HomeLayout,
+    agents: &[AgentKind],
+    initial_view: TuiView,
+    refresh: Duration,
+) -> Result<()> {
     let refresh = refresh.clamp(Duration::from_millis(250), Duration::from_millis(10_000));
     let _session = TerminalSession::enter()?;
     let mut stdin = io::stdin();
@@ -206,7 +246,8 @@ fn run_interactive(layout: &HomeLayout, agents: &[AgentKind], refresh: Duration)
     let colors = color_enabled();
     let mut dashboard = build_dashboard(layout, agents)?;
     let mut selected = dashboard.primary_row_index().unwrap_or(0);
-    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
+    let mut view = normalize_interactive_view(initial_view);
+    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
     let mut last_refresh = Instant::now();
     let mut input = [0_u8; 1];
 
@@ -217,18 +258,23 @@ fn run_interactive(layout: &HomeLayout, agents: &[AgentKind], refresh: Duration)
                 b'q' | 27 => break,
                 b'j' | b'J' => {
                     selected = (selected + 1).min(dashboard.rows.len().saturating_sub(1));
-                    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
+                    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
                 }
                 b'k' | b'K' => {
                     selected = selected.saturating_sub(1);
-                    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
+                    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
                 }
                 b'r' | b'R' => {
                     dashboard = build_dashboard(layout, agents)?;
                     selected = selected.min(dashboard.rows.len().saturating_sub(1));
-                    draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
+                    draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
                     last_refresh = Instant::now();
                 }
+                b'1' => view = TuiView::Dashboard,
+                b'2' => view = TuiView::Policies,
+                b'3' => view = TuiView::Audit,
+                b'4' => view = TuiView::Capabilities,
+                b'5' => view = TuiView::Recovery,
                 _ => {}
             },
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -238,16 +284,22 @@ fn run_interactive(layout: &HomeLayout, agents: &[AgentKind], refresh: Duration)
         if last_refresh.elapsed() >= refresh {
             dashboard = build_dashboard(layout, agents)?;
             selected = selected.min(dashboard.rows.len().saturating_sub(1));
-            draw_dashboard(&mut stdout, &dashboard, colors, selected)?;
+            draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
             last_refresh = Instant::now();
         }
+        draw_dashboard(&mut stdout, layout, &dashboard, colors, selected, view)?;
     }
 
     Ok(())
 }
 
 #[cfg(not(unix))]
-fn run_interactive(_layout: &HomeLayout, _agents: &[AgentKind], _refresh: Duration) -> Result<()> {
+fn run_interactive(
+    _layout: &HomeLayout,
+    _agents: &[AgentKind],
+    _initial_view: TuiView,
+    _refresh: Duration,
+) -> Result<()> {
     anyhow::bail!("interactive TUI is currently available on Unix terminals only")
 }
 
@@ -301,14 +353,16 @@ impl Drop for TerminalSession {
 
 fn draw_dashboard(
     stdout: &mut impl Write,
+    layout: &HomeLayout,
     dashboard: &Dashboard,
     colors: bool,
     selected: usize,
+    view: TuiView,
 ) -> io::Result<()> {
     let (cols, rows) = terminal_size();
     let width = cols.clamp(40, 120);
     let height = rows.max(12);
-    let lines = render_lines(dashboard, width, colors, selected);
+    let lines = render_lines(layout, dashboard, width, colors, selected, view);
     write!(stdout, "\x1b[H\x1b[2J")?;
     for line in lines.into_iter().take(height) {
         writeln!(stdout, "{}", truncate_plain(&line, width))?;
@@ -316,7 +370,14 @@ fn draw_dashboard(
     stdout.flush()
 }
 
-fn render_lines(dashboard: &Dashboard, width: usize, colors: bool, selected: usize) -> Vec<String> {
+fn render_lines(
+    layout: &HomeLayout,
+    dashboard: &Dashboard,
+    width: usize,
+    colors: bool,
+    selected: usize,
+    view: TuiView,
+) -> Vec<String> {
     let mut lines = Vec::new();
     let overall = dashboard.overall_status();
     let summary = dashboard.summary();
@@ -341,7 +402,8 @@ fn render_lines(dashboard: &Dashboard, width: usize, colors: bool, selected: usi
     lines.push(boxed(format!("updated {}", dashboard.updated), width));
     lines.push(boxed(
         format!(
-            "readiness {}  {}",
+            "view {}  readiness {}  {}",
+            view.label(),
             progress_bar(summary.ready_percent(), 18),
             summary.describe()
         ),
@@ -351,9 +413,52 @@ fn render_lines(dashboard: &Dashboard, width: usize, colors: bool, selected: usi
     lines.push(String::new());
     lines.push(format!(
         "{}  {}",
-        paint("Readiness", UiTone::Gold, true, colors),
-        paint("j/k moves focus", UiTone::Muted, false, colors)
+        paint("Views", UiTone::Gold, true, colors),
+        paint(
+            "1 readiness  2 policies  3 audit  4 capabilities  5 recovery",
+            UiTone::Muted,
+            false,
+            colors
+        )
     ));
+    render_view_body(&mut lines, layout, dashboard, colors, selected, view);
+    lines.push(String::new());
+    lines.push(format!(
+        "{} quit   {} refresh   {} move   {} for CI and issue reports",
+        paint("q", UiTone::Gold, true, colors),
+        paint("r", UiTone::Gold, true, colors),
+        paint("j/k", UiTone::Gold, true, colors),
+        paint("--snapshot", UiTone::Muted, false, colors)
+    ));
+    lines
+}
+
+fn render_view_body(
+    lines: &mut Vec<String>,
+    layout: &HomeLayout,
+    dashboard: &Dashboard,
+    colors: bool,
+    selected: usize,
+    view: TuiView,
+) {
+    match view {
+        TuiView::Dashboard | TuiView::All => {
+            render_dashboard_body(lines, dashboard, colors, selected);
+        }
+        other => match build_view_report(layout, other) {
+            Ok(report) => render_report_body(lines, &report, colors),
+            Err(error) => lines.push(format!("could not render {}: {error}", other.label())),
+        },
+    }
+}
+
+fn render_dashboard_body(
+    lines: &mut Vec<String>,
+    dashboard: &Dashboard,
+    colors: bool,
+    selected: usize,
+) {
+    lines.push(paint("Readiness", UiTone::Gold, true, colors));
     for (index, row) in dashboard.rows.iter().enumerate() {
         let cursor = if index == selected { ">" } else { " " };
         lines.push(format!(
@@ -380,15 +485,16 @@ fn render_lines(dashboard: &Dashboard, width: usize, colors: bool, selected: usi
     for (index, action) in dashboard.next_actions.iter().enumerate() {
         lines.push(format!("{}. {action}", index + 1));
     }
+}
+
+fn render_report_body(lines: &mut Vec<String>, report: &ViewReport, colors: bool) {
+    lines.push(paint(&report.title, UiTone::Gold, true, colors));
+    lines.extend(report.lines.iter().map(|line| format!("- {line}")));
     lines.push(String::new());
-    lines.push(format!(
-        "{} quit   {} refresh   {} move   {} for CI and issue reports",
-        paint("q", UiTone::Gold, true, colors),
-        paint("r", UiTone::Gold, true, colors),
-        paint("j/k", UiTone::Gold, true, colors),
-        paint("--snapshot", UiTone::Muted, false, colors)
-    ));
-    lines
+    lines.push(paint("Next", UiTone::Gold, true, colors));
+    for (index, action) in report.next_actions.iter().enumerate() {
+        lines.push(format!("{}. {action}", index + 1));
+    }
 }
 
 fn progress_bar(percent: usize, width: usize) -> String {
@@ -492,6 +598,14 @@ fn normalize_agents(agents: Vec<AgentKind>) -> Vec<AgentKind> {
         }
     }
     normalized
+}
+
+fn normalize_interactive_view(view: TuiView) -> TuiView {
+    if view == TuiView::All {
+        TuiView::Dashboard
+    } else {
+        view
+    }
 }
 
 fn from_doctor_status(status: DoctorStatus) -> UiStatus {

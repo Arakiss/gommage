@@ -118,5 +118,44 @@ fn tui_help_lists_snapshot_and_refresh_controls() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("--snapshot"));
     assert!(stdout.contains("--agent"));
+    assert!(stdout.contains("--view"));
     assert!(stdout.contains("--refresh-ms"));
+}
+
+#[test]
+fn tui_snapshot_view_all_includes_operator_sections() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let claude_settings = temp.path().join("claude-settings.json");
+
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &claude_settings)
+        .args(["tui", "--snapshot", "--view", "all", "--agent", "claude"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("policies:"));
+    assert!(stdout.contains("- policy files:"));
+    assert!(stdout.contains("audit:"));
+    assert!(stdout.contains("- approval requests:"));
+    assert!(stdout.contains("capabilities:"));
+    assert!(stdout.contains("- mapper rules:"));
+    assert!(stdout.contains("recovery:"));
+    assert!(stdout.contains("- pending approvals:"));
+    assert!(!stdout.contains("\x1b["));
 }

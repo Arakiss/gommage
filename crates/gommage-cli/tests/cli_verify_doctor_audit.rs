@@ -329,7 +329,16 @@ fn explain_prints_structured_decision_for_exact_audit_id() {
     assert!(child.wait_with_output().unwrap().status.success());
 
     let audit = fs::read_to_string(home.join("audit.log")).unwrap();
-    let value: serde_json::Value = serde_json::from_str(audit.lines().next().unwrap()).unwrap();
+    let decision_line = audit
+        .lines()
+        .find(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| value.get("tool").cloned())
+                .is_some()
+        })
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(decision_line).unwrap();
     let id = value.get("id").and_then(|v| v.as_str()).unwrap();
 
     let output = gommage(&home).args(["explain", id]).output().unwrap();

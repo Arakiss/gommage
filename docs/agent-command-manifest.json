@@ -87,6 +87,31 @@
       "argv": ["smoke", "--json"]
     },
     {
+      "id": "tui_snapshot_all",
+      "purpose": "Capture the human operator snapshot without ANSI output.",
+      "stdin_mode": "none",
+      "argv": ["tui", "--snapshot", "--view", "all"]
+    },
+    {
+      "id": "approval_list_json",
+      "purpose": "Inspect pending out-of-band approval requests.",
+      "stdin_mode": "none",
+      "argv": ["approval", "list", "--json"]
+    },
+    {
+      "id": "approval_webhook_dry_run_json",
+      "purpose": "Render pending approval webhook payloads without network delivery.",
+      "stdin_mode": "none",
+      "argv": [
+        "approval",
+        "webhook",
+        "--url",
+        "https://approval.example.invalid/hook",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    {
       "id": "policy_schema",
       "purpose": "Print the fixture schema for agents/editors/CI.",
       "stdin_mode": "none",
