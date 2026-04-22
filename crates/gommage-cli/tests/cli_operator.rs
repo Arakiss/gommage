@@ -138,6 +138,86 @@ fn policy_init_stdlib_installs_loadable_defaults() {
 }
 
 #[test]
+fn map_json_reports_capabilities_without_policy_files() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let capabilities_dir = home.join("capabilities.d");
+    fs::create_dir_all(&capabilities_dir).unwrap();
+    fs::write(
+        capabilities_dir.join("bash.yaml"),
+        r#"
+- name: bash-proc-exec
+  tool: Bash
+  emit:
+    - "proc.exec:${input.command}"
+- name: bash-git-push
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push(?:\\s+[-\\w]+)*\\s+(?P<remote>[\\w.-]+)\\s+(?P<ref>\\S+)"
+  emit:
+    - "git.push:refs/heads/${ref}"
+    - "net.out:github.com"
+- name: bash-git-force-push
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push[^#]*--force\\b"
+  emit:
+    - "git.push.force:<any>"
+"#,
+    )
+    .unwrap();
+
+    let mut child = gommage(&home)
+        .args(["map", "--json"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"tool":"Bash","input":{"command":"git push --force origin main"}}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("tool").and_then(|value| value.as_str()),
+        Some("Bash")
+    );
+    assert_eq!(
+        report.get("mapper_rules").and_then(|value| value.as_u64()),
+        Some(3)
+    );
+    let capabilities = report
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"proc.exec:git push --force origin main"));
+    assert!(capabilities.contains(&"git.push:refs/heads/main"));
+    assert!(capabilities.contains(&"net.out:github.com"));
+    assert!(capabilities.contains(&"git.push.force:<any>"));
+    assert!(
+        report
+            .get("input_hash")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| value.starts_with("sha256:"))
+    );
+    assert!(report.get("decision").is_none());
+    assert!(!home.join("policy.d").exists());
+    assert!(!home.join("audit.log").exists());
+}
+
+#[test]
 fn smoke_json_reports_semantic_passes() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
