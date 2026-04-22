@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.10.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.9.0-alpha.1...gommage-cli-v0.10.0-alpha.1) (2026-04-22)
+
+
+### Features
+
+* **cli:** accept hook payloads for authoring ([3297630](https://github.com/Arakiss/gommage/commit/32976309dcc8dd793f2874f3d4f168ad3f76a1c7))
+
 ## [0.9.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.8.0-alpha.1...gommage-cli-v0.9.0-alpha.1) (2026-04-22)
 
 
