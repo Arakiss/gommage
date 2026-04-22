@@ -20,13 +20,31 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   no-billing/no-publish alpha decision.
 - Installer post-install hints now point agents at `quickstart --daemon
   --self-test` and the `gommage verify` readiness gate.
+- Installer diagnostics now explain missing `cosign` with OS-aware hints, log
+  which GitHub token environment variable is used, expose non-TTY skill-agent
+  defaults, and support an explicit `--verify` post-install delegation.
+- `gommage quickstart` now runs its self-test by default, checks recovery
+  decisions in addition to `gommage verify`, and restores touched agent config
+  snapshots if the post-install self-test fails.
+- `gommage agent uninstall <claude|codex|all>` removes Gommage-managed hook
+  groups and can restore the newest validated `.gommage-bak-*` backup.
+- `gommage uninstall` provides dry-run cleanup for agent hooks, daemon service
+  files, installed skills, binaries, and Gommage home data. Destructive home
+  removal requires `--yes`.
+- `GOMMAGE_BYPASS=1` for `gommage-mcp`, allowing host environments to recover
+  from a broken hook path without opening `~/.gommage`.
+- Agent command contract check (`scripts/check-agent-command-contracts.sh`) so
+  README and skill command surfaces cannot drift from the binary unnoticed.
 - Signed audit lifecycle events for picto create/confirm/consume/revoke/reject and policy reloads. `audit-verify` and `audit-verify --explain` now verify mixed decision/event JSONL logs.
 - `gommage policy init --stdlib` installs the bundled stdlib policies and capability mappers without requiring manual file copies.
 - `gommage quickstart` and `gommage agent install` bootstrap Claude Code/Codex integrations with config backups, stdlib install, Claude native deny-rule import, and hook installation.
-- Claude Code native permission inheritance now imports narrow supported
-  `permissions.allow` entries into a late-order
-  `90-claude-allow-import.yaml` policy file, while broad allow entries remain
-  manual-review only so bundled Gommage guardrails still win.
+- Claude Code native permission inheritance now imports supported
+  `permissions.allow` entries, including broad tool allows, into a late-order
+  `90-claude-allow-import.yaml` policy file while earlier hard-stops, deny
+  imports, stdlib denies, and ask rules still win.
+- Stdlib recovery policy keeps Gommage readiness commands, basic inspection,
+  systemd daemon recovery, and Claude settings backup restore commands
+  available after quickstart.
 - `gommage agent status <claude|codex>` reports host-agent hook wiring,
   generated Claude native-permission imports, Codex hook feature flags, and
   Codex sandbox warnings in human and JSON formats.
@@ -84,6 +102,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 - README agent guidance now uses short command blocks and stable contract
   tables instead of an oversized all-in-one command block.
+- `gommage verify --json` now includes a pre-init hint and skips smoke when
+  doctor already failed, avoiding noisy cascades from a missing home.
 - Picto lookup and consumption now verify ed25519 signatures before a stored row can convert `ask_picto` into `allow`; tampered rows remain unconsumed and emit `picto_rejected` audit events.
 - `gommage-mcp` daemon-absent fallback now writes signed audit entries instead of silently evaluating without audit.
 - Policy version hashes now use relative policy file paths plus substituted effective contents, making identical policy trees path-stable across homes while distinguishing different effective canvases.

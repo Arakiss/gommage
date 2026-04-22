@@ -139,6 +139,8 @@ jobs:
           diff -ru policies crates/gommage-stdlib/policies
           diff -ru capabilities crates/gommage-stdlib/capabilities
       - run: cargo build -p gommage-cli
+      - name: Verify agent command contracts
+        run: GOMMAGE_BIN=./target/debug/gommage sh scripts/check-agent-command-contracts.sh
       - name: Init home and install shipped stdlib
         run: |
           export GOMMAGE_HOME="$RUNNER_TEMP/.gommage"

@@ -1,5 +1,27 @@
 # Changelog — gommage-cli
 
+## [Unreleased]
+
+### Features
+
+- `gommage quickstart` runs self-test by default, verifies recovery decisions,
+  and rolls back touched agent configs on self-test failure.
+- `gommage agent uninstall <claude|codex|all>` and `gommage uninstall` provide
+  reversible cleanup and dry-run recovery surfaces.
+- Agent command contract script verifies README/skill-facing commands against
+  the current binary.
+
+### Bug fixes
+
+- Claude native permission import now carries broad supported
+  `permissions.allow` entries forward instead of creating a fail-closed
+  deadlock after hook installation.
+- `gommage verify --json` reports a pre-init hint and skips smoke when doctor
+  already failed.
+- The installer now logs token source, gives OS-aware cosign hints, makes
+  non-TTY skill defaults explicit, supports `--verify`, and uses fixed-string
+  PATH matching.
+
 ## [0.13.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.12.2-alpha.1...gommage-cli-v0.13.0-alpha.1) (2026-04-22)
 
 

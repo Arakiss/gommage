@@ -1,5 +1,12 @@
 # Changelog — gommage-mcp
 
+## [Unreleased]
+
+### Added
+
+- `GOMMAGE_BYPASS=1` break-glass mode returns an allow decision without
+  opening `~/.gommage`, for host-managed recovery from broken hook wiring.
+
 ## [0.2.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.2.1-alpha.1...gommage-mcp-v0.2.2-alpha.1) (2026-04-22)
 
 

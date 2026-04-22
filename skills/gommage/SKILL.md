@@ -43,6 +43,7 @@ curl --proto '=https' --tlsv1.2 -sSf \
 5. Set up the target agent:
 
 ```sh
+# `--self-test` is the default; keep it explicit in scripts for readability.
 gommage quickstart --agent claude --daemon --self-test
 gommage quickstart --agent codex --daemon --self-test
 ```
@@ -63,6 +64,10 @@ Treat `verify --json` status as:
 - `pass`: doctor, built-in smoke checks, and requested policy fixtures passed.
 - `warn`: operable, commonly before the first audit entry or without a daemon socket.
 - `fail`: do not trust the hook path until fixed.
+
+On a fresh machine, `verify --json` includes a top-level `hint` and reports
+`smoke.status: "skip"` when doctor already failed. Follow the hint before
+debugging policy semantics.
 
 Treat lower-level `doctor --json` status as:
 
@@ -96,13 +101,13 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
 - Agent skill install destinations:
   - Codex: `${CODEX_HOME:-$HOME/.codex}/skills/gommage`
   - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
-- Agent automation should prefer `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, and `gommage audit-verify --explain` JSON. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
-- Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook, imports supported `permissions.deny` entries into `05-claude-import.yaml`, and imports narrow supported `permissions.allow` entries into `90-claude-allow-import.yaml`. Broad allow entries such as `Bash` or `*` are hook matcher input only and must be reviewed manually before becoming Gommage allow policy.
+- Agent automation should prefer `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot` or `gommage logo`; they are presentation-only.
+- Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook, imports supported `permissions.deny` entries into `05-claude-import.yaml`, and imports supported `permissions.allow` entries into `90-claude-allow-import.yaml`. Late allow imports preserve the user's native Claude posture while earlier hard-stops, denies, ask rules, and native deny imports still win.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
-- Quickstart self-test: `--self-test` runs `gommage verify` after setup.
-  Combined with `--dry-run`, it prints the planned verification step without
-  writing `GOMMAGE_HOME` or host-agent config.
+- Quickstart self-test: the readiness gate runs by default. `--self-test` remains accepted for scripts; `--no-self-test` is the manual escape hatch.
+- Recovery: use `gommage agent uninstall claude --restore-backup`, `gommage agent uninstall codex --restore-backup`, or `gommage uninstall --all --dry-run` before destructive cleanup. `--purge-home` requires `--yes`.
+- Break-glass: `GOMMAGE_BYPASS=1` makes `gommage-mcp` allow without opening `~/.gommage` when the host can set hook process env vars. Use only to recover a broken hook path.
 
 ## Policy Operations
 
@@ -116,6 +121,8 @@ gommage verify --json
 gommage verify --json --policy-test path/to/policy-fixtures.yaml
 gommage agent status claude --json
 gommage agent status codex --json
+gommage agent uninstall claude --restore-backup --dry-run
+gommage uninstall --all --dry-run
 gommage smoke --json
 echo '{"tool":"Bash","input":{"command":"git push --force origin main"}}' \
   | gommage map --json
