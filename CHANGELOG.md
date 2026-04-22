@@ -15,6 +15,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 - `docs/beta-readiness.md` and a beta-readiness issue template for tracking
   launch blockers with command, workflow, release, and documentation evidence.
+- `docs/roadmap.md` with the beta-to-v1 product sequence covering dry-run
+  setup planning, redacted report bundles, audit replay, policy suggestions,
+  live approvals, MCP gateway mode, policy packs, browser playground, and
+  distribution work.
 - `scripts/check-crates-publish-readiness.sh` and refreshed publishing docs
   with current crates.io evidence, package-gate status, and the explicit
   no-billing/no-publish alpha decision.
