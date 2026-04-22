@@ -49,7 +49,7 @@ issue:
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
 | CI | `ci`, `release`, `audit`, and `scorecard` are green on the release commit. |
 | Docs | README, diagnostics, agent compatibility, publishing, and release-signing docs match the current CLI. |
-| Packaging | crates.io status is current; unpublished crates have an explicit reason. |
+| Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
 
 ## Blocking issues
 
