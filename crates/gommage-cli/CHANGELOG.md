@@ -1,5 +1,17 @@
 # Changelog — gommage-cli
 
+## [0.23.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.22.0-alpha.1...gommage-cli-v0.23.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* make approval webhooks recoverable ([4075edd](https://github.com/Arakiss/gommage/commit/4075eddc5242c56c68ea1af74b411c2c5d15ce2e))
+
+
+### Documentation
+
+* promote public policy fixture contract ([e778dea](https://github.com/Arakiss/gommage/commit/e778deacb96aa9cedf4cca019f8f2a2c8c48c575))
+
 ## [0.22.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.21.0-alpha.1...gommage-cli-v0.22.0-alpha.1) (2026-04-23)
 
 
