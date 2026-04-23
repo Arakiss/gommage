@@ -213,16 +213,16 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
             json,
             signing_secret,
             signing_key_id,
-        } => approval_webhook(
+        } => approval_webhook(ApprovalWebhookOptions {
             layout,
-            &url,
+            url,
             provider,
             dry_run,
             limit,
             json,
-            signing_secret.as_deref(),
-            signing_key_id.as_deref(),
-        ),
+            signing_secret,
+            signing_key_id,
+        }),
         ApprovalCmd::Replay { id, json } => approval_replay(layout, &id, json),
         ApprovalCmd::Evidence {
             id,
@@ -384,23 +384,35 @@ pub(crate) fn deny_request(
     })
 }
 
-fn approval_webhook(
+struct ApprovalWebhookOptions {
     layout: HomeLayout,
-    url: &str,
+    url: String,
     provider: WebhookProvider,
     dry_run: bool,
     limit: Option<usize>,
     json: bool,
-    signing_secret: Option<&str>,
-    signing_key_id: Option<&str>,
-) -> Result<ExitCode> {
+    signing_secret: Option<String>,
+    signing_key_id: Option<String>,
+}
+
+fn approval_webhook(options: ApprovalWebhookOptions) -> Result<ExitCode> {
+    let ApprovalWebhookOptions {
+        layout,
+        url,
+        provider,
+        dry_run,
+        limit,
+        json,
+        signing_secret,
+        signing_key_id,
+    } = options;
     let store = ApprovalStore::open(&layout.approvals_log);
     let mut pending = store.pending()?;
     if let Some(limit) = limit {
         pending.truncate(limit);
     }
     let mut report = WebhookReport {
-        url: url.to_string(),
+        url: url.clone(),
         provider: provider.as_str().to_string(),
         dry_run,
         sent: 0,
@@ -417,8 +429,9 @@ fn approval_webhook(
         let payload = webhook_payload(&state.request, provider);
         let body = serde_json::to_vec(&payload)?;
         let signature = signing_secret
+            .as_deref()
             .filter(|secret| !secret.trim().is_empty())
-            .map(|secret| sign_webhook_body(&body, secret, signing_key_id));
+            .map(|secret| sign_webhook_body(&body, secret, signing_key_id.as_deref()));
         if dry_run {
             if !json {
                 println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -437,13 +450,13 @@ fn approval_webhook(
             });
             continue;
         }
-        match post_json_with_curl(url, &body, signature.as_ref()) {
+        match post_json_with_curl(&url, &body, signature.as_ref()) {
             Ok(status) => {
                 report.sent += 1;
                 if let Some(writer) = audit.as_mut() {
                     writer.append_event(AuditEvent::ApprovalWebhookDelivered {
                         id: state.request.id.clone(),
-                        url: url.to_string(),
+                        url: url.clone(),
                         status: Some(status),
                         signature: signature.as_ref().map(signature_audit_summary),
                     })?;
@@ -464,7 +477,7 @@ fn approval_webhook(
                 if let Some(writer) = audit.as_mut() {
                     writer.append_event(AuditEvent::ApprovalWebhookFailed {
                         id: state.request.id.clone(),
-                        url: url.to_string(),
+                        url: url.clone(),
                         error: message.clone(),
                         signature: signature.as_ref().map(signature_audit_summary),
                     })?;
