@@ -19,6 +19,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Release automation now dispatches `ci.yml` for generated release-please PR
   branches after workspace dependency pin repair, eliminating the manual empty
   commit workaround for required release PR checks.
+- `gommage tui --snapshot --view onboarding` adds a first-minute operator guide
+  with safe setup, beta gate, report bundle, and rollback commands.
 - `docs/beta-readiness.md` and a beta-readiness issue template for tracking
   launch blockers with command, workflow, release, and documentation evidence.
 - `docs/roadmap.md` with the beta-to-v1 product sequence covering dry-run

@@ -30,13 +30,14 @@ Evidence to save:
 gommage quickstart --agent claude --daemon --dry-run --json
 gommage agent status claude --json
 gommage tui --snapshot --view all
+gommage tui --snapshot --view onboarding
 ```
 
 Evidence to save:
 
 - quickstart JSON plan
 - current host-agent status
-- plain-text TUI snapshot
+- plain-text TUI snapshot and onboarding view
 
 ## 3. Quickstart And Verify
 

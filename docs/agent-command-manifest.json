@@ -111,6 +111,12 @@
       "argv": ["tui", "--snapshot", "--view", "all"]
     },
     {
+      "id": "tui_snapshot_onboarding",
+      "purpose": "Capture first-minute operator setup and rollback guidance.",
+      "stdin_mode": "none",
+      "argv": ["tui", "--snapshot", "--view", "onboarding"]
+    },
+    {
       "id": "tui_snapshot_approvals",
       "purpose": "Capture the approval inbox operator snapshot without ANSI output.",
       "stdin_mode": "none",
