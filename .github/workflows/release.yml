@@ -178,6 +178,21 @@ jobs:
             [[ -n "${tag}" ]] || continue
             gh release edit "${tag}" --repo "${GITHUB_REPOSITORY}" --prerelease --latest=false
           done <<< "${tags}"
+      - name: Name CLI release as the Gommage product
+        if: ${{ steps.release.outputs['crates/gommage-cli--release_created'] == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLI_TAG: ${{ steps.release.outputs['crates/gommage-cli--tag_name'] }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${CLI_TAG#gommage-cli-v}"
+          gh release edit "${CLI_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Gommage v${version}" \
+            --prerelease \
+            --latest=false
       - name: Trigger CLI binary build
         if: ${{ steps.release.outputs['crates/gommage-cli--release_created'] == 'true' }}
         env:
