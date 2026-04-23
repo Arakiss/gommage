@@ -1,5 +1,13 @@
 # Changelog — gommage-cli
 
+## [0.22.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.21.0-alpha.1...gommage-cli-v0.22.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* add beta readiness gate ([fca0d17](https://github.com/Arakiss/gommage/commit/fca0d17fe715deef66818e13574edc636304a936))
+* add tui onboarding view ([58bd0a1](https://github.com/Arakiss/gommage/commit/58bd0a126aa074b0bf1161c64bb758e6ec5309b0))
+
 ## [0.21.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.20.1-alpha.1...gommage-cli-v0.21.0-alpha.1) (2026-04-23)
 
 
