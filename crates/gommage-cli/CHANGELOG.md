@@ -1,5 +1,18 @@
 # Changelog — gommage-cli
 
+## [0.21.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.20.1-alpha.1...gommage-cli-v0.21.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* sign approval webhook deliveries ([acb4417](https://github.com/Arakiss/gommage/commit/acb4417f2ce4e567485448676547b1e10e3b6382))
+* stream live decision activity ([0529185](https://github.com/Arakiss/gommage/commit/0529185588d89f8f22279bd476e54d8f75773e8f))
+
+
+### Refactor
+
+* keep approval webhook options cohesive ([9e8b36b](https://github.com/Arakiss/gommage/commit/9e8b36b3e32339ef8e41e5c2d30b4e90637a8825))
+
 ## [0.20.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.20.0-alpha.1...gommage-cli-v0.20.1-alpha.1) (2026-04-23)
 
 

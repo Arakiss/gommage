@@ -1,5 +1,12 @@
 # Changelog — gommage-mcp
 
+## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.3.1-alpha.1...gommage-mcp-v0.4.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* sign approval webhook deliveries ([acb4417](https://github.com/Arakiss/gommage/commit/acb4417f2ce4e567485448676547b1e10e3b6382))
+
 ## [0.3.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.3.0-alpha.1...gommage-mcp-v0.3.1-alpha.1) (2026-04-23)
 
 ## [0.3.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.2.5-alpha.1...gommage-mcp-v0.3.0-alpha.1) (2026-04-22)
