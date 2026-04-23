@@ -148,6 +148,21 @@
       ]
     },
     {
+      "id": "approval_webhook_discord_dry_run_json",
+      "purpose": "Render Discord-shaped pending approval webhook payloads without network delivery.",
+      "stdin_mode": "none",
+      "argv": [
+        "approval",
+        "webhook",
+        "--provider",
+        "discord",
+        "--url",
+        "https://approval.example.invalid/discord",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    {
       "id": "approval_template_ntfy_json",
       "purpose": "Print the ntfy approval notification template without sending.",
       "stdin_mode": "none",

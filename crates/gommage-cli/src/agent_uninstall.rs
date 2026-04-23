@@ -98,10 +98,12 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
+    let mut removed_codex_hook = false;
     if hooks_path.exists() {
         let mut hooks = read_json_object(&hooks_path)?;
         let removed = remove_json_hook_groups(&mut hooks, "/PreToolUse", "gommage-mcp");
         if removed > 0 {
+            removed_codex_hook = true;
             write_json(&hooks_path, &hooks, dry_run)?;
             if dry_run {
                 println!(
@@ -124,7 +126,7 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
         println!("ok codex: hooks file not found at {}", hooks_path.display());
     }
 
-    if config_path.exists() {
+    if removed_codex_hook && config_path.exists() {
         let mut config = read_toml_document(&config_path)?;
         if config
             .get("features")
@@ -145,6 +147,11 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
                 );
             }
         }
+    } else if config_path.exists() {
+        println!(
+            "ok codex: leaving features.codex_hooks unchanged at {}; no Gommage Codex hook was found",
+            config_path.display()
+        );
     }
     Ok(())
 }

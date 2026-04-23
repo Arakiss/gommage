@@ -75,6 +75,11 @@ gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL"
 gommage approval template --provider ntfy
 ```
 
+Dry-run JSON includes the shaped request body in `requests[].payload` for each
+pending approval. That makes generic, Slack, and Discord payloads inspectable
+without network delivery, and keeps endpoint tests composable with tools like
+`jq` and `curl`.
+
 Slack incoming webhooks accept JSON with `text` and optional `blocks`; Discord
 incoming webhooks accept JSON `content` and optional `embeds`; ntfy JSON
 publishing posts to the server root URL with a `topic`, so Gommage documents an

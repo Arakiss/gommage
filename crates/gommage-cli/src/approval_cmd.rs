@@ -8,6 +8,7 @@ use std::{
     path::PathBuf,
     process::{Command, ExitCode, Stdio},
 };
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::approval_workflow::{
     WebhookProvider, WebhookTemplateProvider, approval_evidence, approval_replay,
@@ -21,9 +22,9 @@ pub(crate) enum ApprovalCmd {
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
-        /// Filter by request status.
-        #[arg(long, value_enum)]
-        status: Option<ApprovalStatusArg>,
+        /// Filter by request status. Defaults to pending; use all for history.
+        #[arg(long, value_enum, default_value = "pending")]
+        status: ApprovalStatusArg,
     },
     /// Show one approval request.
     Show {
@@ -105,17 +106,19 @@ pub(crate) enum ApprovalCmd {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum ApprovalStatusArg {
+    All,
     Pending,
     Approved,
     Denied,
 }
 
-impl From<ApprovalStatusArg> for ApprovalStatus {
-    fn from(value: ApprovalStatusArg) -> Self {
-        match value {
-            ApprovalStatusArg::Pending => ApprovalStatus::Pending,
-            ApprovalStatusArg::Approved => ApprovalStatus::Approved,
-            ApprovalStatusArg::Denied => ApprovalStatus::Denied,
+impl ApprovalStatusArg {
+    fn status(self) -> Option<ApprovalStatus> {
+        match self {
+            ApprovalStatusArg::All => None,
+            ApprovalStatusArg::Pending => Some(ApprovalStatus::Pending),
+            ApprovalStatusArg::Approved => Some(ApprovalStatus::Approved),
+            ApprovalStatusArg::Denied => Some(ApprovalStatus::Denied),
         }
     }
 }
@@ -144,9 +147,36 @@ struct WebhookRequestReport {
     id: String,
     status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     http_status: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalListItem<'a> {
+    id: &'a str,
+    status: ApprovalStatus,
+    created_at: String,
+    tool: &'a str,
+    required_scope: &'a str,
+    request: &'a gommage_core::ApprovalRequest,
+    resolution: &'a Option<gommage_core::ApprovalResolution>,
+}
+
+impl<'a> From<&'a ApprovalState> for ApprovalListItem<'a> {
+    fn from(state: &'a ApprovalState) -> Self {
+        Self {
+            id: &state.request.id,
+            status: state.status,
+            created_at: format_timestamp(state.request.created_at),
+            tool: &state.request.tool,
+            required_scope: &state.request.required_scope,
+            request: &state.request,
+            resolution: &state.resolution,
+        }
+    }
 }
 
 pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitCode> {
@@ -179,19 +209,18 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
     }
 }
 
-fn approval_list(
-    layout: HomeLayout,
-    json: bool,
-    status: Option<ApprovalStatusArg>,
-) -> Result<ExitCode> {
+fn approval_list(layout: HomeLayout, json: bool, status: ApprovalStatusArg) -> Result<ExitCode> {
     let store = ApprovalStore::open(&layout.approvals_log);
     let mut states = store.list()?;
-    if let Some(status) = status {
-        let status = ApprovalStatus::from(status);
+    if let Some(status) = status.status() {
         states.retain(|state| state.status == status);
     }
     if json {
-        println!("{}", serde_json::to_string_pretty(&states)?);
+        let items = states
+            .iter()
+            .map(ApprovalListItem::from)
+            .collect::<Vec<_>>();
+        println!("{}", serde_json::to_string_pretty(&items)?);
         return Ok(ExitCode::SUCCESS);
     }
     if states.is_empty() {
@@ -366,6 +395,7 @@ fn approval_webhook(
             report.requests.push(WebhookRequestReport {
                 id: state.request.id,
                 status: "dry_run".to_string(),
+                payload: Some(payload),
                 http_status: None,
                 error: None,
             });
@@ -384,6 +414,7 @@ fn approval_webhook(
                 report.requests.push(WebhookRequestReport {
                     id: state.request.id,
                     status: "sent".to_string(),
+                    payload: None,
                     http_status: Some(status),
                     error: None,
                 });
@@ -401,6 +432,7 @@ fn approval_webhook(
                 report.requests.push(WebhookRequestReport {
                     id: state.request.id,
                     status: "failed".to_string(),
+                    payload: None,
                     http_status: None,
                     error: Some(message),
                 });
@@ -467,6 +499,10 @@ fn print_state_detail(state: &ApprovalState) {
             state.request.id
         );
     }
+}
+
+fn format_timestamp(value: OffsetDateTime) -> String {
+    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
 fn post_json_with_curl(url: &str, payload: &serde_json::Value) -> Result<i32> {

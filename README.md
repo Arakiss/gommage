@@ -288,10 +288,11 @@ Stable automation contracts:
 | `policy test --json` | Project-owned policy regression fixtures. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
-| `approval list --json` | Pending out-of-band approval requests. |
+| `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
 | `approval evidence <id> --redact` | Export request state, relevant signed audit lines, verification summary, and next commands. |
+| `approval webhook --dry-run --json` | Render generic, Slack, or Discord payloads in `requests[].payload` without sending network traffic. |
 | `approval template --provider <name> --json` | Render generic, Slack, Discord, or ntfy notification payload templates. |
 | `agent uninstall` / `uninstall --dry-run` | Reversible cleanup and recovery. |
 
@@ -372,12 +373,14 @@ gommage grant \
 
 # Review an out-of-band ask and mint an exact-scope picto.
 gommage approval list
+gommage approval list --status all
 gommage approval show <approval-id>
 gommage approval replay <approval-id>
 gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 
 # Or notify humans through generic, Slack, or Discord webhook payloads.
+gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL"
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
 gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL"
