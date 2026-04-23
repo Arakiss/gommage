@@ -1,7 +1,7 @@
 mod support;
 
 use std::{fs, io::Write, process::Stdio};
-use support::{doctor_check, gommage};
+use support::{doctor_check, gommage, workspace_path};
 use tempfile::tempdir;
 
 #[test]
@@ -121,6 +121,48 @@ cases:
             .pointer("/summary/failures")
             .and_then(|value| value.as_u64()),
         Some(1)
+    );
+}
+
+#[test]
+fn verify_json_accepts_public_fixture_library() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let fixture = workspace_path("examples/policy-fixtures.yaml");
+
+    let output = gommage(&home)
+        .args([
+            "verify",
+            "--json",
+            "--policy-test",
+            fixture.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.pointer("/policy_tests/0/status").and_then(|value| value.as_str()),
+        Some("pass")
+    );
+    assert_eq!(
+        report
+            .pointer("/policy_tests/0/report/summary/passed")
+            .and_then(|value| value.as_u64()),
+        Some(7)
     );
 }
 

@@ -281,6 +281,10 @@ cases:
       matched_rule: gate-main-push
 ```
 
+The repository-owned `examples/policy-fixtures.yaml` expands this shape into
+the public fixture library for the canonical stdlib semantics: hard-stop,
+fail-closed, Git allow/ask/deny, `WebFetch`, and write-like `mcp__*` gating.
+
 Run it locally or in CI:
 
 ```sh
@@ -339,7 +343,8 @@ top-level YAML list of cases. Each case supports:
 The JSON report has top-level `status: "pass" | "fail"`, `policy_version`,
 `mapper_rules`, `summary`, and per-case `capabilities`, `matched_rule`,
 `actual`, `expected`, and `errors`. Treat `fail` as a policy regression until
-the policy or mapper change is reviewed.
+the policy or mapper change is reviewed. The public fixture file is suitable
+for repository CI, host-smoke evidence, and agent-generated regression loops.
 
 `gommage policy schema` prints the official JSON Schema for the fixture file
 contract. The schema covers both accepted fixture shapes: a mapping with

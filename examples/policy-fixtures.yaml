@@ -1,7 +1,33 @@
 version: 1
 cases:
-  - name: main_push_requires_picto
-    description: Pushes to main should require a signed git.push:main picto.
+  - name: hardstop_rm_root
+    description: Compiled hard-stops must block destructive root deletion.
+    tool: Bash
+    input:
+      command: rm -rf /
+    expect:
+      decision: gommage
+      hard_stop: true
+
+  - name: fail_closed_unmapped_tool
+    description: Unknown tools must deny when no capability or policy rule matches.
+    tool: UnknownTool
+    input: {}
+    expect:
+      decision: gommage
+      hard_stop: false
+
+  - name: allow_feature_push
+    description: Feature branch pushes should pass without requiring a picto.
+    tool: Bash
+    input:
+      command: git push origin chore/test-branch
+    expect:
+      decision: allow
+      matched_rule: allow-feature-push
+
+  - name: ask_main_push
+    description: Main branch pushes should require a signed git.push:main picto.
     tool: Bash
     input:
       command: git push origin main
@@ -10,17 +36,8 @@ cases:
       required_scope: git.push:main
       matched_rule: gate-main-push
 
-  - name: feature_push_is_allowed
-    description: Feature branch pushes should pass without a picto.
-    tool: Bash
-    input:
-      command: git push origin chore/test-branch
-    expect:
-      decision: allow
-      matched_rule: allow-feature-push
-
-  - name: force_push_is_denied
-    description: Force pushes should be denied by policy.
+  - name: deny_force_push
+    description: Force pushes should be denied by policy before a main-push approval can help.
     tool: Bash
     input:
       command: git push --force origin main
@@ -28,3 +45,23 @@ cases:
       decision: gommage
       hard_stop: false
       matched_rule: no-force-push
+
+  - name: ask_web_fetch
+    description: Agent-native web fetches cross the local trust boundary and should require approval.
+    tool: WebFetch
+    input:
+      url: https://example.com/docs
+    expect:
+      decision: ask_picto
+      required_scope: net.fetch
+      matched_rule: ask-web-fetch
+
+  - name: ask_mcp_write
+    description: Write-like MCP tools should require explicit approval.
+    tool: mcp__github__create_issue
+    input:
+      title: smoke
+    expect:
+      decision: ask_picto
+      required_scope: mcp.write
+      matched_rule: ask-mcp-write
