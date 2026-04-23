@@ -381,7 +381,8 @@ gommage approval approve <approval-id> --ttl 10m --uses 1
 
 # Or notify humans through generic, Slack, or Discord webhook payloads.
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json
-gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL"
+gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
+  --signing-secret "$GOMMAGE_APPROVAL_WEBHOOK_SECRET"
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
 gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL"
 gommage approval template --provider ntfy
@@ -546,7 +547,8 @@ execution order.
 - Durable out-of-band approval inbox with exact-scope picto minting, replay
   diagnostics, redacted evidence bundles, and TUI approval resolution
 - Generic approval webhook delivery plus Slack/Discord-shaped payloads through
-  `gommage approval webhook`
+  `gommage approval webhook`, with optional HMAC-SHA256 signatures over the
+  exact HTTP body via `--signing-secret` or `GOMMAGE_APPROVAL_WEBHOOK_SECRET`
 - Append-only signed audit log
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
@@ -566,13 +568,12 @@ execution order.
   strict policy linting for the policy-authoring loop
 - crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
-- Signed callback protocol for remote approval providers
 - Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
 - Generic MCP server mode for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
-- Native ntfy approval provider, signed callbacks, and richer editable approval
-  forms on top of the generic webhook payload
+- Native ntfy approval provider and richer editable approval forms on top of
+  the generic webhook payload
 - Browser playground for mapping, policy evaluation, explain traces, and fixture
   generation
 

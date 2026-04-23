@@ -14,6 +14,7 @@ use gommage_core::{
     ApprovalRequest, Capability, CapabilityMapper, Decision, EvalResult, MatchedRule, PictoConsume,
     PictoLookup, ToolCall, evaluate, hardstop,
     runtime::{HomeLayout, Runtime},
+    webhook_signature::{WebhookSignatureReport, sign_webhook_body},
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -432,22 +433,29 @@ fn notify_approval_webhook_best_effort(request: &ApprovalRequest) -> Option<Audi
     if url.trim().is_empty() {
         return None;
     }
-    Some(match post_approval_json(&url, request) {
+    let payload = approval_payload(request);
+    let Ok(body) = serde_json::to_vec(&payload) else {
+        return None;
+    };
+    let signature = webhook_signature_from_env(&body);
+    Some(match post_approval_json(&url, &body, signature.as_ref()) {
         Ok(status) => AuditEvent::ApprovalWebhookDelivered {
             id: request.id.clone(),
             url,
             status: Some(status),
+            signature: signature.as_ref().map(signature_audit_summary),
         },
         Err(error) => AuditEvent::ApprovalWebhookFailed {
             id: request.id.clone(),
             url,
             error: error.to_string(),
+            signature: signature.as_ref().map(signature_audit_summary),
         },
     })
 }
 
-fn post_approval_json(url: &str, request: &ApprovalRequest) -> Result<i32> {
-    let payload = serde_json::json!({
+fn approval_payload(request: &ApprovalRequest) -> serde_json::Value {
+    serde_json::json!({
         "kind": "gommage_approval_request",
         "id": request.id,
         "created_at": request.created_at,
@@ -462,26 +470,56 @@ fn post_approval_json(url: &str, request: &ApprovalRequest) -> Result<i32> {
             "approve": format!("gommage approval approve {}", request.id),
             "deny": format!("gommage approval deny {}", request.id)
         }
-    });
-    let mut child = Command::new("curl")
-        .args([
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "5",
-            "--output",
-            "/dev/null",
-            "--write-out",
-            "%{http_code}",
-            "--header",
-            "content-type: application/json",
-            "--request",
-            "POST",
-            "--data-binary",
-            "@-",
-            url,
-        ])
+    })
+}
+
+fn webhook_signature_from_env(body: &[u8]) -> Option<WebhookSignatureReport> {
+    let secret = env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET").ok()?;
+    if secret.trim().is_empty() {
+        return None;
+    }
+    let key_id = env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET_ID").ok();
+    Some(sign_webhook_body(body, &secret, key_id.as_deref()))
+}
+
+fn signature_audit_summary(
+    signature: &WebhookSignatureReport,
+) -> gommage_audit::WebhookSignatureAudit {
+    gommage_audit::WebhookSignatureAudit {
+        algorithm: signature.algorithm.clone(),
+        key_id: signature.key_id.clone(),
+        timestamp: signature.timestamp.clone(),
+        body_sha256: signature.body_sha256.clone(),
+        signature_prefix: signature.signature.chars().take(18).collect(),
+    }
+}
+
+fn post_approval_json(
+    url: &str,
+    body: &[u8],
+    signature: Option<&WebhookSignatureReport>,
+) -> Result<i32> {
+    let mut command = Command::new("curl");
+    command.args([
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "5",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
+        "--header",
+        "content-type: application/json",
+    ]);
+    if let Some(signature) = signature {
+        for header in signature.curl_headers() {
+            command.args(["--header", &header]);
+        }
+    }
+    let mut child = command
+        .args(["--request", "POST", "--data-binary", "@-", url])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -491,7 +529,7 @@ fn post_approval_json(url: &str, request: &ApprovalRequest) -> Result<i32> {
         .stdin
         .take()
         .context("opening curl stdin")?
-        .write_all(serde_json::to_string(&payload)?.as_bytes())?;
+        .write_all(body)?;
     let output = child.wait_with_output()?;
     if !output.status.success() {
         anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());

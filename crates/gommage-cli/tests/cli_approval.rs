@@ -41,7 +41,7 @@ fn fake_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBu
     let script = bin.join("curl");
     fs::write(
         &script,
-        "#!/bin/sh\ncat > \"$GOMMAGE_FAKE_CURL_CAPTURE\"\nprintf 202\n",
+        "#!/bin/sh\nif [ -n \"${GOMMAGE_FAKE_CURL_ARGS:-}\" ]; then printf '%s\n' \"$@\" > \"$GOMMAGE_FAKE_CURL_ARGS\"; fi\ncat > \"$GOMMAGE_FAKE_CURL_CAPTURE\"\nprintf 202\n",
     )
     .unwrap();
     let mut perms = fs::metadata(&script).unwrap().permissions();
@@ -329,6 +329,62 @@ fn approval_webhook_dry_run_json_includes_provider_payloads() {
 }
 
 #[test]
+fn approval_webhook_dry_run_json_includes_signature_metadata() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+
+    let output = gommage(&home)
+        .args([
+            "approval",
+            "webhook",
+            "--url",
+            "https://approval.example.invalid/hook",
+            "--dry-run",
+            "--json",
+            "--signing-secret",
+            "test-secret",
+            "--signing-key-id",
+            "local-test",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let request = &report["requests"][0];
+    assert_eq!(
+        request["signature"]["algorithm"].as_str(),
+        Some("hmac-sha256")
+    );
+    assert_eq!(request["signature"]["key_id"].as_str(), Some("local-test"));
+    assert!(
+        request["signature"]["signature"]
+            .as_str()
+            .unwrap()
+            .starts_with("v1=")
+    );
+    assert!(
+        request["body"]
+            .as_str()
+            .unwrap()
+            .contains("gommage_approval_request")
+    );
+    let headers = request["signature"]["headers"].as_array().unwrap();
+    assert!(headers.iter().any(|header| {
+        header["name"].as_str() == Some("x-gommage-signature")
+            && header["value"].as_str().unwrap().starts_with("v1=")
+    }));
+}
+
+#[test]
 #[cfg(unix)]
 fn approval_webhook_posts_pending_payloads_with_curl() {
     let temp = tempdir().unwrap();
@@ -376,6 +432,63 @@ fn approval_webhook_posts_pending_payloads_with_curl() {
     assert!(captured.contains(r#""approve":"gommage approval approve apr_"#));
     let audit = fs::read_to_string(home.join("audit.log")).unwrap();
     assert!(audit.contains(r#""type":"approval_webhook_delivered""#));
+}
+
+#[test]
+#[cfg(unix)]
+fn approval_webhook_posts_signature_headers_and_audits_metadata() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+    let (fake_bin, capture) = fake_curl(&temp);
+    let args_capture = temp.path().join("curl-args.txt");
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = gommage(&home)
+        .env("PATH", path)
+        .env("GOMMAGE_FAKE_CURL_CAPTURE", &capture)
+        .env("GOMMAGE_FAKE_CURL_ARGS", &args_capture)
+        .args([
+            "approval",
+            "webhook",
+            "--url",
+            "https://approval.example.test/hook",
+            "--json",
+            "--signing-secret",
+            "test-secret",
+            "--signing-key-id",
+            "local-test",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["requests"][0]["signature"]["key_id"].as_str(),
+        Some("local-test")
+    );
+    let args = fs::read_to_string(args_capture).unwrap();
+    assert!(args.contains("x-gommage-signature: v1="));
+    assert!(args.contains("x-gommage-signature-key-id: local-test"));
+    let body = fs::read_to_string(capture).unwrap();
+    assert!(body.contains(r#""kind":"gommage_approval_request""#));
+    let audit = fs::read_to_string(home.join("audit.log")).unwrap();
+    assert!(audit.contains(r#""type":"approval_webhook_delivered""#));
+    assert!(audit.contains(r#""signature_prefix":"v1="#));
+    assert!(audit.contains(r#""key_id":"local-test""#));
 }
 
 #[test]
