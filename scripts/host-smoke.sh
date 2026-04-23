@@ -117,6 +117,9 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="$(CDPATH='' cd -- "$script_dir/.." && pwd)"
+public_fixture="$repo_root/examples/policy-fixtures.yaml"
 if [ -z "$capture_dir" ]; then
   capture_dir="host-smoke-$timestamp"
 fi
@@ -164,6 +167,10 @@ run_capture "quickstart apply without daemon start" "quickstart.txt" \
   gommage_cmd quickstart --agent "$agent" --daemon-no-start \
     --daemon-manager "$daemon_manager" --self-test
 run_capture "verify readiness" "verify.json" gommage_cmd verify --json
+run_capture "public policy fixtures" "policy-fixtures.json" \
+  gommage_cmd policy test "$public_fixture" --json
+run_capture "beta readiness" "beta-check.json" \
+  gommage_cmd beta check --json --policy-test "$public_fixture"
 run_capture "agent status" "agent-status.json" \
   gommage_cmd agent status "$agent" --json
 run_capture "semantic smoke" "smoke.json" gommage_cmd smoke --json

@@ -2,7 +2,7 @@ mod support;
 
 use std::fs;
 
-use support::gommage;
+use support::{gommage, workspace_path};
 use tempfile::tempdir;
 
 #[test]
@@ -127,6 +127,60 @@ cases:
                     .unwrap()
                     .starts_with("policy fixture")
                     && check.get("status").and_then(|value| value.as_str()) == Some("pass")
+            })
+    );
+}
+
+#[test]
+fn beta_check_accepts_public_fixture_library() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let claude_settings = temp.path().join("claude-settings.json");
+    let fixture = workspace_path("examples/policy-fixtures.yaml");
+
+    assert!(
+        gommage(&home)
+            .env("GOMMAGE_CLAUDE_SETTINGS", &claude_settings)
+            .args(["quickstart", "--agent", "claude", "--no-self-test"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &claude_settings)
+        .args([
+            "beta",
+            "check",
+            "--json",
+            "--policy-test",
+            fixture.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert!(
+        report["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| {
+                check["name"].as_str().unwrap().starts_with("policy fixture")
+                    && check["status"].as_str() == Some("pass")
+                    && check["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("7 passed, 0 failed")
             })
     );
 }

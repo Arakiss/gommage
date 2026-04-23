@@ -168,6 +168,8 @@ jobs:
           ./target/debug/gommage init
           ./target/debug/gommage policy init --stdlib
           ./target/debug/gommage policy check
+      - name: Verify public policy fixture library
+        run: GOMMAGE_BIN=./target/debug/gommage sh scripts/check-public-policy-fixtures.sh
 
   deny:
     name: cargo-deny

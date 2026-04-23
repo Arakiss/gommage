@@ -342,7 +342,8 @@ gommage doctor --json
 # Semantic verification. This should pass before trusting the harness.
 gommage smoke --json
 
-# Optional project regression fixtures. Keep these in the repo and run in CI.
+# Public fixture library plus optional repo-specific regression fixtures.
+# Keep these in the repo and run them in CI or host-smoke evidence.
 gommage policy test examples/policy-fixtures.yaml --json
 
 # Optional schema export for editors, agents, and fixture generators.
@@ -553,6 +554,10 @@ cases:
       matched_rule: gate-main-push
 ```
 
+The repository ships `examples/policy-fixtures.yaml` as the public fixture
+library for the canonical stdlib semantics: hard-stop, fail-closed, Git allow
+/ ask-picto / deny, `WebFetch`, and write-like `mcp__*` tools.
+
 Run fixtures with:
 
 ```sh
@@ -563,7 +568,8 @@ gommage policy test examples/policy-fixtures.yaml --json
 Each case reports the tool call, canonical `input_hash`, emitted capabilities,
 matched rule, expected decision, actual decision, and mismatch errors. The
 command exits non-zero when any case fails. The schema export is the stable
-fixture contract for agents, editors, and CI fixture generators.
+fixture contract for agents, editors, CI fixture generators, and the bundled
+host-smoke/beta-readiness loops.
 
 ## Determinism guarantee
 
