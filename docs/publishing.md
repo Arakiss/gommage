@@ -89,19 +89,30 @@ strips path dependencies for crates.io consumers.
 CI and the release workflow enforce that invariant with:
 
 ```sh
-sh scripts/check-workspace-internal-deps.sh
+sh scripts/sync-workspace-internal-deps.sh --check
 ```
+
+Repair stale root pins locally with:
+
+```sh
+sh scripts/sync-workspace-internal-deps.sh
+```
+
+The release workflow also runs this repair step against the generated
+release-please PR branch. That keeps root `[workspace.dependencies]` exact
+version requirements synchronized with crate version bumps before a release PR
+is merged, avoiding stale CLI artifacts after internal crate releases.
+
+Any internal `gommage-*` dependency that points at another workspace crate must
+carry an exact `version = "=<crate version>"` requirement next to its local
+`path`. This keeps release-please version bumps from creating tags whose binary
+builds cannot resolve the workspace.
 
 Publishing readiness is a manual/network gate:
 
 ```sh
 sh scripts/check-crates-publish-readiness.sh
 ```
-
-Any internal `gommage-*` dependency that points at another workspace crate must
-carry an exact `version = "=<crate version>"` requirement next to its local
-`path`. This keeps release-please version bumps from creating tags whose binary
-builds cannot resolve the workspace.
 
 Living release docs are also guarded:
 

@@ -58,6 +58,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage tui --stream` prints a compact live decision/event feed. It reads
   recent events through daemon IPC when the daemon is reachable and falls back
   to the signed audit log for local and CI captures.
+- `scripts/sync-workspace-internal-deps.sh` and release workflow repair
+  automation keep root workspace internal dependency pins synchronized with
+  release-please crate version bumps before release PRs are merged.
 - `gommage tui --snapshot --view approvals` now includes selected-request
   detail, replay commands, and redacted evidence-bundle commands.
 - Interactive `gommage tui --view approvals` now supports TTL and use-count

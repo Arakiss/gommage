@@ -35,8 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Verify internal workspace dependency versions
-        run: sh scripts/check-workspace-internal-deps.sh
+      - name: Verify internal workspace dependency pins
+        run: sh scripts/sync-workspace-internal-deps.sh --check
       - name: Verify living docs avoid pinned release drift
         run: sh scripts/check-doc-release-refs.sh
       - id: release
@@ -49,6 +49,50 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sync generated release PR workspace pins
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_number="$(
+            node <<'NODE'
+          const single = process.env.RELEASE_PR || "";
+          const many = process.env.RELEASE_PRS || "";
+          const prs = [];
+          if (single) prs.push(JSON.parse(single));
+          if (many) prs.push(...JSON.parse(many));
+          const pr = prs.find((item) => item && (item.number || item.id));
+          if (pr?.number) {
+            console.log(pr.number);
+          }
+          NODE
+          )"
+
+          if [[ -z "${pr_number}" ]]; then
+            echo "No release PR number emitted; skipping workspace pin sync."
+            exit 0
+          fi
+
+          gh pr checkout "${pr_number}" --repo "${GITHUB_REPOSITORY}"
+          sh scripts/sync-workspace-internal-deps.sh
+
+          if git diff --quiet -- Cargo.toml; then
+            echo "Release PR workspace dependency pins already synchronized."
+            exit 0
+          fi
+
+          git add Cargo.toml
+          git commit -m "chore: sync workspace dependency pins"
+          git push origin "HEAD:$(git branch --show-current)"
       - name: Mark alpha releases as prereleases
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
