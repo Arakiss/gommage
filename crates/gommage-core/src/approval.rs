@@ -9,11 +9,15 @@ use crate::{Capability, EvalResult, MatchedRule, ToolCall, error::GommageError};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    fmt,
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
 };
-use time::OffsetDateTime;
+use time::{
+    Date, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset,
+    format_description::well_known::Rfc3339,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +40,7 @@ impl ApprovalStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalRequest {
     pub id: String,
+    #[serde(with = "approval_time")]
     pub created_at: OffsetDateTime,
     pub tool: String,
     pub input_hash: String,
@@ -49,6 +54,7 @@ pub struct ApprovalRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalResolution {
     pub request_id: String,
+    #[serde(with = "approval_time")]
     pub resolved_at: OffsetDateTime,
     pub status: ApprovalStatus,
     pub reason: String,
@@ -253,6 +259,73 @@ fn same_request(a: &ApprovalRequest, b: &ApprovalRequest) -> bool {
         && a.policy_version == b.policy_version
 }
 
+mod approval_time {
+    use super::*;
+    use serde::{Deserializer, Serializer, de};
+
+    pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let formatted = value.format(&Rfc3339).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(&formatted)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(ApprovalTimeVisitor)
+    }
+
+    struct ApprovalTimeVisitor;
+
+    impl<'de> de::Visitor<'de> for ApprovalTimeVisitor {
+        type Value = OffsetDateTime;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("an RFC3339 timestamp or legacy time tuple")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            OffsetDateTime::parse(value, &Rfc3339).map_err(E::custom)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let year = next::<i32, _>(&mut seq, "year")?;
+            let ordinal = next::<u16, _>(&mut seq, "ordinal day")?;
+            let hour = next::<u8, _>(&mut seq, "hour")?;
+            let minute = next::<u8, _>(&mut seq, "minute")?;
+            let second = next::<u8, _>(&mut seq, "second")?;
+            let nanosecond = next::<u32, _>(&mut seq, "nanosecond")?;
+            let offset_hour = next::<i8, _>(&mut seq, "offset hour")?;
+            let offset_minute = next::<i8, _>(&mut seq, "offset minute")?;
+            let offset_second = next::<i8, _>(&mut seq, "offset second")?;
+            let date = Date::from_ordinal_date(year, ordinal).map_err(de::Error::custom)?;
+            let time =
+                Time::from_hms_nano(hour, minute, second, nanosecond).map_err(de::Error::custom)?;
+            let offset = UtcOffset::from_hms(offset_hour, offset_minute, offset_second)
+                .map_err(de::Error::custom)?;
+            Ok(PrimitiveDateTime::new(date, time).assume_offset(offset))
+        }
+    }
+
+    fn next<'de, T, A>(seq: &mut A, field: &'static str) -> Result<T, A::Error>
+    where
+        T: Deserialize<'de>,
+        A: de::SeqAccess<'de>,
+    {
+        seq.next_element()?
+            .ok_or_else(|| de::Error::missing_field(field))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,5 +463,38 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn approval_timestamps_serialize_as_rfc3339_and_read_legacy_tuple() {
+        let request = ApprovalRequest {
+            id: "apr_test".to_string(),
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            tool: "Bash".to_string(),
+            input_hash: "sha256:test".to_string(),
+            required_scope: "proc.exec:echo".to_string(),
+            reason: "test".to_string(),
+            capabilities: Vec::new(),
+            matched_rule: None,
+            policy_version: "sha256:test".to_string(),
+        };
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["created_at"].as_str(), Some("1970-01-01T00:00:00Z"));
+
+        let legacy = serde_json::json!({
+            "id": "apr_legacy",
+            "created_at": [2026, 113, 7, 40, 28, 811654143, 0, 0, 0],
+            "tool": "Bash",
+            "input_hash": "sha256:legacy",
+            "required_scope": "proc.exec:echo",
+            "reason": "legacy",
+            "capabilities": [],
+            "matched_rule": null,
+            "policy_version": "sha256:legacy"
+        });
+        let decoded: ApprovalRequest = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.created_at.year(), 2026);
+        assert_eq!(decoded.created_at.ordinal(), 113);
+        assert_eq!(decoded.created_at.nanosecond(), 811_654_143);
     }
 }

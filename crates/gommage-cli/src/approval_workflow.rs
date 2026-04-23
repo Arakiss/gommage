@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
-use time::OffsetDateTime;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::util::path_display;
 
@@ -125,7 +125,7 @@ pub(crate) fn approval_evidence(
     );
     let bundle = EvidenceBundle {
         schema_version: 1,
-        generated_at: OffsetDateTime::now_utc().to_string(),
+        generated_at: format_timestamp(OffsetDateTime::now_utc()),
         redacted: redact,
         home: path_display(&layout.root),
         audit_log: path_display(&layout.audit_log),
@@ -192,7 +192,7 @@ fn generic_payload(request: &ApprovalRequest) -> serde_json::Value {
     serde_json::json!({
         "kind": "gommage_approval_request",
         "id": request.id,
-        "created_at": request.created_at,
+        "created_at": format_timestamp(request.created_at),
         "tool": request.tool,
         "input_hash": request.input_hash,
         "required_scope": request.required_scope,
@@ -245,6 +245,10 @@ fn approval_message(request: &ApprovalRequest) -> String {
         "Gommage approval required: {} for {} ({})",
         request.required_scope, request.tool, request.id
     )
+}
+
+fn format_timestamp(value: OffsetDateTime) -> String {
+    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
 fn replay_conclusion(required_scope: &str, decision: &Decision) -> String {

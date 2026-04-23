@@ -124,6 +124,7 @@ Use these commands for operator triage:
 ```sh
 gommage approval list
 gommage approval list --json
+gommage approval list --status all --json
 gommage approval show <approval-id>
 gommage approval replay <approval-id> --json
 gommage approval evidence <approval-id> --redact --output approval-evidence.json
@@ -135,13 +136,20 @@ gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL" --dry-r
 gommage approval template --provider ntfy
 ```
 
+`approval list` defaults to pending work. Use `--status all` when reviewing
+historical approved or denied requests. JSON list output keeps the nested
+`request` object and also exposes top-level `id`, `created_at`, `tool`, and
+`required_scope` fields for simple `jq` queries.
+
 Approving a request mints an exact-scope picto and writes signed
 `picto_created` plus `approval_resolved` events. Denying a request writes a
 signed `approval_resolved` event with `status: denied`. Webhook delivery is
 best-effort: failures are signed as `approval_webhook_failed`, but never change
-the permission decision. Replay compares the stored request capabilities against
-the current policy; evidence bundles collect request state, relevant signed
-audit lines, verification summary, and next commands for issue reports.
+the permission decision. Dry-run JSON includes the provider-shaped request body
+at `requests[].payload`, so endpoint payloads can be inspected without sending.
+Replay compares the stored request capabilities against the current policy;
+evidence bundles collect request state, relevant signed audit lines,
+verification summary, and next commands for issue reports.
 `gommage tui --snapshot --view approvals` includes selected-request detail and
 the same replay/evidence commands. Bounded watch mode is useful when an operator
 or agent wants to capture the inbox changing without driving the interactive

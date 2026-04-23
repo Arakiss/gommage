@@ -173,6 +173,42 @@ fn agent_uninstall_dry_run_uses_plan_language_without_mutating() {
 }
 
 #[test]
+fn agent_uninstall_codex_leaves_feature_flag_without_gommage_hook() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(hooks.parent().unwrap()).unwrap();
+    fs::write(&hooks, r#"{"PreToolUse":[]}"#).unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\ncodex_hooks = true\n",
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["agent", "uninstall", "codex"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("no Gommage hook found"));
+    assert!(stdout.contains("leaving features.codex_hooks unchanged"));
+    assert!(
+        fs::read_to_string(&config)
+            .unwrap()
+            .contains("codex_hooks = true")
+    );
+}
+
+#[test]
 fn uninstall_all_dry_run_lists_every_surface() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

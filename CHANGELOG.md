@@ -76,6 +76,16 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   a fixed `curl` invocation, and `GOMMAGE_APPROVAL_WEBHOOK_URL` enables
   best-effort hook-time webhook delivery without changing the permission
   decision when delivery fails.
+- `gommage approval webhook --dry-run --json` now includes the shaped provider
+  payload under `requests[].payload`, so generic, Slack, and Discord endpoint
+  payloads can be inspected or piped without sending network traffic.
+- Approval JSON timestamps now serialize as RFC3339/ISO-8601 strings while
+  still reading legacy alpha approval logs that used time tuples.
+- `gommage approval list` now defaults to pending work, supports
+  `--status all` for history, and exposes top-level `id`, `created_at`,
+  `tool`, and `required_scope` fields while preserving the nested `request`.
+- Codex uninstall now leaves `features.codex_hooks` untouched when no Gommage
+  Codex hook was found, avoiding rollback of settings Gommage did not own.
 - `gommage audit-verify --explain` reports signed bypass activity with
   `bypass_activations` and `hard_stop_bypass_attempts`.
 - `gommage uninstall --purge-backups` removes Gommage-created

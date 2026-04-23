@@ -96,9 +96,9 @@ gommage approval template --provider ntfy --json
 
 Evidence to save:
 
-- generic JSON payload shape
-- Slack payload shape
-- Discord payload shape
+- generic JSON payload shape from `requests[].payload`
+- Slack payload shape from `requests[].payload`
+- Discord payload shape from `requests[].payload`
 - ntfy template output
 
 ## 6. Recovery And Uninstall

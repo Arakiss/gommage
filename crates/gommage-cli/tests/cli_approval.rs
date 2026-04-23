@@ -171,6 +171,53 @@ fn approval_deny_removes_request_from_pending_work() {
 }
 
 #[test]
+fn approval_list_defaults_to_pending_and_exposes_top_level_fields() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+    let output = gommage(&home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let pending: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(pending.as_array().unwrap().len(), 1);
+    let request_id = pending[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        pending[0]["request"]["id"].as_str(),
+        Some(request_id.as_str())
+    );
+    let created_at = pending[0]["created_at"].as_str().unwrap();
+    assert!(created_at.contains('T'));
+    assert!(created_at.ends_with('Z'));
+
+    let deny = gommage(&home)
+        .args(["approval", "deny", &request_id])
+        .output()
+        .unwrap();
+    assert!(deny.status.success());
+
+    let output = gommage(&home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    let pending: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(pending.as_array().unwrap().len(), 0);
+
+    let output = gommage(&home)
+        .args(["approval", "list", "--status", "all", "--json"])
+        .output()
+        .unwrap();
+    let all: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(all.as_array().unwrap().len(), 1);
+    assert_eq!(all[0]["status"].as_str(), Some("denied"));
+}
+
+#[test]
 fn resolved_approval_can_be_requested_again() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
@@ -206,6 +253,79 @@ fn resolved_approval_can_be_requested_again() {
     let pending: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(pending.as_array().unwrap().len(), 1);
     assert_ne!(pending[0]["request"]["id"].as_str().unwrap(), original_id);
+}
+
+#[test]
+fn approval_webhook_dry_run_json_includes_provider_payloads() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+
+    let generic = gommage(&home)
+        .args([
+            "approval",
+            "webhook",
+            "--url",
+            "https://approval.example.invalid/hook",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        generic.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generic.stderr)
+    );
+    let generic: serde_json::Value = serde_json::from_slice(&generic.stdout).unwrap();
+    assert_eq!(generic["requests"][0]["status"].as_str(), Some("dry_run"));
+    assert_eq!(
+        generic["requests"][0]["payload"]["kind"].as_str(),
+        Some("gommage_approval_request")
+    );
+    let created_at = generic["requests"][0]["payload"]["created_at"]
+        .as_str()
+        .unwrap();
+    assert!(created_at.contains('T'));
+    assert!(created_at.ends_with('Z'));
+
+    let slack = gommage(&home)
+        .args([
+            "approval",
+            "webhook",
+            "--provider",
+            "slack",
+            "--url",
+            "https://approval.example.invalid/slack",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(slack.status.success());
+    let slack: serde_json::Value = serde_json::from_slice(&slack.stdout).unwrap();
+    assert!(slack["requests"][0]["payload"]["blocks"].is_array());
+
+    let discord = gommage(&home)
+        .args([
+            "approval",
+            "webhook",
+            "--provider",
+            "discord",
+            "--url",
+            "https://approval.example.invalid/discord",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(discord.status.success());
+    let discord: serde_json::Value = serde_json::from_slice(&discord.stdout).unwrap();
+    assert!(discord["requests"][0]["payload"]["embeds"].is_array());
 }
 
 #[test]
