@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.20.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.20.0-alpha.1...gommage-cli-v0.20.1-alpha.1) (2026-04-23)
+
+
+### Bug fixes
+
+* polish approval webhook diagnostics ([fc39ab0](https://github.com/Arakiss/gommage/commit/fc39ab07e0fc03f86df0439fb003d1160fb96c72))
+
 ## [0.20.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.19.0-alpha.1...gommage-cli-v0.20.0-alpha.1) (2026-04-22)
 
 
