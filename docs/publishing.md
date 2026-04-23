@@ -16,6 +16,11 @@ OS and architecture, verifies the Sigstore bundle, verifies the SHA-256
 checksum, and only then extracts `gommage`, `gommage-daemon`, and
 `gommage-mcp` into the install directory.
 
+Treat `gommage-cli-v*` as the product release stream. Internal crate versions
+can differ for semver hygiene, and older alpha history may show per-crate
+GitHub Releases, but the supported installable product is the CLI release that
+carries the signed binary archives.
+
 Useful installer options:
 
 ```sh
@@ -176,6 +181,9 @@ The target state is:
 
 - GitHub Releases remain the primary install path for end users because they
   provide signed, checksum-verified, prebuilt binaries.
+- GitHub Releases should expose the product stream only. Release automation may
+  still bump internal crates in the release PR, but non-CLI workspace
+  components skip GitHub Release publication.
 - crates.io provides `cargo install gommage-cli` for Rust-native users once the
   package gates above pass.
 - Release automation publishes crates only after the binary release, SBOM, and

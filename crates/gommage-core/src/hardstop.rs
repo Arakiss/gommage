@@ -22,28 +22,14 @@ pub const HARD_STOPS: &[(&str, &str)] = &[
     ("hs.fork-bomb", "proc.exec:*:|:&*"),
     ("hs.wipe-disk", "proc.exec:shred /dev/*"),
     ("hs.chmod-system", "proc.exec:chmod -R * /"),
-    // --- Shell-wrapper evasion variants ---
-    // Cover the shape `<wrapper> -c '<destructive>'`. The trailing `*` accepts
-    // the closing quote of the wrapped command. Over-reach is accepted: a
-    // command that legitimately needs `bash -c "rm -rf /<path>"` has better
-    // options (call `rm -rf /<path>` directly, no wrap).
-    ("hs.bash-c-rm-rf-root", "proc.exec:bash -c *rm -rf /*"),
-    ("hs.sh-c-rm-rf-root", "proc.exec:sh -c *rm -rf /*"),
-    ("hs.zsh-c-rm-rf-root", "proc.exec:zsh -c *rm -rf /*"),
-    ("hs.env-rm-rf-root", "proc.exec:env *rm -rf /*"),
-    ("hs.sudo-bash-c-rm-rf", "proc.exec:sudo bash -c *rm -rf /*"),
-    ("hs.sudo-sh-c-rm-rf", "proc.exec:sudo sh -c *rm -rf /*"),
-    ("hs.xargs-rm-rf", "proc.exec:*xargs rm -rf*"),
-    // --- Substring catch-all for newline / compound-command evasion ---
-    // `echo ok; rm -rf /` or `echo ok\n rm -rf /` both surface here as a
-    // capability whose string contains `rm -rf /` anywhere. Same for
-    // `dd if=* of=/dev/*` when prefixed by benign-looking wrappers.
-    // Over-reach: an echo command whose argument literally contains
-    // `rm -rf /` gets caught. Acceptable: agents that want to discuss the
-    // string have better ways (print it character-by-character, encode it).
-    ("hs.rm-rf-root-anywhere", "proc.exec:*rm -rf /*"),
-    ("hs.dd-device-anywhere", "proc.exec:*dd if=* of=/dev/*"),
+    // Compound commands, shell wrappers, `env`/`sudo` prefixes, `xargs`, and
+    // command substitution are handled by the semantic scanner below. Keep glob
+    // entries for single-command shapes only; broad substring globs create
+    // false positives for quoted fixture data.
 ];
+
+const SEMANTIC_RM_RF_ROOT_PATTERN: &str = "proc.exec:<shell-semantic rm -rf absolute>";
+const SEMANTIC_DD_DEVICE_PATTERN: &str = "proc.exec:<shell-semantic dd of=/dev/*>";
 
 fn compiled() -> &'static [(&'static str, GlobMatcher)] {
     static CELL: OnceLock<Vec<(&'static str, GlobMatcher)>> = OnceLock::new();
@@ -89,6 +75,282 @@ pub fn check(caps: &[Capability]) -> Option<HardStopHit> {
                 });
             }
         }
+    }
+    for cap in caps {
+        if cap.namespace() == "proc.exec"
+            && let Some((name, pattern)) = semantic_proc_exec_hit(cap.payload())
+        {
+            return Some(HardStopHit {
+                name,
+                pattern,
+                capability: cap.clone(),
+            });
+        }
+    }
+    None
+}
+
+fn semantic_proc_exec_hit(command: &str) -> Option<(&'static str, &'static str)> {
+    for substitution in command_substitutions(command) {
+        if let Some(hit) = semantic_proc_exec_hit(&substitution) {
+            return Some(hit);
+        }
+    }
+
+    for segment in shell_segments(command) {
+        if let Some(hit) = semantic_segment_hit(&segment) {
+            return Some(hit);
+        }
+    }
+    None
+}
+
+fn semantic_segment_hit(words: &[String]) -> Option<(&'static str, &'static str)> {
+    let words = command_words(words)?;
+    let (cmd, args) = words.split_first()?;
+
+    if matches!(cmd.as_str(), "bash" | "sh" | "zsh")
+        && let Some(script) = shell_c_payload(args)
+    {
+        return semantic_proc_exec_hit(script);
+    }
+
+    if cmd == "xargs" && xargs_invokes_rm_rf(args) {
+        return Some(("hs.xargs-rm-rf", "proc.exec:*xargs rm -rf*"));
+    }
+
+    if cmd == "rm" && rm_rf_absolute(args) {
+        return Some(("hs.rm-rf-root", SEMANTIC_RM_RF_ROOT_PATTERN));
+    }
+
+    if cmd == "dd" && dd_writes_device(args) {
+        return Some(("hs.dd-to-device", SEMANTIC_DD_DEVICE_PATTERN));
+    }
+
+    None
+}
+
+fn command_words(words: &[String]) -> Option<&[String]> {
+    let mut index = 0;
+    while index < words.len() {
+        match words[index].as_str() {
+            "sudo" => {
+                index += 1;
+                while index < words.len() && words[index].starts_with('-') {
+                    if matches!(
+                        words[index].as_str(),
+                        "-u" | "--user" | "-g" | "--group" | "-h" | "--host"
+                    ) {
+                        index += 1;
+                    }
+                    index += 1;
+                }
+            }
+            "env" => {
+                index += 1;
+                while index < words.len()
+                    && (is_assignment(&words[index]) || words[index].starts_with('-'))
+                {
+                    index += 1;
+                }
+            }
+            word if is_assignment(word) => index += 1,
+            _ => break,
+        }
+    }
+    words.get(index..)
+}
+
+fn is_assignment(word: &str) -> bool {
+    let Some((name, _)) = word.split_once('=') else {
+        return false;
+    };
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn shell_c_payload(args: &[String]) -> Option<&str> {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if arg == "-c" {
+            return args.get(index + 1).map(String::as_str);
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return None;
+    }
+    None
+}
+
+fn rm_rf_absolute(args: &[String]) -> bool {
+    let mut recursive = false;
+    let mut force = false;
+    let mut absolute = false;
+
+    for arg in args {
+        if arg == "--" {
+            continue;
+        }
+        if arg == "--recursive" {
+            recursive = true;
+            continue;
+        }
+        if arg == "--force" {
+            force = true;
+            continue;
+        }
+        if let Some(flags) = arg.strip_prefix('-')
+            && !flags.is_empty()
+            && flags.chars().all(|ch| ch.is_ascii_alphabetic())
+        {
+            recursive |= flags.contains('r') || flags.contains('R');
+            force |= flags.contains('f');
+            continue;
+        }
+        absolute |= arg == "/" || arg.starts_with('/');
+    }
+
+    recursive && force && absolute
+}
+
+fn dd_writes_device(args: &[String]) -> bool {
+    args.iter().any(|arg| arg.starts_with("of=/dev/"))
+}
+
+fn xargs_invokes_rm_rf(args: &[String]) -> bool {
+    args.windows(3)
+        .any(|window| window[0] == "rm" && rm_rf_flags(&window[1..]))
+        || args
+            .windows(2)
+            .any(|window| window[0] == "rm" && rm_rf_flags(&window[1..]))
+}
+
+fn rm_rf_flags(args: &[String]) -> bool {
+    let mut recursive = false;
+    let mut force = false;
+    for arg in args {
+        if let Some(flags) = arg.strip_prefix('-') {
+            recursive |= flags.contains('r') || flags.contains('R');
+            force |= flags.contains('f');
+        }
+    }
+    recursive && force
+}
+
+fn shell_segments(command: &str) -> Vec<Vec<String>> {
+    let mut segments = Vec::new();
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut chars = command.chars().peekable();
+    let mut single = false;
+    let mut double = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            '\\' if !single => {
+                if let Some(next) = chars.next() {
+                    word.push(next);
+                }
+            }
+            ';' | '\n' if !single && !double => {
+                push_word(&mut words, &mut word);
+                push_segment(&mut segments, &mut words);
+            }
+            '&' if !single && !double && chars.peek() == Some(&'&') => {
+                chars.next();
+                push_word(&mut words, &mut word);
+                push_segment(&mut segments, &mut words);
+            }
+            '|' if !single && !double => {
+                if chars.peek() == Some(&'|') {
+                    chars.next();
+                }
+                push_word(&mut words, &mut word);
+                push_segment(&mut segments, &mut words);
+            }
+            ch if ch.is_whitespace() && !single && !double => push_word(&mut words, &mut word),
+            _ => word.push(ch),
+        }
+    }
+    push_word(&mut words, &mut word);
+    push_segment(&mut segments, &mut words);
+    segments
+}
+
+fn push_word(words: &mut Vec<String>, word: &mut String) {
+    if !word.is_empty() {
+        words.push(std::mem::take(word));
+    }
+}
+
+fn push_segment(segments: &mut Vec<Vec<String>>, words: &mut Vec<String>) {
+    if !words.is_empty() {
+        segments.push(std::mem::take(words));
+    }
+}
+
+fn command_substitutions(command: &str) -> Vec<String> {
+    let chars = command.char_indices().collect::<Vec<_>>();
+    let mut substitutions = Vec::new();
+    let mut single = false;
+    let mut double = false;
+    let mut index = 0;
+
+    while index < chars.len() {
+        let (_, ch) = chars[index];
+        match ch {
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            '$' if !single && chars.get(index + 1).is_some_and(|(_, next)| *next == '(') => {
+                if let Some((end, content)) = read_command_substitution(command, &chars, index + 2)
+                {
+                    substitutions.push(content);
+                    index = end;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    substitutions
+}
+
+fn read_command_substitution(
+    command: &str,
+    chars: &[(usize, char)],
+    start: usize,
+) -> Option<(usize, String)> {
+    let mut depth = 1usize;
+    let mut single = false;
+    let mut double = false;
+    let content_start = chars.get(start).map_or(command.len(), |(byte, _)| *byte);
+    let mut index = start;
+
+    while index < chars.len() {
+        let (_, ch) = chars[index];
+        match ch {
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            '(' if !single && !double => depth += 1,
+            ')' if !single && !double => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let content_end = chars[index].0;
+                    return Some((index + 1, command[content_start..content_end].to_string()));
+                }
+            }
+            _ => {}
+        }
+        index += 1;
     }
     None
 }
@@ -165,5 +427,55 @@ mod tests {
         // caught by the wrapper hardstops.
         let caps = vec![Capability::new("proc.exec:bash -c 'ls -la /tmp'")];
         assert!(check(&caps).is_none());
+    }
+
+    #[test]
+    fn quoted_fixture_data_is_not_hardstopped() {
+        let caps = vec![Capability::new(
+            r#"proc.exec:echo '{"tool_input":{"command":"rm -rf /"}}' | gommage-mcp"#,
+        )];
+        assert!(check(&caps).is_none());
+    }
+
+    #[test]
+    fn bash_c_echoing_fixture_data_is_not_hardstopped() {
+        let caps = vec![Capability::new(
+            r#"proc.exec:bash -c 'echo {"command":"rm -rf /"}'"#,
+        )];
+        assert!(check(&caps).is_none());
+    }
+
+    #[test]
+    fn compound_rm_rf_root_is_caught() {
+        let caps = vec![Capability::new("proc.exec:echo ok; rm -rf /")];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn newline_rm_rf_root_is_caught() {
+        let caps = vec![Capability::new("proc.exec:echo ok\nrm -rf /")];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn command_substitution_rm_rf_root_is_caught() {
+        let caps = vec![Capability::new(r#"proc.exec:echo "$(rm -rf /)""#)];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
+    fn quoted_dd_fixture_data_is_not_hardstopped() {
+        let caps = vec![Capability::new(
+            r#"proc.exec:echo '{"command":"dd if=/dev/zero of=/dev/sda"}'"#,
+        )];
+        assert!(check(&caps).is_none());
+    }
+
+    #[test]
+    fn compound_dd_to_device_is_caught() {
+        let caps = vec![Capability::new(
+            "proc.exec:printf ok; dd if=/dev/zero of=/dev/sda",
+        )];
+        assert!(check(&caps).is_some());
     }
 }

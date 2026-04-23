@@ -211,10 +211,26 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   CI and release-please, so living README/docs/script/skill examples use
   `latest` or placeholder tags instead of stale concrete alpha release tags.
 
+### Fixed
+
+- Hard-stop matching for shell commands now uses semantic command segments for
+  destructive `rm -rf`/`dd` shapes instead of broad raw-line substring globs,
+  so quoted fixture data such as `echo '{"command":"rm -rf /"}'` no longer
+  blocks the agent while real direct, wrapped, compound, and substitution
+  executions still hard-stop.
+- Webhook signing documentation now states the exact canonical string:
+  `timestamp + "." + raw_http_body`, matching the HMAC-SHA256 implementation
+  and dry-run signature metadata.
+
 ### Changed
 
 - README agent guidance now uses short command blocks and stable contract
   tables instead of an oversized all-in-one command block.
+- Release automation now treats `gommage-cli-v*` as the only user-facing
+  GitHub Release stream. Internal workspace crates still version through
+  release-please, but skip GitHub Release publication so the Releases page does
+  not present `gommage-mcp`, `gommage-daemon`, or other components as separate
+  products.
 - `gommage verify` human output now includes a header, top-level status, home,
   pre-init hints, and next actions while preserving the existing section lines
   and leaving `verify --json` unchanged.
