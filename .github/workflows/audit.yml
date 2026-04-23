@@ -28,6 +28,13 @@ on:
       - '**/Cargo.lock'
       - '**/audit.toml'
       - '.github/workflows/audit.yml'
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/audit.toml'
+      - '.github/workflows/audit.yml'
   schedule:
     # Daily at 06:00 UTC — after the typical RustSec publish window and
     # before European working hours, so any issue filed here is visible by
@@ -42,6 +49,7 @@ jobs:
   audit:
     name: cargo-audit
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     permissions:
       contents: read
       # Needed so the action can open / update an issue when a new advisory
@@ -49,6 +57,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
       - uses: actions-rust-lang/audit@v1
         with:
           # Do NOT use the `ignore` input here — suppressing an advisory is a
