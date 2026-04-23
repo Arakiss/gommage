@@ -133,8 +133,11 @@ gommage approval replay <approval-id> --json
 gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 gommage approval deny <approval-id> --reason "not enough context"
+gommage approval dlq --json
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
+  --attempts 3 \
+  --backoff-ms 250 \
   --signing-secret "$GOMMAGE_APPROVAL_WEBHOOK_SECRET" \
   --signing-key-id "operator-prod"
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL" --dry-run
@@ -149,13 +152,16 @@ historical approved or denied requests. JSON list output keeps the nested
 
 Approving a request mints an exact-scope picto and writes signed
 `picto_created` plus `approval_resolved` events. Denying a request writes a
-signed `approval_resolved` event with `status: denied`. Webhook delivery is
-best-effort: failures are signed as `approval_webhook_failed`, but never change
-the permission decision. Dry-run JSON includes the provider-shaped request body
-at `requests[].payload`, so endpoint payloads can be inspected without sending.
-When `--signing-secret` or `GOMMAGE_APPROVAL_WEBHOOK_SECRET` is set, Gommage
-also includes `requests[].body` and `requests[].signature` in dry-run JSON and
-sends `x-gommage-signature-*` headers on real delivery. The signature is
+signed `approval_resolved` event with `status: denied`. Webhook delivery uses
+bounded retries; exhausted failures are written to
+`~/.gommage/approval-webhook-dlq.jsonl`, exposed through `approval dlq`, and
+signed in audit as `approval_webhook_failed` plus
+`approval_webhook_dead_lettered`. Dry-run JSON includes the provider-shaped
+request body at `requests[].payload`, so endpoint payloads can be inspected
+without sending. When `--signing-secret` or
+`GOMMAGE_APPROVAL_WEBHOOK_SECRET` is set, Gommage also includes
+`requests[].body` and `requests[].signature` in dry-run JSON and sends
+`x-gommage-signature-*` headers on real delivery. The signature is
 `HMAC-SHA256(secret, timestamp + "." + raw_http_body)` and covers the exact
 bytes sent to the receiver. Audit events store only non-secret signature
 metadata: algorithm, optional key id, timestamp, body SHA-256, and a signature

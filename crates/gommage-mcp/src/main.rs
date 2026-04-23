@@ -11,17 +11,18 @@
 use anyhow::{Context, Result};
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    ApprovalRequest, Capability, CapabilityMapper, Decision, EvalResult, MatchedRule, PictoConsume,
-    PictoLookup, ToolCall, evaluate, hardstop,
+    ApprovalRequest, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
+    ApprovalWebhookSource, Capability, CapabilityMapper, Decision, EvalResult, MatchedRule,
+    PictoConsume, PictoLookup, ToolCall, approval_webhook_generic_payload,
+    deliver_prepared_approval_webhook, evaluate, hardstop, prepare_approval_webhook,
     runtime::{HomeLayout, Runtime},
-    webhook_signature::{WebhookSignatureReport, sign_webhook_body},
+    webhook_signature::WebhookSignatureReport,
 };
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
     env,
     io::{self, Read, Write},
-    process::{Command, Stdio},
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -372,7 +373,7 @@ fn decide_in_process_and_audit(
                     reason: request.reason.clone(),
                     policy_version: request.policy_version.clone(),
                 });
-                if let Some(event) = notify_approval_webhook_best_effort(&request) {
+                for event in notify_approval_webhook_best_effort(&request) {
                     events.push(event);
                 }
                 eval.decision = Decision::AskPicto {
@@ -426,60 +427,82 @@ fn approval_reason(reason: &str, request_id: &str) -> String {
     )
 }
 
-fn notify_approval_webhook_best_effort(request: &ApprovalRequest) -> Option<AuditEvent> {
+fn notify_approval_webhook_best_effort(request: &ApprovalRequest) -> Vec<AuditEvent> {
     let Ok(url) = env::var("GOMMAGE_APPROVAL_WEBHOOK_URL") else {
-        return None;
+        return Vec::new();
     };
     if url.trim().is_empty() {
-        return None;
+        return Vec::new();
     }
-    let payload = approval_payload(request);
-    let Ok(body) = serde_json::to_vec(&payload) else {
-        return None;
+    let payload = approval_webhook_generic_payload(request);
+    let Ok(prepared) = prepare_approval_webhook(
+        payload,
+        env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET").ok().as_deref(),
+        env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET_ID")
+            .ok()
+            .as_deref(),
+    ) else {
+        return Vec::new();
     };
-    let signature = webhook_signature_from_env(&body);
-    Some(match post_approval_json(&url, &body, signature.as_ref()) {
-        Ok(status) => AuditEvent::ApprovalWebhookDelivered {
-            id: request.id.clone(),
-            url,
-            status: Some(status),
-            signature: signature.as_ref().map(signature_audit_summary),
-        },
-        Err(error) => AuditEvent::ApprovalWebhookFailed {
+    let layout = HomeLayout::default();
+    let settings = ApprovalWebhookDeliverySettings::from_env();
+    match deliver_prepared_approval_webhook(
+        &layout,
+        request,
+        ApprovalWebhookSource::McpFallback,
+        "generic",
+        &url,
+        &prepared,
+        &settings,
+    ) {
+        Ok(outcome) if outcome.kind == ApprovalWebhookDeliveryKind::Delivered => {
+            vec![AuditEvent::ApprovalWebhookDelivered {
+                id: request.id.clone(),
+                url,
+                status: outcome.http_status,
+                attempts: outcome.attempts,
+                source: ApprovalWebhookSource::McpFallback.as_str().to_string(),
+                signature: outcome.signature.as_ref().map(signature_audit_summary),
+            }]
+        }
+        Ok(outcome) => {
+            let error = outcome
+                .error
+                .clone()
+                .unwrap_or_else(|| "webhook delivery failed".to_string());
+            vec![
+                AuditEvent::ApprovalWebhookFailed {
+                    id: request.id.clone(),
+                    url: url.clone(),
+                    error: error.clone(),
+                    attempts: outcome.attempts,
+                    source: ApprovalWebhookSource::McpFallback.as_str().to_string(),
+                    signature: outcome.signature.as_ref().map(signature_audit_summary),
+                },
+                AuditEvent::ApprovalWebhookDeadLettered {
+                    id: request.id.clone(),
+                    url,
+                    dead_letter_id: outcome
+                        .dead_letter_id
+                        .clone()
+                        .unwrap_or_else(|| "<unknown>".to_string()),
+                    provider: "generic".to_string(),
+                    attempts: outcome.attempts,
+                    source: ApprovalWebhookSource::McpFallback.as_str().to_string(),
+                    error,
+                    signature: outcome.signature.as_ref().map(signature_audit_summary),
+                },
+            ]
+        }
+        Err(error) => vec![AuditEvent::ApprovalWebhookFailed {
             id: request.id.clone(),
             url,
             error: error.to_string(),
-            signature: signature.as_ref().map(signature_audit_summary),
-        },
-    })
-}
-
-fn approval_payload(request: &ApprovalRequest) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "gommage_approval_request",
-        "id": request.id,
-        "created_at": request.created_at,
-        "tool": request.tool,
-        "input_hash": request.input_hash,
-        "required_scope": request.required_scope,
-        "reason": request.reason,
-        "capabilities": request.capabilities,
-        "matched_rule": request.matched_rule,
-        "policy_version": request.policy_version,
-        "commands": {
-            "approve": format!("gommage approval approve {}", request.id),
-            "deny": format!("gommage approval deny {}", request.id)
-        }
-    })
-}
-
-fn webhook_signature_from_env(body: &[u8]) -> Option<WebhookSignatureReport> {
-    let secret = env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET").ok()?;
-    if secret.trim().is_empty() {
-        return None;
+            attempts: settings.attempts,
+            source: ApprovalWebhookSource::McpFallback.as_str().to_string(),
+            signature: prepared.signature.as_ref().map(signature_audit_summary),
+        }],
     }
-    let key_id = env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET_ID").ok();
-    Some(sign_webhook_body(body, &secret, key_id.as_deref()))
 }
 
 fn signature_audit_summary(
@@ -492,52 +515,6 @@ fn signature_audit_summary(
         body_sha256: signature.body_sha256.clone(),
         signature_prefix: signature.signature.chars().take(18).collect(),
     }
-}
-
-fn post_approval_json(
-    url: &str,
-    body: &[u8],
-    signature: Option<&WebhookSignatureReport>,
-) -> Result<i32> {
-    let mut command = Command::new("curl");
-    command.args([
-        "--fail",
-        "--silent",
-        "--show-error",
-        "--max-time",
-        "5",
-        "--output",
-        "/dev/null",
-        "--write-out",
-        "%{http_code}",
-        "--header",
-        "content-type: application/json",
-    ]);
-    if let Some(signature) = signature {
-        for header in signature.curl_headers() {
-            command.args(["--header", &header]);
-        }
-    }
-    let mut child = command
-        .args(["--request", "POST", "--data-binary", "@-", url])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("starting curl for approval webhook delivery")?;
-    child
-        .stdin
-        .take()
-        .context("opening curl stdin")?
-        .write_all(body)?;
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
-        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<i32>()
-        .unwrap_or(0))
 }
 
 #[cfg(test)]

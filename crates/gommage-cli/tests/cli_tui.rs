@@ -21,6 +21,23 @@ fn run_mcp(home: &std::path::Path, payload: &[u8]) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[cfg(unix)]
+fn failing_curl(temp: &tempfile::TempDir) -> std::path::PathBuf {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let bin = temp.path().join("bin-fail");
+    fs::create_dir_all(&bin).unwrap();
+    let script = bin.join("curl");
+    fs::write(
+        &script,
+        "#!/bin/sh\ncat > /dev/null\nprintf 'curl: (22) simulated failure\\n' >&2\nexit 22\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    bin
+}
+
 #[test]
 fn tui_snapshot_is_plain_and_actionable_preinit() {
     let temp = tempdir().unwrap();
@@ -260,6 +277,58 @@ fn tui_snapshot_view_all_includes_operator_sections() {
     assert!(stdout.contains("onboarding:"));
     assert!(stdout.contains("- safe first minute:"));
     assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+#[cfg(unix)]
+fn tui_snapshot_view_all_mentions_webhook_dead_letters() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let bin = failing_curl(&temp);
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let _ = run_mcp(
+        &home,
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#,
+    );
+    let dead_letter = gommage(&home)
+        .env("PATH", path)
+        .args([
+            "approval",
+            "webhook",
+            "--url",
+            "https://approval.example.test/hook",
+            "--json",
+            "--attempts",
+            "2",
+            "--backoff-ms",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(!dead_letter.status.success());
+
+    let snapshot = gommage(&home)
+        .args(["tui", "--snapshot", "--view", "all"])
+        .output()
+        .unwrap();
+
+    assert!(snapshot.status.success());
+    let stdout = String::from_utf8(snapshot.stdout).unwrap();
+    assert!(stdout.contains("webhook dead letters: 1"));
+    assert!(stdout.contains("gommage approval dlq --json"));
 }
 
 #[test]

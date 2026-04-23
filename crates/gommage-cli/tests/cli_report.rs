@@ -81,6 +81,25 @@ fn report_bundle_writes_redacted_support_json() {
     );
     assert_eq!(
         report
+            .pointer("/approvals/requests_total")
+            .and_then(|v| v.as_u64()),
+        Some(0)
+    );
+    assert_eq!(
+        report
+            .pointer("/approvals/webhook_dead_letters")
+            .and_then(|v| v.as_u64()),
+        Some(0)
+    );
+    assert!(
+        report
+            .pointer("/home/approval_webhook_dlq")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .contains(".gommage")
+    );
+    assert_eq!(
+        report
             .pointer("/inventory/policies/files")
             .and_then(|v| v.as_array())
             .unwrap()

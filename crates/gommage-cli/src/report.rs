@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
-use gommage_core::runtime::HomeLayout;
+use gommage_core::{
+    ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetterStore, runtime::HomeLayout,
+};
 use serde::Serialize;
 use std::{
     env, fs,
@@ -101,10 +103,13 @@ fn build_report_bundle(layout: &HomeLayout, redacted: bool) -> Result<ReportBund
             root: path_display(&layout.root),
             policy_dir: path_display(&layout.policy_dir),
             capabilities_dir: path_display(&layout.capabilities_dir),
+            approvals_log: path_display(&layout.approvals_log),
+            approval_webhook_dlq: path_display(&layout.approval_webhook_dlq),
             key_file: path_display(&layout.key_file),
             audit_log: path_display(&layout.audit_log),
             socket: path_display(&layout.socket),
         },
+        approvals: approval_bundle(layout),
         environment: environment_hints(),
         inventory: InventoryBundle {
             policies: directory_inventory(&layout.policy_dir),
@@ -128,6 +133,7 @@ struct ReportBundle {
     cli: CliBundle,
     host: HostBundle,
     home: HomeBundle,
+    approvals: ApprovalBundle,
     environment: Vec<EnvHint>,
     inventory: InventoryBundle,
     daemon: Vec<serde_json::Value>,
@@ -153,9 +159,18 @@ struct HomeBundle {
     root: String,
     policy_dir: String,
     capabilities_dir: String,
+    approvals_log: String,
+    approval_webhook_dlq: String,
     key_file: String,
     audit_log: String,
     socket: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalBundle {
+    requests_total: usize,
+    requests_pending: usize,
+    webhook_dead_letters: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -215,6 +230,24 @@ fn environment_hints() -> Vec<EnvHint> {
         value: env::var_os(name).map(|_| "<redacted>"),
     })
     .collect()
+}
+
+fn approval_bundle(layout: &HomeLayout) -> ApprovalBundle {
+    let states = ApprovalStore::open(&layout.approvals_log)
+        .list()
+        .unwrap_or_default();
+    let requests_pending = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Pending)
+        .count();
+    let webhook_dead_letters = ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
+        .count()
+        .unwrap_or(0);
+    ApprovalBundle {
+        requests_total: states.len(),
+        requests_pending,
+        webhook_dead_letters,
+    }
 }
 
 fn directory_inventory(path: &Path) -> DirectoryInventory {

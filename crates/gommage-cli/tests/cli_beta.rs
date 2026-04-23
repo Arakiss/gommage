@@ -169,20 +169,17 @@ fn beta_check_accepts_public_fixture_library() {
         report.get("status").and_then(|value| value.as_str()),
         Some("warn")
     );
-    assert!(
-        report["checks"]
-            .as_array()
+    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
+        check["name"]
+            .as_str()
             .unwrap()
-            .iter()
-            .any(|check| {
-                check["name"].as_str().unwrap().starts_with("policy fixture")
-                    && check["status"].as_str() == Some("pass")
-                    && check["message"]
-                        .as_str()
-                        .unwrap()
-                        .contains("7 passed, 0 failed")
-            })
-    );
+            .starts_with("policy fixture")
+            && check["status"].as_str() == Some("pass")
+            && check["message"]
+                .as_str()
+                .unwrap()
+                .contains("7 passed, 0 failed")
+    }));
 }
 
 #[test]

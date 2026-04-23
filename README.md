@@ -307,6 +307,7 @@ Stable automation contracts:
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
 | `approval evidence <id> --redact` | Export request state, relevant signed audit lines, verification summary, and next commands. |
+| `approval dlq --json` | Inspect dead-lettered approval webhook deliveries after bounded retries are exhausted. |
 | `approval webhook --dry-run --json` | Render generic, Slack, or Discord payloads in `requests[].payload` without sending network traffic. |
 | `approval template --provider <name> --json` | Render generic, Slack, Discord, or ntfy notification payload templates. |
 | `agent uninstall` / `uninstall --dry-run` | Reversible cleanup and recovery. |
@@ -403,7 +404,10 @@ gommage approval approve <approval-id> --ttl 10m --uses 1
 # Or notify humans through generic, Slack, or Discord webhook payloads.
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
+  --attempts 3 \
+  --backoff-ms 250 \
   --signing-secret "$GOMMAGE_APPROVAL_WEBHOOK_SECRET"
+gommage approval dlq --json
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
 gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL"
 gommage approval template --provider ntfy
@@ -590,7 +594,8 @@ execution order.
 - Durable out-of-band approval inbox with exact-scope picto minting, replay
   diagnostics, redacted evidence bundles, and TUI approval resolution
 - Generic approval webhook delivery plus Slack/Discord-shaped payloads through
-  `gommage approval webhook`, with optional HMAC-SHA256 signatures over the
+  `gommage approval webhook`, with bounded retries, dead-letter inspection via
+  `gommage approval dlq`, and optional HMAC-SHA256 signatures over the
   canonical string `<timestamp>.<exact HTTP body>` via `--signing-secret` or
   `GOMMAGE_APPROVAL_WEBHOOK_SECRET`
 - Append-only signed audit log
