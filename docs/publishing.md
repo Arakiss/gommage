@@ -103,6 +103,12 @@ release-please PR branch. That keeps root `[workspace.dependencies]` exact
 version requirements synchronized with crate version bumps before a release PR
 is merged, avoiding stale CLI artifacts after internal crate releases.
 
+After release-please creates or updates a release PR, the release workflow also
+dispatches `ci.yml` against the release PR branch. This avoids the previous
+manual "empty commit" workaround for required checks: the PR branch is tested
+after any automated workspace-pin repair, and maintainers can merge the release
+PR only after the same CI contract has run on the exact generated branch.
+
 Any internal `gommage-*` dependency that points at another workspace crate must
 carry an exact `version = "=<crate version>"` requirement next to its local
 `path`. This keeps release-please version bumps from creating tags whose binary

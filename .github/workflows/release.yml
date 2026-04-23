@@ -93,6 +93,54 @@ jobs:
           git add Cargo.toml
           git commit -m "chore: sync workspace dependency pins"
           git push origin "HEAD:$(git branch --show-current)"
+      - name: Trigger CI for generated release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_info="$(
+            node <<'NODE'
+          const single = process.env.RELEASE_PR || "";
+          const many = process.env.RELEASE_PRS || "";
+          const prs = [];
+          if (single) prs.push(JSON.parse(single));
+          if (many) prs.push(...JSON.parse(many));
+          const pr = prs.find((item) => item && (item.number || item.id));
+          if (!pr) {
+            process.exit(0);
+          }
+          const branch = pr.headRefName
+            || pr.headBranchName
+            || pr.branch
+            || pr.head?.ref
+            || "";
+          console.log(`${pr.number || ""}\t${branch}`);
+          NODE
+          )"
+
+          if [[ -z "${pr_info}" ]]; then
+            echo "No release PR metadata emitted; skipping CI dispatch."
+            exit 0
+          fi
+
+          pr_number="${pr_info%%$'\t'*}"
+          pr_branch="${pr_info#*$'\t'}"
+          if [[ -z "${pr_branch}" && -n "${pr_number}" ]]; then
+            pr_branch="$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json headRefName --jq .headRefName)"
+          fi
+
+          if [[ -z "${pr_branch}" ]]; then
+            echo "::warning::Release PR branch could not be resolved; skipping CI dispatch."
+            exit 0
+          fi
+
+          echo "Dispatching ci.yml for release PR branch ${pr_branch}"
+          gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
       - name: Mark alpha releases as prereleases
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
