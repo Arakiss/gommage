@@ -16,6 +16,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage beta check` provides a single beta-readiness gate that aggregates
   doctor, smoke, agent integration status, optional policy fixtures, operator
   dashboard availability, and actionable next steps for host test loops.
+- Release automation now dispatches `ci.yml` for generated release-please PR
+  branches after workspace dependency pin repair, eliminating the manual empty
+  commit workaround for required release PR checks.
 - `docs/beta-readiness.md` and a beta-readiness issue template for tracking
   launch blockers with command, workflow, release, and documentation evidence.
 - `docs/roadmap.md` with the beta-to-v1 product sequence covering dry-run
