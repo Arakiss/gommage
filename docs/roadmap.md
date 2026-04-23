@@ -122,8 +122,8 @@ Features:
 - Approval provider interface
   - Generic, Slack-shaped, and Discord-shaped webhook payloads now exist through
     `gommage approval webhook`, including payloads in dry-run JSON and optional
-    HMAC-SHA256 signatures over the exact HTTP body. Next step is native
-    provider callbacks and native ntfy provider support.
+    HMAC-SHA256 signatures over `<timestamp>.<exact HTTP body>`. Next step is
+    native provider callbacks and native ntfy provider support.
 - Metrics endpoint
   - Local counters for decisions, denials, asks, picto outcomes, audit anomalies,
     and daemon health.

@@ -21,12 +21,35 @@
     { "type": "test",     "section": "Tests", "hidden": true }
   ],
   "packages": {
-    "crates/gommage-stdlib": { "component": "gommage-stdlib", "package-name": "gommage-stdlib" },
-    "crates/gommage-core":   { "component": "gommage-core",   "package-name": "gommage-core" },
-    "crates/gommage-audit":  { "component": "gommage-audit",  "package-name": "gommage-audit" },
-    "crates/gommage-cli":    { "component": "gommage-cli",    "package-name": "gommage-cli" },
-    "crates/gommage-daemon": { "component": "gommage-daemon", "package-name": "gommage-daemon" },
-    "crates/gommage-mcp":    { "component": "gommage-mcp",    "package-name": "gommage-mcp" }
+    "crates/gommage-stdlib": {
+      "component": "gommage-stdlib",
+      "package-name": "gommage-stdlib",
+      "skip-github-release": true
+    },
+    "crates/gommage-core": {
+      "component": "gommage-core",
+      "package-name": "gommage-core",
+      "skip-github-release": true
+    },
+    "crates/gommage-audit": {
+      "component": "gommage-audit",
+      "package-name": "gommage-audit",
+      "skip-github-release": true
+    },
+    "crates/gommage-cli": {
+      "component": "gommage-cli",
+      "package-name": "gommage-cli"
+    },
+    "crates/gommage-daemon": {
+      "component": "gommage-daemon",
+      "package-name": "gommage-daemon",
+      "skip-github-release": true
+    },
+    "crates/gommage-mcp": {
+      "component": "gommage-mcp",
+      "package-name": "gommage-mcp",
+      "skip-github-release": true
+    }
   },
   "plugins": [
     { "type": "cargo-workspace", "merge": true }

@@ -69,9 +69,15 @@ gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
 ```
 
 The generic JSON payload is the stable automation contract. `--signing-secret`
-adds `x-gommage-signature-*` headers over the exact HTTP body; audit events keep
-only non-secret signature metadata for receiver-side correlation. Slack and
-Discord incoming webhook payloads are available as presentation formats:
+adds `x-gommage-signature-*` headers. The signed canonical string is:
+
+```text
+<x-gommage-signature-timestamp> + "." + <exact HTTP body bytes>
+```
+
+The signature value is `v1=<hex HMAC-SHA256>`. Audit events keep only
+non-secret signature metadata for receiver-side correlation. Slack and Discord
+incoming webhook payloads are available as presentation formats:
 
 ```sh
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
@@ -83,6 +89,30 @@ Dry-run JSON includes the shaped request body in `requests[].payload` for each
 pending approval. That makes generic, Slack, and Discord payloads inspectable
 without network delivery, and keeps endpoint tests composable with tools like
 `jq` and `curl`.
+
+Receiver verification must use the timestamp and body exactly as delivered:
+
+```python
+import hashlib
+import hmac
+
+def valid_gommage_signature(secret: str, timestamp: str, body: bytes, signature: str) -> bool:
+    canonical = timestamp.encode() + b"." + body
+    digest = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(f"v1={digest}", signature)
+```
+
+```js
+import crypto from "node:crypto";
+
+export function validGommageSignature(secret, timestamp, body, signature) {
+  const canonical = Buffer.concat([Buffer.from(timestamp), Buffer.from("."), Buffer.from(body)]);
+  const digest = crypto.createHmac("sha256", secret).update(canonical).digest("hex");
+  const expected = Buffer.from(`v1=${digest}`);
+  const received = Buffer.from(signature);
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+}
+```
 
 Slack incoming webhooks accept JSON with `text` and optional `blocks`; Discord
 incoming webhooks accept JSON `content` and optional `embeds`; ntfy JSON

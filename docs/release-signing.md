@@ -30,8 +30,9 @@ for release API and asset downloads.
 
 When `GOMMAGE_VERSION=latest` (the default), the installer resolves the newest
 `gommage-cli-v*` release that contains the platform archive it needs. It does
-not rely on GitHub's repository-level "latest release" pointer, because the
-workspace publishes per-crate releases and only `gommage-cli` carries binary
+not rely on GitHub's repository-level "latest release" pointer. `gommage-cli`
+is the installable product channel; older alpha history may still contain
+internal per-crate release entries, but component crates do not carry binary
 archives.
 
 Manual verification:

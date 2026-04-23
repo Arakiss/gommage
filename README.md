@@ -86,6 +86,13 @@ The alpha distribution has two install surfaces:
   approvals can tune TTL/use-count presets before resolving pending requests,
   and still require an explicit confirmation keystroke before mutating state.
 
+Only `gommage-cli-v*` is a user-facing product release. Older alpha history may
+show per-crate GitHub Releases for internal workspace components such as
+`gommage-mcp` or `gommage-daemon`; those are implementation components, not
+separate products. Current release automation keeps GitHub Releases focused on
+the installable product channel while crate versions may still differ inside
+`gommage --version` for semver hygiene.
+
 <p align="center">
   <img src="docs/assets/tui-dashboard.gif" alt="Animated Gommage operator dashboard TUI demo showing readiness, approvals, policies, audit, capabilities, and recovery views" width="100%" />
 </p>
@@ -578,7 +585,8 @@ execution order.
   diagnostics, redacted evidence bundles, and TUI approval resolution
 - Generic approval webhook delivery plus Slack/Discord-shaped payloads through
   `gommage approval webhook`, with optional HMAC-SHA256 signatures over the
-  exact HTTP body via `--signing-secret` or `GOMMAGE_APPROVAL_WEBHOOK_SECRET`
+  canonical string `<timestamp>.<exact HTTP body>` via `--signing-secret` or
+  `GOMMAGE_APPROVAL_WEBHOOK_SECRET`
 - Append-only signed audit log
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
