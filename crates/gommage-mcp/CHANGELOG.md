@@ -1,5 +1,12 @@
 # Changelog — gommage-mcp
 
+## [0.4.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.4.0-alpha.1...gommage-mcp-v0.4.1-alpha.1) (2026-04-23)
+
+
+### Bug fixes
+
+* harden hard-stop parsing and release framing ([0490dac](https://github.com/Arakiss/gommage/commit/0490dac4ea2acae60ac2ab105a23cc1454484675))
+
 ## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.3.1-alpha.1...gommage-mcp-v0.4.0-alpha.1) (2026-04-23)
 
 
