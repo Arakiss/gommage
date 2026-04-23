@@ -16,6 +16,7 @@ pub(crate) enum TuiView {
     Audit,
     Capabilities,
     Recovery,
+    Onboarding,
     All,
 }
 
@@ -28,11 +29,12 @@ impl TuiView {
             TuiView::Audit => "audit",
             TuiView::Capabilities => "capabilities",
             TuiView::Recovery => "recovery",
+            TuiView::Onboarding => "onboarding",
             TuiView::All => "all",
         }
     }
 
-    pub(crate) fn interactive_views() -> [TuiView; 6] {
+    pub(crate) fn interactive_views() -> [TuiView; 7] {
         [
             TuiView::Dashboard,
             TuiView::Approvals,
@@ -40,6 +42,7 @@ impl TuiView {
             TuiView::Audit,
             TuiView::Capabilities,
             TuiView::Recovery,
+            TuiView::Onboarding,
         ]
     }
 }
@@ -63,6 +66,7 @@ pub(crate) fn build_view_report(layout: &HomeLayout, view: TuiView) -> Result<Vi
         TuiView::Audit => audit_report(layout),
         TuiView::Capabilities => capabilities_report(layout),
         TuiView::Recovery => recovery_report(layout),
+        TuiView::Onboarding => onboarding_report(layout),
     })
 }
 
@@ -326,6 +330,41 @@ fn recovery_report(layout: &HomeLayout) -> ViewReport {
             "gommage agent status claude --json".to_string(),
             "gommage uninstall --all --dry-run".to_string(),
             "GOMMAGE_BYPASS=1 gommage-mcp < hook.json".to_string(),
+        ],
+    }
+}
+
+fn onboarding_report(layout: &HomeLayout) -> ViewReport {
+    let doctor = build_doctor_report(layout);
+    let stage = if doctor.status == crate::doctor::DoctorStatus::Fail {
+        "pre-init or unhealthy"
+    } else if layout.audit_log.exists() {
+        "operational with audit evidence"
+    } else {
+        "initialized, waiting for first audited decision"
+    };
+    let lines = vec![
+        format!("stage: {stage}"),
+        format!("home: {}", path_display(&layout.root)),
+        format!(
+            "doctor: {:?} ({} failure(s), {} warning(s))",
+            doctor.status, doctor.summary.failures, doctor.summary.warnings
+        ),
+        "safe first minute: dry-run setup, install with self-test, run beta gate, capture report"
+            .to_string(),
+        "rollback: uninstall dry-run first; purge home only with explicit --yes".to_string(),
+        "agent rule: keep native Claude/Codex sandboxing enabled during alpha".to_string(),
+        "evidence: beta check JSON, TUI snapshot, report bundle, audit explain".to_string(),
+    ];
+    ViewReport {
+        title: "onboarding".to_string(),
+        lines,
+        next_actions: vec![
+            "gommage quickstart --agent claude --daemon --dry-run --json".to_string(),
+            "gommage quickstart --agent claude --daemon --self-test".to_string(),
+            "gommage beta check --json --policy-test examples/policy-fixtures.yaml".to_string(),
+            "gommage report bundle --redact --output gommage-report.json".to_string(),
+            "gommage uninstall --all --restore-backup --dry-run".to_string(),
         ],
     }
 }

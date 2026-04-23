@@ -61,7 +61,7 @@ pub(crate) fn render_lines(
         "{}  {}",
         paint("Views", UiTone::Gold, true, colors),
         paint(
-            "1 readiness  2 approvals  3 policies  4 audit  5 capabilities  6 recovery",
+            "1 readiness  2 approvals  3 policies  4 audit  5 capabilities  6 recovery  7 onboarding",
             UiTone::Muted,
             false,
             colors

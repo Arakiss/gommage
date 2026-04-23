@@ -384,6 +384,7 @@ fn run_interactive(
                         b'4' => view = TuiView::Audit,
                         b'5' => view = TuiView::Capabilities,
                         b'6' => view = TuiView::Recovery,
+                        b'7' => view = TuiView::Onboarding,
                         b't' if view == TuiView::Approvals => {
                             approval_draft.cycle_ttl(false);
                             notice = Some(format!(
@@ -579,6 +580,7 @@ fn next_actions(rows: &[StatusRow]) -> Vec<String> {
         .any(|row| row.label == "doctor" && row.status == UiStatus::Fail)
     {
         actions.push("gommage quickstart --agent claude --daemon --self-test".to_string());
+        actions.push("gommage beta check --json".to_string());
         actions.push("gommage verify --json".to_string());
         return actions;
     }
@@ -595,6 +597,7 @@ fn next_actions(rows: &[StatusRow]) -> Vec<String> {
     {
         actions.push("gommage smoke --json".to_string());
     }
+    actions.push("gommage beta check --json".to_string());
     actions.push("gommage verify --json".to_string());
     actions.truncate(4);
     actions

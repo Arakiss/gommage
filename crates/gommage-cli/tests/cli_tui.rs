@@ -257,6 +257,33 @@ fn tui_snapshot_view_all_includes_operator_sections() {
     assert!(stdout.contains("- mapper rules:"));
     assert!(stdout.contains("recovery:"));
     assert!(stdout.contains("- pending approvals:"));
+    assert!(stdout.contains("onboarding:"));
+    assert!(stdout.contains("- safe first minute:"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn tui_onboarding_snapshot_guides_first_minute() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home)
+        .args(["tui", "--snapshot", "--view", "onboarding"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("onboarding:"));
+    assert!(stdout.contains("stage: pre-init or unhealthy"));
+    assert!(stdout.contains("safe first minute:"));
+    assert!(stdout.contains("gommage quickstart --agent claude --daemon --dry-run --json"));
+    assert!(stdout.contains("gommage beta check --json --policy-test"));
+    assert!(stdout.contains("gommage uninstall --all --restore-backup --dry-run"));
     assert!(!stdout.contains("\x1b["));
 }
 

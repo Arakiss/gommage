@@ -77,9 +77,10 @@ The alpha distribution has two install surfaces:
 - **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
 - **Operator dashboard**: `gommage tui`, a dependency-free terminal command
   center for humans with readiness, approvals, policies, audit, capabilities,
-  and recovery views. Use `gommage tui --snapshot --view all` for issue reports
-  and non-interactive shells, or `gommage tui --watch --watch-ticks 3` when a
-  headless terminal should show live refreshes. Use `gommage tui --stream` for
+  recovery, and onboarding views. Use `gommage tui --snapshot --view all` for
+  issue reports and non-interactive shells, or
+  `gommage tui --watch --watch-ticks 3` when a headless terminal should show
+  live refreshes. Use `gommage tui --stream` for
   a compact decision/event feed backed by daemon IPC when the daemon is running,
   with signed audit-log fallback for CI and local captures. Interactive
   approvals can tune TTL/use-count presets before resolving pending requests,
@@ -294,6 +295,7 @@ Stable automation contracts:
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
 | `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, with signed audit-log fallback. |
+| `tui --snapshot --view onboarding` | First-minute operator guide with safe setup, beta gate, report, and rollback commands. |
 | `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
@@ -361,6 +363,7 @@ gommage tui --snapshot --view all
 gommage tui --watch --watch-ticks 3 --view approvals
 gommage tui --stream --stream-ticks 5
 gommage tui --view approvals
+gommage tui --snapshot --view onboarding
 
 # Start an expedition (a.k.a. task context)
 gommage expedition start "refactor-auth-middleware"
