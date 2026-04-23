@@ -42,6 +42,7 @@ Evidence to save:
 
 ```sh
 gommage quickstart --agent claude --daemon --self-test
+gommage beta check --json --policy-test examples/policy-fixtures.yaml
 gommage verify --json
 gommage smoke --json
 gommage audit-verify --explain
@@ -52,6 +53,7 @@ gommage tui --stream --stream-ticks 1 --stream-limit 8
 Expected result:
 
 - quickstart either passes or rolls back touched agent config
+- `beta check --json` is `pass` or a documented `warn`
 - `verify --json` is `pass` or a documented `warn`
 - `smoke --json` is `pass`
 - bounded TUI watch prints two plain-text frames and no ANSI escapes

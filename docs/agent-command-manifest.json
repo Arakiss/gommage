@@ -51,6 +51,24 @@
       "argv": ["verify", "--json"]
     },
     {
+      "id": "beta_check_json",
+      "purpose": "Run the beta-readiness gate for local agents and policies.",
+      "stdin_mode": "none",
+      "argv": ["beta", "check", "--json"]
+    },
+    {
+      "id": "beta_check_policy_fixture_json",
+      "purpose": "Run the beta-readiness gate with repository-owned policy fixtures.",
+      "stdin_mode": "none",
+      "argv": [
+        "beta",
+        "check",
+        "--json",
+        "--policy-test",
+        "examples/policy-fixtures.yaml"
+      ]
+    },
+    {
       "id": "verify_policy_fixtures",
       "purpose": "Run repository-owned policy fixtures.",
       "stdin_mode": "none",

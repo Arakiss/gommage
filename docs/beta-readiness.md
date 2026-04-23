@@ -41,6 +41,7 @@ issue:
 | Release assets | 12 CLI release assets: 4 archives, 4 checksums, 4 Sigstore bundles. |
 | Binary introspection | `gommage`, `gommage-daemon`, and `gommage-mcp` all support `--version`. |
 | Home setup | `gommage init` and `gommage policy init --stdlib` succeed in a clean home. |
+| Beta gate | `gommage beta check --json --policy-test examples/policy-fixtures.yaml` exits with `pass` or documented `warn` and includes actionable `next` entries. |
 | Readiness gate | `gommage verify --json` exits with `pass` or documented `warn`. |
 | Quickstart self-test | `gommage quickstart --self-test` reaches the same readiness gate after setup. |
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
