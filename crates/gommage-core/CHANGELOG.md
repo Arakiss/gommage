@@ -3,6 +3,34 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.6.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.5.1-alpha.1...gommage-core-v0.6.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* add agent quickstart setup ([8f84fc0](https://github.com/Arakiss/gommage/commit/8f84fc0c61ffa7f463e14920d487c457bd63932b))
+* add out-of-band approval workflow ([159aa6c](https://github.com/Arakiss/gommage/commit/159aa6c19706ef0a2ea6db92f2407b002fedcf1f))
+* **core:** proptest robustness suite; drop empty fuzz.yml stub ([#12](https://github.com/Arakiss/gommage/issues/12)) ([755af07](https://github.com/Arakiss/gommage/commit/755af07ae07e929fa93b8b0e2a807230098caf57))
+* **hardstop:** adversarial corpus and wrapper-evasion patterns ([#8](https://github.com/Arakiss/gommage/issues/8)) ([8132865](https://github.com/Arakiss/gommage/commit/813286502135dbccd506f61b9642099c3faa19f5))
+* map agent web and mcp tools ([c3601c6](https://github.com/Arakiss/gommage/commit/c3601c6502a35c6e0b7c735998011a892b3ca7d6))
+* sign approval webhook deliveries ([acb4417](https://github.com/Arakiss/gommage/commit/acb4417f2ce4e567485448676547b1e10e3b6382))
+* **stdlib:** package bundled policy assets ([6e91243](https://github.com/Arakiss/gommage/commit/6e912433db6c130725ab5469195469f51b36ad3d))
+
+
+### Bug fixes
+
+* **ci:** actually set explicit version in gommage-core Cargo.toml ([04b2c3e](https://github.com/Arakiss/gommage/commit/04b2c3e5a499c84e4a795db87732ebfce93e7d2c))
+* **deps:** drop version pin on internal workspace crate deps ([#4](https://github.com/Arakiss/gommage/issues/4)) ([17d9fa7](https://github.com/Arakiss/gommage/commit/17d9fa7a0224bf18b28b4232210e77cab5f08f00))
+* enforce auditable trust guarantees ([fef1098](https://github.com/Arakiss/gommage/commit/fef1098ea15b3796c578d9a5a55b20e472d532de))
+* harden hard-stop parsing and release framing ([0490dac](https://github.com/Arakiss/gommage/commit/0490dac4ea2acae60ac2ab105a23cc1454484675))
+* polish approval webhook diagnostics ([fc39ab0](https://github.com/Arakiss/gommage/commit/fc39ab07e0fc03f86df0439fb003d1160fb96c72))
+
+
+### Documentation
+
+* add changelogs and semver/commit policy ([6463288](https://github.com/Arakiss/gommage/commit/6463288e9f22573b57ad78b1b7b0d182733714c6))
+* clarify skill and release hygiene ([d74c16d](https://github.com/Arakiss/gommage/commit/d74c16dbe42ca2a6e17e106364904431f03e0bd9))
+
 ## [0.5.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.5.0-alpha.1...gommage-core-v0.5.1-alpha.1) (2026-04-23)
 
 
