@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use ed25519_dalek::VerifyingKey;
-use gommage_audit::{AuditEvent, AuditWriter};
+use gommage_audit::{AuditEvent, AuditWriter, recent_stream_items};
 use gommage_core::{
     ApprovalRequest, Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
     runtime::{HomeLayout, Runtime},
@@ -55,6 +55,8 @@ enum Request {
     Reload,
     /// Ping.
     Ping,
+    /// Return recent audit stream items for operator dashboards.
+    RecentAudit { limit: Option<usize> },
 }
 
 #[derive(Debug, Serialize)]
@@ -197,6 +199,13 @@ async fn handle_connection(
 async fn handle_request(req: Request, shared: &Arc<Mutex<State>>) -> String {
     match req {
         Request::Ping => ok(&"pong"),
+        Request::RecentAudit { limit } => {
+            let s = shared.lock().await;
+            match recent_stream_items(s.writer.path(), limit.unwrap_or(20).min(100)) {
+                Ok(items) => ok(&items),
+                Err(error) => err(format!("recent audit failed: {error}")),
+            }
+        }
         Request::Reload => {
             let mut s = shared.lock().await;
             match s.rt.reload_policy() {

@@ -56,6 +56,7 @@ gommage doctor
 gommage tui --snapshot --view all
 gommage tui --snapshot --view approvals
 gommage tui --watch --watch-ticks 2 --view approvals
+gommage tui --stream --stream-ticks 1 --stream-limit 8
 gommage verify --json
 gommage doctor --json
 gommage smoke --json
@@ -111,7 +112,7 @@ Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gom
   `scripts/check-agent-command-contracts.sh`.
 - Host validation evidence should use `scripts/host-smoke.sh`; CachyOS and
   other systemd hosts should pass `--daemon-manager systemd`.
-- Agent automation should prefer `gommage quickstart --dry-run --json`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage report bundle --redact --output <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage approval list --json`, `gommage approval list --status all --json`, `gommage approval show <id> --json`, `gommage approval replay <id> --json`, `gommage approval evidence <id> --redact`, `gommage approval webhook --dry-run --json`, `gommage approval template --provider <provider> --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. `approval list` defaults to pending; use `--status all` for history. `approval webhook --dry-run --json` exposes shaped request bodies in `requests[].payload`. Use `gommage tui --snapshot` or bounded `gommage tui --watch --watch-ticks <n>` only when a human-readable operator report is useful; do not parse TUI output as a contract. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot`, `gommage logo`, or interactive `gommage tui`; they are presentation-only. Interactive `gommage tui --view approvals` may adjust TTL/use-count and approve/deny after y/n confirmation, so agents should not drive it programmatically.
+- Agent automation should prefer `gommage quickstart --dry-run --json`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage report bundle --redact --output <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage approval list --json`, `gommage approval list --status all --json`, `gommage approval show <id> --json`, `gommage approval replay <id> --json`, `gommage approval evidence <id> --redact`, `gommage approval webhook --dry-run --json`, `gommage approval template --provider <provider> --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. `approval list` defaults to pending; use `--status all` for history. `approval webhook --dry-run --json` exposes shaped request bodies in `requests[].payload`; signed dry-runs also expose `requests[].body` and `requests[].signature`. Use `gommage tui --snapshot`, bounded `gommage tui --watch --watch-ticks <n>`, or bounded `gommage tui --stream --stream-ticks <n>` only when a human-readable operator report is useful; do not parse TUI output as a stable contract. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot`, `gommage logo`, or interactive `gommage tui`; they are presentation-only. Interactive `gommage tui --view approvals` may adjust TTL/use-count and approve/deny after y/n confirmation, so agents should not drive it programmatically.
 - Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook, imports supported `permissions.deny` entries into `05-claude-import.yaml`, and imports supported `permissions.allow` entries into `90-claude-allow-import.yaml`. Late allow imports preserve the user's native Claude posture while earlier hard-stops, denies, ask rules, and native deny imports still win.
 - Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
@@ -134,6 +135,7 @@ gommage tui --snapshot
 gommage tui --snapshot --view all
 gommage tui --snapshot --view approvals
 gommage tui --watch --watch-ticks 2 --view approvals
+gommage tui --stream --stream-ticks 1 --stream-limit 8
 gommage agent status claude --json
 gommage agent status codex --json
 gommage agent uninstall claude --restore-backup --dry-run
@@ -153,6 +155,7 @@ gommage approval list --status all --json
 gommage approval replay <approval-id> --json
 gommage approval evidence <approval-id> --redact
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json
+gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json --signing-secret "$GOMMAGE_APPROVAL_WEBHOOK_SECRET"
 gommage approval template --provider slack --json
 gommage audit-verify
 gommage audit-verify --explain --format human

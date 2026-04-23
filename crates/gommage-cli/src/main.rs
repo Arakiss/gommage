@@ -29,6 +29,7 @@ mod smoke;
 mod tui;
 mod tui_actions;
 mod tui_render;
+mod tui_stream;
 mod tui_views;
 mod uninstall;
 mod util;
@@ -283,6 +284,15 @@ enum Cmd {
         /// Stop watch mode after this many frames. Implies --watch.
         #[arg(long)]
         watch_ticks: Option<u32>,
+        /// Print a live decision/event stream instead of dashboard snapshots.
+        #[arg(long)]
+        stream: bool,
+        /// Stop stream mode after this many frames. Implies --stream.
+        #[arg(long)]
+        stream_ticks: Option<u32>,
+        /// Number of recent audit events to show per stream frame.
+        #[arg(long, default_value_t = 12)]
+        stream_limit: usize,
         /// Interactive refresh interval in milliseconds.
         #[arg(long, default_value_t = 1500)]
         refresh_ms: u64,
@@ -543,6 +553,9 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             snapshot,
             watch,
             watch_ticks,
+            stream,
+            stream_ticks,
+            stream_limit,
             refresh_ms,
         } => {
             return cmd_tui(
@@ -553,6 +566,9 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     snapshot,
                     watch,
                     watch_ticks,
+                    stream,
+                    stream_ticks,
+                    stream_limit,
                     refresh_ms,
                 },
             );

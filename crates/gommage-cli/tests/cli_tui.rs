@@ -139,6 +139,8 @@ fn tui_help_lists_snapshot_and_refresh_controls() {
     assert!(stdout.contains("--view"));
     assert!(stdout.contains("--watch"));
     assert!(stdout.contains("--watch-ticks"));
+    assert!(stdout.contains("--stream"));
+    assert!(stdout.contains("--stream-ticks"));
     assert!(stdout.contains("--refresh-ms"));
 }
 
@@ -167,6 +169,54 @@ fn tui_watch_ticks_prints_bounded_plain_frames() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert_eq!(stdout.matches("--- gommage tui frame").count(), 2);
     assert_eq!(stdout.matches("Gommage dashboard").count(), 2);
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn tui_stream_ticks_prints_recent_decisions_without_ansi() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let ask = run_mcp(&home, payload);
+    assert_eq!(
+        ask.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("ask")
+    );
+
+    let output = gommage(&home)
+        .args([
+            "tui",
+            "--stream",
+            "--stream-ticks",
+            "1",
+            "--stream-limit",
+            "8",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Gommage live decision stream"));
+    assert!(stdout.contains("source: audit-log"));
+    assert!(stdout.contains("approval requested apr_"));
+    assert!(stdout.contains("mcp__db__write_row"));
+    assert!(stdout.contains("decision ask_picto"));
     assert!(!stdout.contains("\x1b["));
 }
 

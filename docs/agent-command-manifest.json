@@ -114,6 +114,21 @@
       ]
     },
     {
+      "id": "tui_stream_decisions",
+      "purpose": "Capture bounded live decision stream frames without ANSI output.",
+      "stdin_mode": "none",
+      "argv": [
+        "tui",
+        "--stream",
+        "--stream-ticks",
+        "1",
+        "--stream-limit",
+        "8",
+        "--refresh-ms",
+        "250"
+      ]
+    },
+    {
       "id": "approval_list_json",
       "purpose": "Inspect pending out-of-band approval requests.",
       "stdin_mode": "none",

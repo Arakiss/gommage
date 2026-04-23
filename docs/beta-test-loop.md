@@ -46,6 +46,7 @@ gommage verify --json
 gommage smoke --json
 gommage audit-verify --explain
 gommage tui --watch --watch-ticks 2 --view approvals
+gommage tui --stream --stream-ticks 1 --stream-limit 8
 ```
 
 Expected result:
@@ -54,6 +55,7 @@ Expected result:
 - `verify --json` is `pass` or a documented `warn`
 - `smoke --json` is `pass`
 - bounded TUI watch prints two plain-text frames and no ANSI escapes
+- bounded TUI stream prints recent decision/event rows and no ANSI escapes
 
 ## 4. Approval Flow
 
