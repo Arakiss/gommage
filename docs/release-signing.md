@@ -31,10 +31,10 @@ for release API and asset downloads.
 When `GOMMAGE_VERSION=latest` (the default), the installer resolves the newest
 `gommage-cli-v*` release that contains the platform archive it needs. It does
 not rely on GitHub's repository-level "latest release" pointer. `gommage-cli`
-is the installable product channel. Internal crates may have git tags so
-release-please can calculate per-crate changelog boundaries, but new internal
-crate tags should not become public GitHub Releases and do not carry binary
-archives.
+is the installable tag channel, and the public release title should be
+`Gommage vX.Y.Z...`. Internal crates may have git tags so release-please can
+calculate per-crate changelog boundaries, but new internal crate tags should
+not become public GitHub Releases and do not carry binary archives.
 
 Manual verification:
 

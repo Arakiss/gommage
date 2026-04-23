@@ -16,10 +16,11 @@ OS and architecture, verifies the Sigstore bundle, verifies the SHA-256
 checksum, and only then extracts `gommage`, `gommage-daemon`, and
 `gommage-mcp` into the install directory.
 
-Treat `gommage-cli-v*` as the product release stream. Internal crate versions
-can differ for semver hygiene, and older alpha history may show per-crate
-GitHub Releases, but new public GitHub Releases should only be created for the
-CLI release that carries the signed binary archives.
+Treat `gommage-cli-v*` as the product release tag stream. The public GitHub
+Release title should read `Gommage vX.Y.Z...` because users install the product,
+not a workspace component. Internal crate versions can differ for semver
+hygiene, but new public GitHub Releases should only be created for the CLI tag
+that carries the signed binary archives.
 
 Useful installer options:
 
