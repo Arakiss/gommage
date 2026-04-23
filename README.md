@@ -563,7 +563,7 @@ execution order.
 - Capability mapping inspector for policy-authoring and mapper-debugging loops
 - Packaged `gommage-stdlib` crate assets for future crates.io support
 - Sigstore-signed binary release artifacts + installer verification
-- Determinism-critical deps pinned with `=x.y.z`, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
+- Determinism-critical deps pinned with `=x.y.z`, root workspace internal pins auto-synchronized for release PRs, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
 
 **v1.0** — hackable by others
 - Dry-run quickstart planning, redacted support bundles, and a host E2E smoke

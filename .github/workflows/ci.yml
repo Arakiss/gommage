@@ -130,8 +130,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Verify internal workspace dependency versions
-        run: sh scripts/check-workspace-internal-deps.sh
+      - name: Verify internal workspace dependency pins
+        run: sh scripts/sync-workspace-internal-deps.sh --check
       - name: Verify living docs avoid pinned release drift
         run: sh scripts/check-doc-release-refs.sh
       - name: Verify installer release resolution
