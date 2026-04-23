@@ -15,10 +15,12 @@ selects operator views. `--view all` is the most useful issue-report snapshot:
 it includes readiness, pending approvals, policy inventory, signed audit
 summary, mapper inventory, and recovery shortcuts. `gommage tui --watch` prints
 the same report repeatedly as plain text; use `--watch-ticks <n>` to bound demos,
-CI artifacts, and issue-report captures. Interactive mode switches views with
-`1`-`6`. In the approvals view, `t/T` changes the TTL preset, `u/U` changes the
-use-count preset, and `A` / `D` stage an approve/deny action for the selected
-request. `y` is still required before mutating state.
+CI artifacts, and issue-report captures. `gommage tui --stream` prints a compact
+live decision/event feed using daemon IPC when the daemon is reachable and the
+signed audit log otherwise. Interactive mode switches views with `1`-`6`. In the
+approvals view, `t/T` changes the TTL preset, `u/U` changes the use-count preset,
+and `A` / `D` stage an approve/deny action for the selected request. `y` is
+still required before mutating state.
 The README embeds a sanitized animated demo at `docs/assets/tui-dashboard.gif`
 and keeps `docs/assets/tui-dashboard.svg` as a static fallback; update both
 assets whenever the TUI's primary sections or vocabulary change.
@@ -62,6 +64,7 @@ Run the aggregated gate with:
 gommage tui
 gommage tui --snapshot --view all
 gommage tui --watch --watch-ticks 3 --view approvals
+gommage tui --stream --stream-ticks 5
 gommage verify --json
 gommage verify --json --policy-test examples/policy-fixtures.yaml
 ```

@@ -15,6 +15,7 @@ use crate::{
     smoke::{SmokeStatus, build_smoke_report},
     tui_actions::{ApprovalDraft, PendingTuiAction, execute_tui_action},
     tui_render::{RenderState, render_lines},
+    tui_stream::print_stream,
     tui_views::{TuiView, build_view_report, pending_approval_ids},
     util::path_display,
 };
@@ -26,6 +27,9 @@ pub(crate) struct TuiOptions {
     pub(crate) snapshot: bool,
     pub(crate) watch: bool,
     pub(crate) watch_ticks: Option<u32>,
+    pub(crate) stream: bool,
+    pub(crate) stream_ticks: Option<u32>,
+    pub(crate) stream_limit: usize,
     pub(crate) refresh_ms: u64,
 }
 
@@ -57,6 +61,15 @@ pub(crate) struct DashboardSummary {
 
 pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCode> {
     let agents = normalize_agents(options.agents);
+    if options.stream || options.stream_ticks.is_some() {
+        print_stream(
+            &layout,
+            Duration::from_millis(options.refresh_ms),
+            options.stream_ticks,
+            options.stream_limit,
+        )?;
+        return Ok(ExitCode::SUCCESS);
+    }
     if options.watch || options.watch_ticks.is_some() {
         print_watch(
             &layout,

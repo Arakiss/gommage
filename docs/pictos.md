@@ -45,6 +45,7 @@ The operator TUI exposes the same inbox:
 gommage tui --view approvals
 gommage tui --snapshot --view approvals
 gommage tui --watch --watch-ticks 3 --view approvals
+gommage tui --stream --stream-ticks 5
 ```
 
 Interactive TUI approval is intentionally two-step. Operators can use `t/T` to
@@ -63,11 +64,14 @@ commands.
 Generic webhook delivery is available without changing the decision path:
 
 ```sh
-gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL"
+gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
+  --signing-secret "$GOMMAGE_APPROVAL_WEBHOOK_SECRET"
 ```
 
-The generic JSON payload is the stable automation contract. Slack and Discord
-incoming webhook payloads are available as presentation formats:
+The generic JSON payload is the stable automation contract. `--signing-secret`
+adds `x-gommage-signature-*` headers over the exact HTTP body; audit events keep
+only non-secret signature metadata for receiver-side correlation. Slack and
+Discord incoming webhook payloads are available as presentation formats:
 
 ```sh
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
@@ -141,5 +145,7 @@ Any secret-equivalent artifact with an unbounded lifetime eventually becomes a s
 Picto lifecycle events that mutate authorization state (create, confirm,
 consume, revoke, bad-signature rejection), approval request/resolution events,
 and approval webhook delivery outcomes are written as signed audit event lines.
+Webhook delivery events include non-secret HMAC metadata when a signing secret
+was configured.
 TTL expiration is enforced at lookup/consume time; expired rows can be swept
 separately without being required for a decision.

@@ -55,6 +55,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage tui --watch` prints repeated plain-text dashboard snapshots for
   headless operators, demos, and issue reports. `--watch-ticks <n>` bounds the
   loop for scripts and CI artifacts.
+- `gommage tui --stream` prints a compact live decision/event feed. It reads
+  recent events through daemon IPC when the daemon is reachable and falls back
+  to the signed audit log for local and CI captures.
 - `gommage tui --snapshot --view approvals` now includes selected-request
   detail, replay commands, and redacted evidence-bundle commands.
 - Interactive `gommage tui --view approvals` now supports TTL and use-count

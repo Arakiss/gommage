@@ -79,9 +79,11 @@ The alpha distribution has two install surfaces:
   center for humans with readiness, approvals, policies, audit, capabilities,
   and recovery views. Use `gommage tui --snapshot --view all` for issue reports
   and non-interactive shells, or `gommage tui --watch --watch-ticks 3` when a
-  headless terminal should show live refreshes. Interactive approvals can tune
-  TTL/use-count presets before resolving pending requests, and still require an
-  explicit confirmation keystroke before mutating state.
+  headless terminal should show live refreshes. Use `gommage tui --stream` for
+  a compact decision/event feed backed by daemon IPC when the daemon is running,
+  with signed audit-log fallback for CI and local captures. Interactive
+  approvals can tune TTL/use-count presets before resolving pending requests,
+  and still require an explicit confirmation keystroke before mutating state.
 
 <p align="center">
   <img src="docs/assets/tui-dashboard.gif" alt="Animated Gommage operator dashboard TUI demo showing readiness, approvals, policies, audit, capabilities, and recovery views" width="100%" />
@@ -288,6 +290,7 @@ Stable automation contracts:
 | `policy test --json` | Project-owned policy regression fixtures. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
+| `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, with signed audit-log fallback. |
 | `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
@@ -350,6 +353,7 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 gommage tui
 gommage tui --snapshot --view all
 gommage tui --watch --watch-ticks 3 --view approvals
+gommage tui --stream --stream-ticks 5
 gommage tui --view approvals
 
 # Start an expedition (a.k.a. task context)
