@@ -109,6 +109,14 @@ manual "empty commit" workaround for required checks: the PR branch is tested
 after any automated workspace-pin repair, and maintainers can merge the release
 PR only after the same CI contract has run on the exact generated branch.
 
+GitHub may mark bot-authored `pull_request` workflow runs as
+`action_required`. To keep release PRs mergeable without manual approvals,
+`ci.yml` and `audit.yml` also define a restricted `pull_request_target` path
+for same-repository branches named `release-please--branches--*`. Those jobs
+check out the release PR head SHA explicitly and skip all other
+`pull_request_target` invocations, so elevated-token execution is not broadened
+to forks or arbitrary user branches.
+
 Any internal `gommage-*` dependency that points at another workspace crate must
 carry an exact `version = "=<crate version>"` requirement next to its local
 `path`. This keeps release-please version bumps from creating tags whose binary
