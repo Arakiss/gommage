@@ -1,5 +1,13 @@
 # Changelog — gommage-audit
 
+## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.3.1-alpha.1...gommage-audit-v0.4.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* sign approval webhook deliveries ([acb4417](https://github.com/Arakiss/gommage/commit/acb4417f2ce4e567485448676547b1e10e3b6382))
+* stream live decision activity ([0529185](https://github.com/Arakiss/gommage/commit/0529185588d89f8f22279bd476e54d8f75773e8f))
+
 ## [0.3.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.3.0-alpha.1...gommage-audit-v0.3.1-alpha.1) (2026-04-23)
 
 ## [0.3.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.2.4-alpha.1...gommage-audit-v0.3.0-alpha.1) (2026-04-22)
