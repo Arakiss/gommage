@@ -22,8 +22,8 @@ authors = ["Petru Arakiss <petruarakiss@gmail.com>"]
 # Internal crates include both local paths and registry versions. Cargo uses the
 # path in this workspace; cargo package/publish keeps the version requirement
 # when the path is stripped for crates.io consumers.
-gommage-core   = { version = "=0.5.1-alpha.1", path = "crates/gommage-core"   }
-gommage-audit  = { version = "=0.4.1-alpha.1", path = "crates/gommage-audit"  }
+gommage-core   = { version = "=0.6.0-alpha.1", path = "crates/gommage-core"   }
+gommage-audit  = { version = "=0.5.0-alpha.1", path = "crates/gommage-audit"  }
 gommage-stdlib = { version = "=0.3.0-alpha.1", path = "crates/gommage-stdlib" }
 
 # --- Plumbing (caret-ranged: stable interfaces, cheap patch bumps) ----------
