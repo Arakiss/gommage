@@ -133,6 +133,23 @@
       ]
     },
     {
+      "id": "approval_webhook_signed_dry_run_json",
+      "purpose": "Render a signed generic approval webhook payload without network delivery.",
+      "stdin_mode": "none",
+      "argv": [
+        "approval",
+        "webhook",
+        "--url",
+        "https://approval.example.invalid/hook",
+        "--dry-run",
+        "--json",
+        "--signing-secret",
+        "contract-secret",
+        "--signing-key-id",
+        "contract"
+      ]
+    },
+    {
       "id": "approval_webhook_slack_dry_run_json",
       "purpose": "Render Slack-shaped pending approval webhook payloads without network delivery.",
       "stdin_mode": "none",

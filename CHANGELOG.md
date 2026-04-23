@@ -79,6 +79,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage approval webhook --dry-run --json` now includes the shaped provider
   payload under `requests[].payload`, so generic, Slack, and Discord endpoint
   payloads can be inspected or piped without sending network traffic.
+- `gommage approval webhook` can sign outbound approval requests with
+  HMAC-SHA256 via `--signing-secret` or `GOMMAGE_APPROVAL_WEBHOOK_SECRET`.
+  Dry-run JSON includes the exact signed body and signature headers; delivered
+  and failed webhook audit events include non-secret signature metadata.
 - Approval JSON timestamps now serialize as RFC3339/ISO-8601 strings while
   still reading legacy alpha approval logs that used time tuples.
 - `gommage approval list` now defaults to pending work, supports

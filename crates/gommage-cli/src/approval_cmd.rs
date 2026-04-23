@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
 use clap::{Subcommand, ValueEnum};
 use gommage_audit::{AuditEvent, AuditWriter};
-use gommage_core::{ApprovalState, ApprovalStatus, ApprovalStore, PictoStore, runtime::HomeLayout};
+use gommage_core::{
+    ApprovalState, ApprovalStatus, ApprovalStore, PictoStore,
+    runtime::HomeLayout,
+    webhook_signature::{WebhookSignatureReport, sign_webhook_body},
+};
 use serde::Serialize;
 use std::{
     io::Write,
@@ -72,6 +76,12 @@ pub(crate) enum ApprovalCmd {
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
+        /// HMAC secret used to sign the exact webhook HTTP body.
+        #[arg(long, env = "GOMMAGE_APPROVAL_WEBHOOK_SECRET")]
+        signing_secret: Option<String>,
+        /// Optional non-secret key identifier emitted with webhook signatures.
+        #[arg(long, env = "GOMMAGE_APPROVAL_WEBHOOK_SECRET_ID")]
+        signing_key_id: Option<String>,
     },
     /// Replay one approval request against the current policy.
     Replay {
@@ -149,6 +159,10 @@ struct WebhookRequestReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     payload: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<WebhookSignatureReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     http_status: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -197,7 +211,18 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
             dry_run,
             limit,
             json,
-        } => approval_webhook(layout, &url, provider, dry_run, limit, json),
+            signing_secret,
+            signing_key_id,
+        } => approval_webhook(
+            layout,
+            &url,
+            provider,
+            dry_run,
+            limit,
+            json,
+            signing_secret.as_deref(),
+            signing_key_id.as_deref(),
+        ),
         ApprovalCmd::Replay { id, json } => approval_replay(layout, &id, json),
         ApprovalCmd::Evidence {
             id,
@@ -366,6 +391,8 @@ fn approval_webhook(
     dry_run: bool,
     limit: Option<usize>,
     json: bool,
+    signing_secret: Option<&str>,
+    signing_key_id: Option<&str>,
 ) -> Result<ExitCode> {
     let store = ApprovalStore::open(&layout.approvals_log);
     let mut pending = store.pending()?;
@@ -388,20 +415,29 @@ fn approval_webhook(
 
     for state in pending {
         let payload = webhook_payload(&state.request, provider);
+        let body = serde_json::to_vec(&payload)?;
+        let signature = signing_secret
+            .filter(|secret| !secret.trim().is_empty())
+            .map(|secret| sign_webhook_body(&body, secret, signing_key_id));
         if dry_run {
             if !json {
                 println!("{}", serde_json::to_string_pretty(&payload)?);
+                if let Some(signature) = &signature {
+                    println!("signature: {} {}", signature.algorithm, signature.signature);
+                }
             }
             report.requests.push(WebhookRequestReport {
                 id: state.request.id,
                 status: "dry_run".to_string(),
                 payload: Some(payload),
+                body: Some(String::from_utf8(body)?),
+                signature,
                 http_status: None,
                 error: None,
             });
             continue;
         }
-        match post_json_with_curl(url, &payload) {
+        match post_json_with_curl(url, &body, signature.as_ref()) {
             Ok(status) => {
                 report.sent += 1;
                 if let Some(writer) = audit.as_mut() {
@@ -409,12 +445,15 @@ fn approval_webhook(
                         id: state.request.id.clone(),
                         url: url.to_string(),
                         status: Some(status),
+                        signature: signature.as_ref().map(signature_audit_summary),
                     })?;
                 }
                 report.requests.push(WebhookRequestReport {
                     id: state.request.id,
                     status: "sent".to_string(),
                     payload: None,
+                    body: None,
+                    signature,
                     http_status: Some(status),
                     error: None,
                 });
@@ -427,12 +466,15 @@ fn approval_webhook(
                         id: state.request.id.clone(),
                         url: url.to_string(),
                         error: message.clone(),
+                        signature: signature.as_ref().map(signature_audit_summary),
                     })?;
                 }
                 report.requests.push(WebhookRequestReport {
                     id: state.request.id,
                     status: "failed".to_string(),
                     payload: None,
+                    body: None,
+                    signature,
                     http_status: None,
                     error: Some(message),
                 });
@@ -505,26 +547,44 @@ fn format_timestamp(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
-fn post_json_with_curl(url: &str, payload: &serde_json::Value) -> Result<i32> {
-    let mut child = Command::new("curl")
-        .args([
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "5",
-            "--output",
-            "/dev/null",
-            "--write-out",
-            "%{http_code}",
-            "--header",
-            "content-type: application/json",
-            "--request",
-            "POST",
-            "--data-binary",
-            "@-",
-            url,
-        ])
+fn signature_audit_summary(
+    signature: &WebhookSignatureReport,
+) -> gommage_audit::WebhookSignatureAudit {
+    gommage_audit::WebhookSignatureAudit {
+        algorithm: signature.algorithm.clone(),
+        key_id: signature.key_id.clone(),
+        timestamp: signature.timestamp.clone(),
+        body_sha256: signature.body_sha256.clone(),
+        signature_prefix: signature.signature.chars().take(18).collect(),
+    }
+}
+
+fn post_json_with_curl(
+    url: &str,
+    body: &[u8],
+    signature: Option<&WebhookSignatureReport>,
+) -> Result<i32> {
+    let mut command = Command::new("curl");
+    command.args([
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "5",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
+        "--header",
+        "content-type: application/json",
+    ]);
+    if let Some(signature) = signature {
+        for header in signature.curl_headers() {
+            command.args(["--header", &header]);
+        }
+    }
+    let mut child = command
+        .args(["--request", "POST", "--data-binary", "@-", url])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -534,7 +594,7 @@ fn post_json_with_curl(url: &str, payload: &serde_json::Value) -> Result<i32> {
         .stdin
         .take()
         .context("opening curl stdin")?
-        .write_all(serde_json::to_string(payload)?.as_bytes())?;
+        .write_all(body)?;
     let output = child.wait_with_output()?;
     if !output.status.success() {
         anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());

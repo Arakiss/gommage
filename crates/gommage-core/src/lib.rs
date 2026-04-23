@@ -14,6 +14,7 @@ pub mod picto;
 pub mod policy;
 pub mod runtime;
 pub mod toolcall;
+pub mod webhook_signature;
 
 pub use approval::{
     ApprovalRequest, ApprovalResolution, ApprovalState, ApprovalStatus, ApprovalStore,

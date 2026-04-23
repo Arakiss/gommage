@@ -113,11 +113,15 @@ pub enum AuditEvent {
         id: String,
         url: String,
         status: Option<i32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<WebhookSignatureAudit>,
     },
     ApprovalWebhookFailed {
         id: String,
         url: String,
         error: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<WebhookSignatureAudit>,
     },
     PictosExpired {
         count: usize,
@@ -137,6 +141,15 @@ pub enum AuditEvent {
         hard_stop: bool,
         bypass_decision: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookSignatureAudit {
+    pub algorithm: String,
+    pub key_id: Option<String>,
+    pub timestamp: String,
+    pub body_sha256: String,
+    pub signature_prefix: String,
 }
 
 pub struct AuditWriter {

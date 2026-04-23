@@ -89,6 +89,10 @@ Evidence to save:
 
 ```sh
 gommage approval webhook --url "https://approval.example.invalid/hook" --dry-run --json
+gommage approval webhook --url "https://approval.example.invalid/hook" \
+  --dry-run --json \
+  --signing-secret "local-test-secret" \
+  --signing-key-id "local-test"
 gommage approval webhook --provider slack --url "https://approval.example.invalid/slack" --dry-run --json
 gommage approval webhook --provider discord --url "https://approval.example.invalid/discord" --dry-run --json
 gommage approval template --provider ntfy --json
@@ -97,6 +101,8 @@ gommage approval template --provider ntfy --json
 Evidence to save:
 
 - generic JSON payload shape from `requests[].payload`
+- signed generic body from `requests[].body` and signature headers from
+  `requests[].signature.headers`
 - Slack payload shape from `requests[].payload`
 - Discord payload shape from `requests[].payload`
 - ntfy template output
