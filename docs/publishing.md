@@ -18,8 +18,8 @@ checksum, and only then extracts `gommage`, `gommage-daemon`, and
 
 Treat `gommage-cli-v*` as the product release stream. Internal crate versions
 can differ for semver hygiene, and older alpha history may show per-crate
-GitHub Releases, but the supported installable product is the CLI release that
-carries the signed binary archives.
+GitHub Releases, but new public GitHub Releases should only be created for the
+CLI release that carries the signed binary archives.
 
 Useful installer options:
 
@@ -108,6 +108,19 @@ release-please PR branch. That keeps root `[workspace.dependencies]` exact
 version requirements synchronized with crate version bumps before a release PR
 is merged, avoiding stale CLI artifacts after internal crate releases.
 
+The release workflow creates lightweight git tags for internal packages that
+set `skip-github-release=true` before release-please runs on `main`. These tags
+are not GitHub Releases and carry no binary assets. They exist only to preserve
+release-please's previous-release boundary for each workspace crate while
+keeping the public Releases tab focused on Gommage as a product.
+
+Verify or repair those internal tag boundaries with:
+
+```sh
+sh scripts/tag-skipped-release-please-components.sh --check
+sh scripts/tag-skipped-release-please-components.sh
+```
+
 After release-please creates or updates a release PR, the release workflow also
 dispatches `ci.yml` against the release PR branch. This avoids the previous
 manual "empty commit" workaround for required checks: the PR branch is tested
@@ -182,7 +195,7 @@ The target state is:
 - GitHub Releases remain the primary install path for end users because they
   provide signed, checksum-verified, prebuilt binaries.
 - GitHub Releases should expose the product stream only. Release automation may
-  still bump internal crates in the release PR, but non-CLI workspace
+  still bump and tag internal crates in the release PR, but non-CLI workspace
   components skip GitHub Release publication.
 - crates.io provides `cargo install gommage-cli` for Rust-native users once the
   package gates above pass.
