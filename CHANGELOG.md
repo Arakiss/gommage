@@ -16,6 +16,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage beta check` provides a single beta-readiness gate that aggregates
   doctor, smoke, agent integration status, optional policy fixtures, operator
   dashboard availability, and actionable next steps for host test loops.
+- Release automation now creates lightweight git tags for internal packages
+  that skip GitHub Release publication, keeping release-please boundaries
+  stable while exposing only the installable Gommage product in GitHub
+  Releases.
 - Release automation now dispatches `ci.yml` for generated release-please PR
   branches after workspace dependency pin repair, eliminating the manual empty
   commit workaround for required release PR checks.
