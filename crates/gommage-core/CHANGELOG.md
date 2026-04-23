@@ -3,6 +3,13 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.5.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.4.1-alpha.1...gommage-core-v0.5.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* sign approval webhook deliveries ([acb4417](https://github.com/Arakiss/gommage/commit/acb4417f2ce4e567485448676547b1e10e3b6382))
+
 ## [0.4.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.4.0-alpha.1...gommage-core-v0.4.1-alpha.1) (2026-04-23)
 
 
