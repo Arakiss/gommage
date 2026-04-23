@@ -16,6 +16,15 @@ pub enum AgentKind {
     Codex,
 }
 
+impl AgentKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+}
+
 #[derive(Subcommand)]
 pub enum AgentCmd {
     /// Install a PreToolUse hook for a supported agent.

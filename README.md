@@ -209,6 +209,8 @@ Primary setup and readiness commands:
 gommage quickstart --agent claude --daemon --dry-run --json
 gommage quickstart --agent claude --daemon --self-test
 gommage quickstart --agent codex --daemon --self-test
+gommage beta check --json
+gommage beta check --json --policy-test examples/policy-fixtures.yaml
 gommage verify --json
 gommage verify --json --policy-test examples/policy-fixtures.yaml
 gommage report bundle --redact --output gommage-report.json
@@ -281,6 +283,7 @@ Stable automation contracts:
 | Surface | Use it for |
 |---|---|
 | `quickstart --dry-run --json` | Inspect planned setup mutations, backups, hooks, imports, daemon service files, and self-test checks before touching a real home. |
+| `beta check --json` | One host-level beta gate for agents and testers: doctor, smoke, agent status, optional policy fixtures, dashboard availability, and next steps. |
 | `verify --json` | Default readiness gate for installers, CI, and agents. |
 | `report bundle --redact` | Support artifact for install or host-integration failures without exposing secrets. |
 | `doctor --json` | Lower-level runtime and install diagnostics. |
@@ -347,6 +350,9 @@ echo '{"tool":"Bash","input":{"command":"git push origin main"}}' \
 
 # One readiness gate for scripts, CI, and agent skills.
 gommage verify --json --policy-test examples/policy-fixtures.yaml
+
+# Beta-readiness gate for host test loops and release candidates.
+gommage beta check --json --policy-test examples/policy-fixtures.yaml
 
 # Human operator dashboard. Snapshot/watch modes are read-only and issue-friendly.
 # Interactive approvals use t/T for TTL, u/U for uses, then A/D + y/n confirmation.
@@ -425,7 +431,24 @@ the daemon key, audit log, policy set, and local capability mappers.
 
 ## Diagnostics
 
-Use `gommage verify` / `gommage verify --json` as the default readiness gate for installers, skills, CI smoke tests, and agent setup scripts. It runs `doctor`, `smoke`, and any repeated `--policy-test <file>` fixtures in one report. On a fresh machine it includes a top-level hint to run `gommage init` or `gommage quickstart`, and skips smoke when doctor already failed so the first error is the root cause. Use `gommage tui` for a read-only human operator dashboard, `gommage tui --snapshot` for terminal-safe issue reports, `gommage doctor` for lower-level installation checks, `gommage map --json` to inspect raw capability mapper output before writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is a real PreToolUse payload, `gommage smoke --json` after policy installation to verify active mapper + policy semantics end to end, `gommage policy schema` to export the fixture contract, and `gommage policy test <file> --json` for repository-owned policy regression fixtures. The doctor JSON report has a top-level `status`:
+Use `gommage beta check --json` as the host-level beta gate for agents, release
+candidate loops, and external tester reports. It aggregates `doctor`, `smoke`,
+agent integration status, optional `--policy-test <file>` fixtures, dashboard
+availability, and next actions. Use `gommage verify` / `gommage verify --json`
+as the lower-level readiness gate for installers, skills, CI smoke tests, and
+agent setup scripts. It runs `doctor`, `smoke`, and any repeated
+`--policy-test <file>` fixtures in one report. On a fresh machine it includes a
+top-level hint to run `gommage init` or `gommage quickstart`, and skips smoke
+when doctor already failed so the first error is the root cause. Use
+`gommage tui` for a read-only human operator dashboard, `gommage tui --snapshot`
+for terminal-safe issue reports, `gommage doctor` for lower-level installation
+checks, `gommage map --json` to inspect raw capability mapper output before
+writing policy, `--hook` on `map`, `decide`, or `policy snapshot` when stdin is
+a real PreToolUse payload, `gommage smoke --json` after policy installation to
+verify active mapper + policy semantics end to end, `gommage policy schema` to
+export the fixture contract, and `gommage policy test <file> --json` for
+repository-owned policy regression fixtures. The doctor JSON report has a
+top-level `status`:
 
 - `ok`: all checks passed.
 - `warn`: operable, but something is not running or has not happened yet, commonly no audit log before the first decision or no daemon socket because the hook will use the audited fallback.

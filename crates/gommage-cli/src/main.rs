@@ -14,6 +14,7 @@ mod agent_uninstall;
 mod approval_cmd;
 mod approval_workflow;
 mod audit_cmd;
+mod beta;
 mod daemon;
 mod doctor;
 mod gestral;
@@ -39,6 +40,7 @@ use agent::{AgentCmd, AgentKind, cmd_agent};
 use agent_uninstall::AgentUninstallTarget;
 use approval_cmd::{ApprovalCmd, cmd_approval};
 use audit_cmd::{AuditExplainFormat, cmd_audit_verify, cmd_explain, print_log};
+use beta::{BetaCmd, cmd_beta};
 use daemon::{DaemonCmd, ServiceManager, cmd_daemon};
 use doctor::cmd_doctor;
 use input::{evaluate_only, read_tool_call_from_stdin};
@@ -114,6 +116,10 @@ enum Cmd {
     /// Install or inspect host-agent integrations.
     #[command(subcommand)]
     Agent(AgentCmd),
+
+    /// Run beta-readiness checks for this host.
+    #[command(subcommand)]
+    Beta(BetaCmd),
 
     /// Remove Gommage integrations and installed state.
     Uninstall {
@@ -391,6 +397,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             );
         }
         Cmd::Agent(sub) => return cmd_agent(sub, layout),
+        Cmd::Beta(sub) => return cmd_beta(sub, layout),
         Cmd::Uninstall {
             agent,
             daemon,

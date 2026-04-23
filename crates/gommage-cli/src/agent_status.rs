@@ -20,7 +20,7 @@ pub(crate) enum AgentStatus {
 }
 
 impl AgentStatus {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Ok => "ok",
             Self::Warn => "warn",
@@ -95,6 +95,18 @@ impl AgentStatusReport {
         } else {
             ExitCode::from(1)
         }
+    }
+
+    pub(crate) fn status(&self) -> AgentStatus {
+        self.status
+    }
+
+    pub(crate) fn failures(&self) -> usize {
+        self.summary.failures
+    }
+
+    pub(crate) fn warnings(&self) -> usize {
+        self.summary.warnings
     }
 }
 
