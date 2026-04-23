@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
@@ -7,7 +7,7 @@ const TIMESTAMP_HEADER: &str = "x-gommage-signature-timestamp";
 const ALGORITHM_HEADER: &str = "x-gommage-signature-algorithm";
 const KEY_ID_HEADER: &str = "x-gommage-signature-key-id";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookSignatureReport {
     pub algorithm: String,
     pub timestamp: String,
@@ -18,7 +18,7 @@ pub struct WebhookSignatureReport {
     pub headers: Vec<WebhookSignatureHeader>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookSignatureHeader {
     pub name: String,
     pub value: String,

@@ -159,6 +159,12 @@
       "argv": ["approval", "list", "--json"]
     },
     {
+      "id": "approval_dlq_json",
+      "purpose": "Inspect dead-lettered approval webhook deliveries.",
+      "stdin_mode": "none",
+      "argv": ["approval", "dlq", "--json"]
+    },
+    {
       "id": "approval_webhook_dry_run_json",
       "purpose": "Render pending approval webhook payloads without network delivery.",
       "stdin_mode": "none",

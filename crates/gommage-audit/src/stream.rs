@@ -110,24 +110,50 @@ fn event_item(line: usize, value: serde_json::Value) -> Result<AuditStreamItem, 
         AuditEvent::ApprovalWebhookDelivered {
             id,
             status,
+            attempts,
+            source,
             signature,
             ..
         } => (
             format!("webhook delivered {id}"),
             format!(
-                "http={} signed={}",
+                "http={} attempts={} source={} signed={}",
                 status.map_or_else(|| "unknown".to_string(), |status| status.to_string()),
+                attempts,
+                source,
                 signature.is_some()
             ),
         ),
         AuditEvent::ApprovalWebhookFailed {
             id,
             error,
+            attempts,
+            source,
             signature,
             ..
         } => (
             format!("webhook failed {id}"),
-            format!("signed={} error={error}", signature.is_some()),
+            format!(
+                "attempts={} source={} signed={} error={error}",
+                attempts,
+                source,
+                signature.is_some()
+            ),
+        ),
+        AuditEvent::ApprovalWebhookDeadLettered {
+            id,
+            dead_letter_id,
+            provider,
+            attempts,
+            source,
+            error,
+            ..
+        } => (
+            format!("webhook dead-lettered {id}"),
+            format!(
+                "dlq={} provider={} attempts={} source={} error={error}",
+                dead_letter_id, provider, attempts, source
+            ),
         ),
         AuditEvent::PictoCreated { id, scope, .. } => {
             (format!("picto created {id}"), format!("scope={scope}"))

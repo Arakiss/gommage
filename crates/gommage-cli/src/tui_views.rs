@@ -2,7 +2,8 @@ use anyhow::Result;
 use clap::ValueEnum;
 use gommage_audit::explain_log;
 use gommage_core::{
-    ApprovalStatus, ApprovalStore, CapabilityMapper, RuleDecision, ToolCall, runtime::HomeLayout,
+    ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetterStore, CapabilityMapper, RuleDecision,
+    ToolCall, runtime::HomeLayout,
 };
 use std::{fs, path::Path};
 
@@ -90,6 +91,9 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
     let states = ApprovalStore::open(&layout.approvals_log)
         .list()
         .unwrap_or_default();
+    let dead_letters = ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
+        .list()
+        .unwrap_or_default();
     let pending = states
         .iter()
         .filter(|state| state.status == ApprovalStatus::Pending)
@@ -111,7 +115,14 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
             denied,
             states.len()
         ),
+        format!("webhook dead letters: {}", dead_letters.len()),
     ];
+    if let Some(entry) = dead_letters.last() {
+        lines.push(format!(
+            "latest dead letter: {} request={} source={} attempts={}",
+            entry.id, entry.request_id, entry.source, entry.attempts
+        ));
+    }
     if pending.is_empty() {
         lines.push("pending: none".to_string());
     } else {
@@ -159,6 +170,7 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
     }
     let mut next_actions = vec![
         "gommage approval list --status pending".to_string(),
+        "gommage approval dlq --json".to_string(),
         "gommage tui --view approvals".to_string(),
     ];
     if let Some(first) = pending.first() {
@@ -227,6 +239,9 @@ fn audit_report(layout: &HomeLayout) -> ViewReport {
         .iter()
         .filter(|state| state.status == ApprovalStatus::Pending)
         .count();
+    let dead_letters = ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
+        .count()
+        .unwrap_or(0);
     let mut lines = vec![
         format!("audit log: {}", path_display(&layout.audit_log)),
         format!(
@@ -234,6 +249,7 @@ fn audit_report(layout: &HomeLayout) -> ViewReport {
             pending,
             approvals.len()
         ),
+        format!("webhook dead letters: {}", dead_letters),
     ];
     match layout.load_verifying_key() {
         Ok(vk) if layout.audit_log.exists() => match explain_log(&layout.audit_log, &vk) {
@@ -260,6 +276,7 @@ fn audit_report(layout: &HomeLayout) -> ViewReport {
         lines,
         next_actions: vec![
             "gommage audit-verify --explain --format human".to_string(),
+            "gommage approval dlq --json".to_string(),
             "gommage approval list".to_string(),
         ],
     }
@@ -310,6 +327,9 @@ fn recovery_report(layout: &HomeLayout) -> ViewReport {
         .pending()
         .unwrap_or_default();
     let backups = backup_count(&layout.root);
+    let dead_letters = ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
+        .count()
+        .unwrap_or(0);
     let lines = vec![
         format!("home: {}", path_display(&layout.root)),
         format!("doctor: {:?}", doctor.status),
@@ -320,6 +340,7 @@ fn recovery_report(layout: &HomeLayout) -> ViewReport {
         format!("socket: {}", path_display(&layout.socket)),
         format!("socket exists: {}", layout.socket.exists()),
         format!("pending approvals: {}", approvals.len()),
+        format!("webhook dead letters: {}", dead_letters),
         format!("local backups under home: {}", backups),
     ];
     ViewReport {

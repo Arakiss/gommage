@@ -65,6 +65,8 @@ Generic webhook delivery is available without changing the decision path:
 
 ```sh
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
+  --attempts 3 \
+  --backoff-ms 250 \
   --signing-secret "$GOMMAGE_APPROVAL_WEBHOOK_SECRET"
 ```
 
@@ -89,6 +91,14 @@ Dry-run JSON includes the shaped request body in `requests[].payload` for each
 pending approval. That makes generic, Slack, and Discord payloads inspectable
 without network delivery, and keeps endpoint tests composable with tools like
 `jq` and `curl`.
+
+Real delivery uses bounded retries. When all attempts fail, Gommage keeps the
+permission decision as `ask`, appends a dead-letter entry to
+`~/.gommage/approval-webhook-dlq.jsonl`, and exposes it through:
+
+```sh
+gommage approval dlq --json
+```
 
 Receiver verification must use the timestamp and body exactly as delivered:
 
@@ -121,8 +131,9 @@ ntfy template but does not send ntfy directly yet.
 
 If `GOMMAGE_APPROVAL_WEBHOOK_URL` is set in the hook environment, daemon and
 MCP fallback paths attempt best-effort webhook delivery at request time. Delivery
-success/failure is signed in audit when a home/key exists. A webhook outage never
-turns `ask` into `allow`.
+success/failure is signed in audit when a home/key exists, including
+dead-lettered failures after retries are exhausted. A webhook outage never turns
+`ask` into `allow`.
 
 ## Lifecycle
 

@@ -35,6 +35,24 @@ fn fake_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBu
     (bin, capture)
 }
 
+#[cfg(unix)]
+fn failing_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = temp.path().join("bin-fail");
+    fs::create_dir_all(&bin).unwrap();
+    let capture = temp.path().join("webhook-failure.json");
+    let script = bin.join("curl");
+    fs::write(
+        &script,
+        "#!/bin/sh\ncat > \"$GOMMAGE_FAKE_CURL_CAPTURE\"\nprintf 'curl: (22) simulated failure\\n' >&2\nexit 22\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    (bin, capture)
+}
+
 #[test]
 fn fallback_path_writes_signed_audit_entry_when_daemon_is_absent() {
     let temp = tempdir().unwrap();
@@ -117,6 +135,59 @@ fn fallback_path_can_notify_approval_webhook_best_effort() {
     assert_eq!(
         verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
         3
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn fallback_path_dead_letters_failed_webhook_delivery() {
+    let temp = tempdir().unwrap();
+    let layout = HomeLayout::at(&temp.path().join(".gommage"));
+    layout.ensure().unwrap();
+
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    copy_yaml_files(&repo_root.join("policies"), &layout.policy_dir);
+    copy_yaml_files(&repo_root.join("capabilities"), &layout.capabilities_dir);
+    let (fake_bin, capture) = failing_curl(&temp);
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gommage-mcp"))
+        .env("GOMMAGE_HOME", &layout.root)
+        .env("GOMMAGE_APPROVAL_WEBHOOK_URL", "https://example.test/hook")
+        .env("GOMMAGE_APPROVAL_WEBHOOK_ATTEMPTS", "2")
+        .env("GOMMAGE_APPROVAL_WEBHOOK_BACKOFF_MS", "1")
+        .env("GOMMAGE_FAKE_CURL_CAPTURE", &capture)
+        .env("PATH", path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(output.status.success());
+    let captured = fs::read_to_string(capture).unwrap();
+    assert!(captured.contains(r#""kind":"gommage_approval_request""#));
+    let dlq = fs::read_to_string(&layout.approval_webhook_dlq).unwrap();
+    assert!(dlq.contains(r#""source":"mcp_fallback""#));
+    assert!(dlq.contains(r#""attempts":2"#));
+    let audit = fs::read_to_string(&layout.audit_log).unwrap();
+    assert!(audit.contains(r#""type":"approval_webhook_failed""#));
+    assert!(audit.contains(r#""type":"approval_webhook_dead_lettered""#));
+    assert_eq!(
+        verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
+        4
     );
 }
 

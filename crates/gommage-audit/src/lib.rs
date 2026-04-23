@@ -116,12 +116,27 @@ pub enum AuditEvent {
         id: String,
         url: String,
         status: Option<i32>,
+        attempts: u32,
+        source: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signature: Option<WebhookSignatureAudit>,
     },
     ApprovalWebhookFailed {
         id: String,
         url: String,
+        error: String,
+        attempts: u32,
+        source: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<WebhookSignatureAudit>,
+    },
+    ApprovalWebhookDeadLettered {
+        id: String,
+        url: String,
+        dead_letter_id: String,
+        provider: String,
+        attempts: u32,
+        source: String,
         error: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signature: Option<WebhookSignatureAudit>,

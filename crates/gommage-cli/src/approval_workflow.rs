@@ -2,8 +2,8 @@ use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use gommage_audit::explain_log;
 use gommage_core::{
-    ApprovalRequest, ApprovalState, ApprovalStore, Decision, evaluate, runtime::HomeLayout,
-    runtime::Runtime,
+    ApprovalRequest, ApprovalState, ApprovalStore, Decision, approval_webhook_generic_payload,
+    evaluate, runtime::HomeLayout, runtime::Runtime,
 };
 use serde::Serialize;
 use std::{
@@ -189,19 +189,7 @@ pub(crate) fn webhook_payload(
 }
 
 fn generic_payload(request: &ApprovalRequest) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "gommage_approval_request",
-        "id": request.id,
-        "created_at": format_timestamp(request.created_at),
-        "tool": request.tool,
-        "input_hash": request.input_hash,
-        "required_scope": request.required_scope,
-        "reason": request.reason,
-        "capabilities": request.capabilities,
-        "matched_rule": request.matched_rule,
-        "policy_version": request.policy_version,
-        "commands": approval_commands(&request.id)
-    })
+    approval_webhook_generic_payload(request)
 }
 
 fn slack_payload(request: &ApprovalRequest) -> serde_json::Value {

@@ -155,7 +155,9 @@ fn verify_json_accepts_public_fixture_library() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
-        report.pointer("/policy_tests/0/status").and_then(|value| value.as_str()),
+        report
+            .pointer("/policy_tests/0/status")
+            .and_then(|value| value.as_str()),
         Some("pass")
     );
     assert_eq!(

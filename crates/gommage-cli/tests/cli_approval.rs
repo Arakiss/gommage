@@ -50,6 +50,24 @@ fn fake_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBu
     (bin, capture)
 }
 
+#[cfg(unix)]
+fn failing_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = temp.path().join("bin-fail");
+    fs::create_dir_all(&bin).unwrap();
+    let capture = temp.path().join("webhook-failure.json");
+    let script = bin.join("curl");
+    fs::write(
+        &script,
+        "#!/bin/sh\nif [ -n \"${GOMMAGE_FAKE_CURL_ARGS:-}\" ]; then printf '%s\n' \"$@\" > \"$GOMMAGE_FAKE_CURL_ARGS\"; fi\ncat > \"$GOMMAGE_FAKE_CURL_CAPTURE\"\nprintf 'curl: (22) simulated failure\\n' >&2\nexit 22\n",
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    (bin, capture)
+}
+
 #[test]
 fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
     let temp = tempdir().unwrap();
@@ -536,6 +554,88 @@ fn approval_webhook_can_shape_slack_payloads() {
     let captured = fs::read_to_string(capture).unwrap();
     assert!(captured.contains(r#""text":"Gommage approval required"#));
     assert!(captured.contains(r#""blocks""#));
+}
+
+#[test]
+#[cfg(unix)]
+fn approval_webhook_dead_letters_after_retry_exhaustion() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+    let (fake_bin, capture) = failing_curl(&temp);
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = gommage(&home)
+        .env("PATH", path)
+        .env("GOMMAGE_FAKE_CURL_CAPTURE", &capture)
+        .args([
+            "approval",
+            "webhook",
+            "--url",
+            "https://approval.example.test/hook",
+            "--json",
+            "--attempts",
+            "2",
+            "--backoff-ms",
+            "1",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("failed").and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        report["requests"][0]["status"].as_str(),
+        Some("dead_lettered")
+    );
+    assert_eq!(report["requests"][0]["attempts"].as_u64(), Some(2));
+    assert!(
+        report["requests"][0]["dead_letter_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("dlq_")
+    );
+    assert!(
+        report["requests"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("simulated failure")
+    );
+    let body = fs::read_to_string(capture).unwrap();
+    assert!(body.contains(r#""kind":"gommage_approval_request""#));
+
+    let dlq = gommage(&home)
+        .args(["approval", "dlq", "--json"])
+        .output()
+        .unwrap();
+    assert!(dlq.status.success());
+    let dlq: serde_json::Value = serde_json::from_slice(&dlq.stdout).unwrap();
+    assert_eq!(dlq["count"].as_u64(), Some(1));
+    assert_eq!(dlq["entries"][0]["attempts"].as_u64(), Some(2));
+    assert_eq!(dlq["entries"][0]["source"].as_str(), Some("cli"));
+    assert_eq!(dlq["entries"][0]["provider"].as_str(), Some("generic"));
+    assert!(
+        dlq["entries"][0]["body"]
+            .as_str()
+            .unwrap()
+            .contains("gommage_approval_request")
+    );
+
+    let audit = fs::read_to_string(home.join("audit.log")).unwrap();
+    assert!(audit.contains(r#""type":"approval_webhook_failed""#));
+    assert!(audit.contains(r#""type":"approval_webhook_dead_lettered""#));
 }
 
 #[test]

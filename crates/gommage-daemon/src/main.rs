@@ -13,18 +13,15 @@ use clap::Parser;
 use ed25519_dalek::VerifyingKey;
 use gommage_audit::{AuditEvent, AuditWriter, recent_stream_items};
 use gommage_core::{
-    ApprovalRequest, Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
+    ApprovalRequest, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
+    ApprovalWebhookSource, Decision, PictoConsume, PictoLookup, ToolCall,
+    approval_webhook_generic_payload, deliver_prepared_approval_webhook, evaluate,
+    prepare_approval_webhook,
     runtime::{HomeLayout, Runtime},
-    webhook_signature::{WebhookSignatureReport, sign_webhook_body},
+    webhook_signature::WebhookSignatureReport,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    env,
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-    sync::Arc,
-};
+use std::{env, path::PathBuf, sync::Arc};
 use time::OffsetDateTime;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -325,61 +322,78 @@ fn notify_approval_webhook_best_effort(writer: &mut AuditWriter, request: &Appro
     if url.trim().is_empty() {
         return;
     }
-    let payload = approval_payload(request);
-    let Ok(body) = serde_json::to_vec(&payload) else {
+    let payload = approval_webhook_generic_payload(request);
+    let Ok(prepared) = prepare_approval_webhook(
+        payload,
+        env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET").ok().as_deref(),
+        env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET_ID")
+            .ok()
+            .as_deref(),
+    ) else {
         return;
     };
-    let signature = webhook_signature_from_env(&body);
-    match post_approval_json(&url, &body, signature.as_ref()) {
-        Ok(status) => {
+    let settings = ApprovalWebhookDeliverySettings::from_env();
+    let layout = writer
+        .path()
+        .parent()
+        .map(HomeLayout::at)
+        .unwrap_or_default();
+    match deliver_prepared_approval_webhook(
+        &layout,
+        request,
+        ApprovalWebhookSource::Daemon,
+        "generic",
+        &url,
+        &prepared,
+        &settings,
+    ) {
+        Ok(outcome) if outcome.kind == ApprovalWebhookDeliveryKind::Delivered => {
             if let Err(error) = writer.append_event(AuditEvent::ApprovalWebhookDelivered {
                 id: request.id.clone(),
                 url,
-                status: Some(status),
-                signature: signature.as_ref().map(signature_audit_summary),
+                status: outcome.http_status,
+                attempts: outcome.attempts,
+                source: ApprovalWebhookSource::Daemon.as_str().to_string(),
+                signature: outcome.signature.as_ref().map(signature_audit_summary),
             }) {
                 tracing::warn!(?error, "failed to audit approval webhook delivery");
             }
         }
-        Err(error) => {
+        Ok(outcome) => {
+            let error_text = outcome
+                .error
+                .clone()
+                .unwrap_or_else(|| "webhook delivery failed".to_string());
             if let Err(audit_error) = writer.append_event(AuditEvent::ApprovalWebhookFailed {
                 id: request.id.clone(),
-                url,
-                error: error.to_string(),
-                signature: signature.as_ref().map(signature_audit_summary),
+                url: url.clone(),
+                error: error_text.clone(),
+                attempts: outcome.attempts,
+                source: ApprovalWebhookSource::Daemon.as_str().to_string(),
+                signature: outcome.signature.as_ref().map(signature_audit_summary),
             }) {
                 tracing::warn!(?audit_error, "failed to audit approval webhook failure");
             }
+            if let Some(dead_letter_id) = outcome.dead_letter_id
+                && let Err(audit_error) =
+                    writer.append_event(AuditEvent::ApprovalWebhookDeadLettered {
+                        id: request.id.clone(),
+                        url,
+                        dead_letter_id,
+                        provider: "generic".to_string(),
+                        attempts: outcome.attempts,
+                        source: ApprovalWebhookSource::Daemon.as_str().to_string(),
+                        error: error_text,
+                        signature: outcome.signature.as_ref().map(signature_audit_summary),
+                    })
+            {
+                tracing::warn!(?audit_error, "failed to audit approval webhook dead-letter");
+            }
+        }
+        Err(error) => {
+            tracing::warn!(?error, "failed to persist approval webhook delivery result");
         }
     }
-}
-
-fn approval_payload(request: &ApprovalRequest) -> serde_json::Value {
-    serde_json::json!({
-        "kind": "gommage_approval_request",
-        "id": request.id,
-        "created_at": request.created_at,
-        "tool": request.tool,
-        "input_hash": request.input_hash,
-        "required_scope": request.required_scope,
-        "reason": request.reason,
-        "capabilities": request.capabilities,
-        "matched_rule": request.matched_rule,
-        "policy_version": request.policy_version,
-        "commands": {
-            "approve": format!("gommage approval approve {}", request.id),
-            "deny": format!("gommage approval deny {}", request.id)
-        }
-    })
-}
-
-fn webhook_signature_from_env(body: &[u8]) -> Option<WebhookSignatureReport> {
-    let secret = env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET").ok()?;
-    if secret.trim().is_empty() {
-        return None;
-    }
-    let key_id = env::var("GOMMAGE_APPROVAL_WEBHOOK_SECRET_ID").ok();
-    Some(sign_webhook_body(body, &secret, key_id.as_deref()))
 }
 
 fn signature_audit_summary(
@@ -392,52 +406,6 @@ fn signature_audit_summary(
         body_sha256: signature.body_sha256.clone(),
         signature_prefix: signature.signature.chars().take(18).collect(),
     }
-}
-
-fn post_approval_json(
-    url: &str,
-    body: &[u8],
-    signature: Option<&WebhookSignatureReport>,
-) -> Result<i32> {
-    let mut command = Command::new("curl");
-    command.args([
-        "--fail",
-        "--silent",
-        "--show-error",
-        "--max-time",
-        "5",
-        "--output",
-        "/dev/null",
-        "--write-out",
-        "%{http_code}",
-        "--header",
-        "content-type: application/json",
-    ]);
-    if let Some(signature) = signature {
-        for header in signature.curl_headers() {
-            command.args(["--header", &header]);
-        }
-    }
-    let mut child = command
-        .args(["--request", "POST", "--data-binary", "@-", url])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("starting curl for approval webhook delivery")?;
-    child
-        .stdin
-        .take()
-        .context("opening curl stdin")?
-        .write_all(body)?;
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
-        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr).trim());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<i32>()
-        .unwrap_or(0))
 }
 
 fn ok<T: Serialize>(v: &T) -> String {

@@ -110,6 +110,8 @@ Evidence to save:
   `requests[].signature.headers`
 - Slack payload shape from `requests[].payload`
 - Discord payload shape from `requests[].payload`
+- if you also exercise a failing endpoint, `gommage approval dlq --json`
+  showing the dead-lettered delivery after retries are exhausted
 - ntfy template output
 
 ## 6. Recovery And Uninstall
