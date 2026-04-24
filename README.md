@@ -260,6 +260,11 @@ gommage policy test examples/policy-fixtures.yaml --json
 Recovery and uninstall commands:
 
 ```sh
+# Rewrite old or broken Gommage hook groups to the current scoped hook while
+# preserving unrelated host hooks. Always inspect first on a real machine.
+gommage repair agent claude --dry-run
+gommage repair agent codex --dry-run
+
 # Remove only host-agent hook wiring. Use --restore-backup when a quickstart
 # backup is the safest recovery source.
 gommage agent uninstall claude --restore-backup
@@ -296,6 +301,7 @@ Stable automation contracts:
 | `report bundle --redact` | Support artifact for install or host-integration failures without exposing secrets. |
 | `doctor --json` | Lower-level runtime and install diagnostics. |
 | `agent status --json` | Claude/Codex hook wiring and native permission import state. |
+| `repair agent <agent> --dry-run` | Inspect legacy/broken Gommage hook repair before mutating host config. |
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
 | `smoke --json` | Built-in semantic post-install checks. |
 | `policy test --json` | Project-owned policy regression fixtures. |
@@ -436,6 +442,8 @@ before replacing them when the content differs. Unchanged files are left as-is.
 Use these recovery paths before manual cleanup:
 
 ```sh
+gommage repair agent claude --dry-run
+gommage repair agent codex --dry-run
 gommage agent uninstall claude --restore-backup
 gommage agent uninstall codex --restore-backup
 gommage uninstall --all --dry-run

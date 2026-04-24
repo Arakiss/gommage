@@ -209,6 +209,184 @@ fn agent_uninstall_codex_leaves_feature_flag_without_gommage_hook() {
 }
 
 #[test]
+fn repair_agent_claude_replaces_legacy_gommage_hook() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/tmp/protect-files.sh" }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "/usr/local/bin/gommage mcp --old" }
+        ]
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["repair", "agent", "claude"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let settings_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    let pre_tool_use = settings_json
+        .pointer("/hooks/PreToolUse")
+        .and_then(|value| value.as_array())
+        .unwrap();
+    assert_eq!(pre_tool_use.len(), 2);
+    assert!(
+        serde_json::to_string(pre_tool_use)
+            .unwrap()
+            .contains("/tmp/protect-files.sh")
+    );
+    assert!(
+        !serde_json::to_string(pre_tool_use)
+            .unwrap()
+            .contains("gommage mcp --old")
+    );
+    assert!(
+        serde_json::to_string(pre_tool_use)
+            .unwrap()
+            .contains("gommage-mcp")
+    );
+    assert!(
+        !serde_json::to_string(pre_tool_use)
+            .unwrap()
+            .contains("\"matcher\":\"*\"")
+    );
+}
+
+#[test]
+fn repair_agent_codex_dry_run_does_not_mutate_legacy_hook() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(hooks.parent().unwrap()).unwrap();
+    fs::write(
+        &hooks,
+        r#"{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"GOMMAGE_BYPASS=1 gommage mcp"}]}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\ncodex_hooks = false\n",
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["repair", "agent", "codex", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("plan write"));
+    assert!(stdout.contains("next codex"));
+    assert!(fs::read_to_string(&hooks).unwrap().contains("gommage mcp"));
+    assert!(
+        fs::read_to_string(&config)
+            .unwrap()
+            .contains("codex_hooks = false")
+    );
+}
+
+#[test]
+fn agent_status_warns_on_legacy_and_global_gommage_hooks() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "gommage-mcp" }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "gommage mcp --old" }
+        ]
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["agent", "status", "claude", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert_eq!(
+        doctor_check(&report, "legacy_hooks")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert_eq!(
+        doctor_check(&report, "hook_scope")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert!(
+        doctor_check(&report, "legacy_hooks")
+            .pointer("/details/repair")
+            .and_then(|value| value.as_str())
+            .unwrap()
+            .contains("gommage repair agent claude")
+    );
+}
+
+#[test]
 fn uninstall_all_dry_run_lists_every_surface() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

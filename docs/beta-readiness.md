@@ -50,6 +50,7 @@ issue:
 | Approval replay/evidence | `gommage approval replay <id> --json` compares stored request semantics with current policy; `gommage approval evidence <id> --redact` exports request state, relevant audit lines, verification summary, and next commands. |
 | Webhook flow | `gommage approval webhook --provider generic|slack|discord --dry-run --json` renders pending provider payloads in `requests[].payload`; `--signing-secret` adds `requests[].body` plus HMAC `requests[].signature`; a fake or test endpoint proves signed success, retry-exhausted failure, and `approval dlq --json` visibility. |
 | Host wiring | `gommage agent status claude --json` and `gommage agent status codex --json` are documented for supported states. |
+| Legacy repair | `gommage repair agent claude --dry-run` and `gommage repair agent codex --dry-run` show how old or broken alpha hooks would be rewritten without mutating host config. |
 | Policy fixtures | `examples/policy-fixtures.yaml` passes through `gommage policy test --json`, and any repository-specific fixture additions are documented or linked. |
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
 | Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host. |
