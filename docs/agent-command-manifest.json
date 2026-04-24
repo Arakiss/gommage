@@ -2,7 +2,9 @@
   "schema_version": 1,
   "description": "Canonical agent-facing Gommage command contract. Commands are executed in order by scripts/check-agent-command-contracts.sh.",
   "placeholders": {
-    "{report_bundle}": "Temporary JSON output path provided by the contract test."
+    "{report_bundle}": "Temporary JSON output path provided by the contract test.",
+    "{replay_audit}": "Temporary audit JSONL fixture provided by the contract test.",
+    "{replay_policy}": "Temporary policy directory fixture provided by the contract test."
   },
   "commands": [
     {
@@ -103,6 +105,19 @@
       "purpose": "Run built-in semantic policy checks.",
       "stdin_mode": "none",
       "argv": ["smoke", "--json"]
+    },
+    {
+      "id": "replay_json",
+      "purpose": "Replay historical audit decisions against a candidate policy.",
+      "stdin_mode": "none",
+      "argv": [
+        "replay",
+        "--audit",
+        "{replay_audit}",
+        "--policy",
+        "{replay_policy}",
+        "--json"
+      ]
     },
     {
       "id": "tui_snapshot_all",

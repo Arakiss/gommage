@@ -363,3 +363,16 @@ contract. The schema covers both accepted fixture shapes: a mapping with
 `version: 1` plus `cases`, or a top-level list of cases. Use it before
 `policy test` when an agent generates fixture YAML or when an editor needs
 completion and validation.
+
+## Policy Replay
+
+Use `gommage replay --audit <file> --policy <dir> --json` to evaluate historical
+audit decision entries against a candidate policy directory. Replay uses the
+capability set already stored in each signed audit decision, so it does not
+guess or reconstruct missing tool input. Non-decision audit events are counted
+as skipped events in the report.
+
+The JSON report includes top-level `status`, `replay_policy_version`,
+`summary`, and per-entry original/replayed decisions, matched rules, policy
+versions, capabilities, and `changed` status. Treat changed entries as review
+items before adopting the candidate policy.
