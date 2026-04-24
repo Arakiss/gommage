@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.27.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.26.0-alpha.1...gommage-cli-v0.27.0-alpha.1) (2026-04-24)
+
+
+### Features
+
+* add explain trace and strict policy lint ([19f99fe](https://github.com/Arakiss/gommage/commit/19f99fe63ef9974224a38a56ef70ee995afd34bd))
+
 ## [0.26.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.25.0-alpha.1...gommage-cli-v0.26.0-alpha.1) (2026-04-24)
 
 
