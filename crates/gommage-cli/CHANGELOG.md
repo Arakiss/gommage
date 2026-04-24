@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.29.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.28.0-alpha.1...gommage-cli-v0.29.0-alpha.1) (2026-04-24)
+
+
+### Features
+
+* improve operator loop visibility ([5118fbf](https://github.com/Arakiss/gommage/commit/5118fbf95ca9c94e6adf2ef7e7a49c36da0efb00))
+
 ## [0.28.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.27.0-alpha.1...gommage-cli-v0.28.0-alpha.1) (2026-04-24)
 
 
