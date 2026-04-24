@@ -3,7 +3,9 @@ use clap::Subcommand;
 use gommage_core::{
     Capability, Decision, MatchedRule, Policy, RuleDecision, ToolCall, evaluate,
     policy::{RawMatch, RawRule, substitute_env},
-    runtime::{Expedition, HomeLayout, default_policy_env},
+    runtime::{
+        Expedition, HomeLayout, active_policy_layers, default_policy_env, load_active_policy,
+    },
 };
 use gommage_stdlib::{
     CAPABILITIES as STDLIB_CAPABILITIES, POLICIES as STDLIB_POLICIES, StdlibFile,
@@ -38,6 +40,12 @@ pub(crate) enum PolicyCmd {
     },
     /// Parse and compile every policy file under policy.d/.
     Check,
+    /// Print the active policy layer order.
+    Layers {
+        /// Emit a stable machine-readable layer report.
+        #[arg(long)]
+        json: bool,
+    },
     /// Parse policy files and optionally run strict authoring checks.
     Lint {
         #[arg(value_name = "FILE")]
@@ -245,6 +253,21 @@ pub(crate) struct PolicyTestReport {
     pub(crate) mapper_rules: usize,
     pub(crate) summary: SmokeSummary,
     pub(crate) cases: Vec<PolicyTestCaseResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct PolicyLayerReport {
+    status: SmokeStatus,
+    policy_version: String,
+    layers: Vec<PolicyLayerEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct PolicyLayerEntry {
+    name: String,
+    dir: String,
+    files: usize,
+    rules: usize,
 }
 
 impl PolicyTestReport {
@@ -466,6 +489,7 @@ struct PolicySuggestionEvidence {
 
 fn build_policy_snapshot_case(
     layout: &HomeLayout,
+    expedition: Option<&Expedition>,
     env: &std::collections::HashMap<String, String>,
     name: String,
     description: Option<String>,
@@ -473,7 +497,7 @@ fn build_policy_snapshot_case(
 ) -> Result<PolicySnapshotCase> {
     let mapper = gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir)
         .context("loading capability mappers for policy snapshot")?;
-    let policy = Policy::load_from_dir(&layout.policy_dir, env)
+    let policy = load_active_policy(layout, expedition, env)
         .context("loading policy for policy snapshot")?;
     let capabilities = mapper.map(&call);
     let eval = evaluate(&capabilities, &policy);
@@ -489,10 +513,11 @@ fn build_policy_snapshot_case(
 
 fn build_policy_suggest_report(
     layout: &HomeLayout,
+    expedition: Option<&Expedition>,
     env: &HashMap<String, String>,
     audit_path: &Path,
 ) -> Result<PolicySuggestReport> {
-    let policy = Policy::load_from_dir(&layout.policy_dir, env)
+    let policy = load_active_policy(layout, expedition, env)
         .context("loading active policy for policy suggest")?;
     let scan = read_audit_decisions(audit_path)?;
     let mut summary = PolicySuggestSummary {
@@ -764,6 +789,7 @@ fn slugify(value: &str) -> String {
 
 pub(crate) fn build_policy_test_report(
     layout: &HomeLayout,
+    expedition: Option<&Expedition>,
     env: &std::collections::HashMap<String, String>,
     file: &Path,
 ) -> Result<PolicyTestReport> {
@@ -784,7 +810,7 @@ pub(crate) fn build_policy_test_report(
     let mapper = gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir)
         .context("loading capability mappers for policy test")?;
     let policy =
-        Policy::load_from_dir(&layout.policy_dir, env).context("loading policy for policy test")?;
+        load_active_policy(layout, expedition, env).context("loading policy for policy test")?;
 
     let mut results = Vec::new();
     let mut summary = SmokeSummary::default();
@@ -837,23 +863,34 @@ pub(crate) fn build_policy_test_report(
 
 fn build_policy_lint_report(
     layout: &HomeLayout,
+    expedition: Option<&Expedition>,
     env: &HashMap<String, String>,
     file: Option<&Path>,
     strict: bool,
 ) -> Result<PolicyLintReport> {
-    let target = file
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| layout.policy_dir.clone());
-    let compiled_policy = if target.is_file() {
-        let raw = std::fs::read_to_string(&target)
-            .with_context(|| format!("reading policy file {}", target.display()))?;
-        Policy::from_yaml_string(&raw, env, &target.to_string_lossy())
-            .with_context(|| format!("linting policy file {}", target.display()))?
+    let target = file.map(Path::to_path_buf);
+    let (target_display, compiled_policy, files) = if let Some(target) = target {
+        let compiled_policy = if target.is_file() {
+            let raw = std::fs::read_to_string(&target)
+                .with_context(|| format!("reading policy file {}", target.display()))?;
+            Policy::from_yaml_string(&raw, env, &target.to_string_lossy())
+                .with_context(|| format!("linting policy file {}", target.display()))?
+        } else {
+            Policy::load_from_dir(&target, env)
+                .with_context(|| format!("linting policy directory {}", target.display()))?
+        };
+        let files = collect_policy_files(&target)?;
+        (path_display(&target), compiled_policy, files)
     } else {
-        Policy::load_from_dir(&target, env)
-            .with_context(|| format!("linting policy directory {}", target.display()))?
+        let layers = active_policy_layers(layout, expedition)?;
+        let compiled_policy =
+            Policy::load_from_layers(&layers, env).context("linting active policy layers")?;
+        let mut files = Vec::new();
+        for layer in &layers {
+            files.extend(collect_policy_files(&layer.dir)?);
+        }
+        ("active policy layers".to_string(), compiled_policy, files)
     };
-    let files = collect_policy_files(&target)?;
     let records = parse_raw_policy_rules(&files, env)?;
     let mut issues = Vec::new();
     if strict {
@@ -867,7 +904,7 @@ fn build_policy_lint_report(
         } else {
             SmokeStatus::Fail
         },
-        target: path_display(&target),
+        target: target_display,
         strict,
         files: files.len(),
         rules: compiled_policy.rules.len(),
@@ -1160,6 +1197,46 @@ pub(crate) fn print_policy_test_report(report: &PolicyTestReport) {
     );
 }
 
+fn build_policy_layer_report(
+    layout: &HomeLayout,
+    expedition: Option<&Expedition>,
+    env: &HashMap<String, String>,
+) -> Result<PolicyLayerReport> {
+    let layers = active_policy_layers(layout, expedition)?;
+    let policy = Policy::load_from_layers(&layers, env).context("loading active policy layers")?;
+    let mut entries = Vec::new();
+    for layer in layers {
+        let files = collect_policy_files(&layer.dir)?;
+        let records = parse_raw_policy_rules(&files, env)?;
+        entries.push(PolicyLayerEntry {
+            name: layer.name,
+            dir: path_display(&layer.dir),
+            files: files.len(),
+            rules: records.len(),
+        });
+    }
+
+    Ok(PolicyLayerReport {
+        status: SmokeStatus::Pass,
+        policy_version: policy.version_hash,
+        layers: entries,
+    })
+}
+
+fn print_policy_layer_report(report: &PolicyLayerReport) {
+    println!("policy version: {}", report.policy_version);
+    for (index, layer) in report.layers.iter().enumerate() {
+        println!(
+            "{}. {}: {} ({} files, {} rules)",
+            index + 1,
+            layer.name,
+            layer.dir,
+            layer.files,
+            layer.rules
+        );
+    }
+}
+
 pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
     let sub = match sub {
         PolicyCmd::Schema => {
@@ -1171,8 +1248,10 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
     };
 
     layout.ensure()?;
-    let env = Expedition::load(&layout.expedition_file)?
-        .map(|e| e.policy_env())
+    let expedition = Expedition::load(&layout.expedition_file)?;
+    let env = expedition
+        .as_ref()
+        .map(Expedition::policy_env)
         .unwrap_or_else(default_policy_env);
     match sub {
         PolicyCmd::Init { stdlib, force } => {
@@ -1186,12 +1265,26 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
             );
         }
         PolicyCmd::Check => {
-            let pol = Policy::load_from_dir(&layout.policy_dir, &env)?;
+            let pol = load_active_policy(&layout, expedition.as_ref(), &env)?;
             println!("ok {} rules loaded", pol.rules.len());
             println!("version: {}", pol.version_hash);
         }
+        PolicyCmd::Layers { json } => {
+            let report = build_policy_layer_report(&layout, expedition.as_ref(), &env)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_policy_layer_report(&report);
+            }
+        }
         PolicyCmd::Lint { file, strict, json } => {
-            let report = build_policy_lint_report(&layout, &env, file.as_deref(), strict)?;
+            let report = build_policy_lint_report(
+                &layout,
+                expedition.as_ref(),
+                &env,
+                file.as_deref(),
+                strict,
+            )?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1202,7 +1295,7 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
         PolicyCmd::Schema => unreachable!("policy schema returns before home validation"),
         PolicyCmd::Diff(_) => unreachable!("policy diff returns before home validation"),
         PolicyCmd::Suggest { audit, json } => {
-            let report = build_policy_suggest_report(&layout, &env, &audit)?;
+            let report = build_policy_suggest_report(&layout, expedition.as_ref(), &env, &audit)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1210,7 +1303,7 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
             }
         }
         PolicyCmd::Test { file, json } => {
-            let report = build_policy_test_report(&layout, &env, &file)?;
+            let report = build_policy_test_report(&layout, expedition.as_ref(), &env, &file)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -1225,7 +1318,14 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
             hook,
         } => {
             let call = read_tool_call_from_stdin(hook)?;
-            let case = build_policy_snapshot_case(&layout, &env, name, description, call)?;
+            let case = build_policy_snapshot_case(
+                &layout,
+                expedition.as_ref(),
+                &env,
+                name,
+                description,
+                call,
+            )?;
             if case_only {
                 println!("{}", serde_yaml::to_string(&[case])?.trim_end());
             } else {
@@ -1237,7 +1337,7 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
             }
         }
         PolicyCmd::Hash => {
-            let pol = Policy::load_from_dir(&layout.policy_dir, &env)?;
+            let pol = load_active_policy(&layout, expedition.as_ref(), &env)?;
             println!("{}", pol.version_hash);
         }
     }

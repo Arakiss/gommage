@@ -22,10 +22,11 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::{
     env,
-    io::{self, Read, Write},
+    io::{self, BufRead, BufReader as StdBufReader, Read, Write},
+    process::{Command, Stdio},
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader},
     net::UnixStream,
 };
 
@@ -46,10 +47,16 @@ struct HookInput {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    if handle_info_flag()? {
-        return Ok(());
+    match parse_args()? {
+        Mode::InfoPrinted => return Ok(()),
+        Mode::Gateway(options) => return run_gateway(options).await,
+        Mode::Hook => {}
     }
 
+    run_hook().await
+}
+
+async fn run_hook() -> Result<()> {
     let mut buf = String::new();
     io::stdin()
         .read_to_string(&mut buf)
@@ -63,11 +70,7 @@ async fn main() -> Result<()> {
     let layout = HomeLayout::default();
     layout.ensure()?;
 
-    let eval = match forward_to_daemon(&layout, &call).await {
-        Ok(e) => e,
-        Err(e) if is_missing_daemon(&e) => decide_in_process_and_audit(&layout, &call)?,
-        Err(e) => return Err(e),
-    };
+    let eval = decide_call(&layout, &call).await?;
 
     let (decision_str, reason) = match &eval.decision {
         Decision::Allow => ("allow", "gommage allowed".to_string()),
@@ -89,6 +92,264 @@ async fn main() -> Result<()> {
     };
     write_hook_response(decision_str, &reason)?;
     Ok(())
+}
+
+async fn decide_call(layout: &HomeLayout, call: &ToolCall) -> Result<gommage_core::EvalResult> {
+    match forward_to_daemon(layout, call).await {
+        Ok(e) => Ok(e),
+        Err(e) if is_missing_daemon(&e) => decide_in_process_and_audit(layout, call),
+        Err(e) => Err(e),
+    }
+}
+
+#[derive(Debug)]
+enum Mode {
+    Hook,
+    Gateway(GatewayOptions),
+    InfoPrinted,
+}
+
+#[derive(Debug)]
+struct GatewayOptions {
+    server_name: String,
+    command: Vec<String>,
+}
+
+fn parse_args() -> Result<Mode> {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.is_empty() {
+        return Ok(Mode::Hook);
+    }
+    if args == ["-V"] || args == ["--version"] {
+        println!("gommage-mcp {}", env!("CARGO_PKG_VERSION"));
+        return Ok(Mode::InfoPrinted);
+    }
+    if args == ["-h"] || args == ["--help"] {
+        print_help();
+        return Ok(Mode::InfoPrinted);
+    }
+    if args.first().map(String::as_str) != Some("--gateway") {
+        anyhow::bail!("unexpected argument {:?}; try --help", args[0]);
+    }
+
+    let mut server_name = "upstream".to_string();
+    let mut command_start = None;
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--server-name" => {
+                let Some(value) = args.get(i + 1) else {
+                    anyhow::bail!("--server-name requires a value");
+                };
+                server_name = value.clone();
+                i += 2;
+            }
+            "--" => {
+                command_start = Some(i + 1);
+                break;
+            }
+            other => anyhow::bail!("unexpected gateway argument {other:?}; try --help"),
+        }
+    }
+    let Some(start) = command_start else {
+        anyhow::bail!("--gateway requires `-- <upstream-command> [args...]`");
+    };
+    let command = args[start..].to_vec();
+    if command.is_empty() {
+        anyhow::bail!("--gateway requires an upstream command after `--`");
+    }
+    Ok(Mode::Gateway(GatewayOptions {
+        server_name,
+        command,
+    }))
+}
+
+async fn run_gateway(options: GatewayOptions) -> Result<()> {
+    let layout = HomeLayout::default();
+    layout.ensure()?;
+    let mut child = Command::new(&options.command[0])
+        .args(&options.command[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("starting upstream MCP server {:?}", options.command))?;
+    let mut upstream_stdin = child.stdin.take().context("missing upstream stdin")?;
+    let upstream_stdout = child.stdout.take().context("missing upstream stdout")?;
+    let mut upstream_stdout = StdBufReader::new(upstream_stdout);
+    let stdin = io::stdin();
+    let mut stdout = io::stdout().lock();
+
+    for line in stdin.lock().lines() {
+        let line = line.context("reading gateway stdin")?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let message: Value = serde_json::from_str(&line).context("parsing MCP JSON-RPC line")?;
+        if let Some(response) = gate_mcp_tool_call(&layout, &options.server_name, &message).await? {
+            writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
+            stdout.flush()?;
+            continue;
+        }
+
+        upstream_stdin.write_all(line.as_bytes())?;
+        upstream_stdin.write_all(b"\n")?;
+        upstream_stdin.flush()?;
+        if message.get("id").is_none() {
+            continue;
+        }
+        let mut response = String::new();
+        upstream_stdout
+            .read_line(&mut response)
+            .context("reading upstream MCP response")?;
+        if response.is_empty() {
+            anyhow::bail!("upstream MCP server closed without response");
+        }
+        stdout.write_all(response.as_bytes())?;
+        stdout.flush()?;
+    }
+
+    drop(upstream_stdin);
+    let status = child.wait().context("waiting for upstream MCP server")?;
+    if !status.success() {
+        anyhow::bail!("upstream MCP server exited with {status}");
+    }
+    Ok(())
+}
+
+async fn gate_mcp_tool_call(
+    layout: &HomeLayout,
+    server_name: &str,
+    message: &Value,
+) -> Result<Option<Value>> {
+    if message.get("method").and_then(Value::as_str) != Some("tools/call") {
+        return Ok(None);
+    }
+    let id = message.get("id").cloned().unwrap_or(Value::Null);
+    let Some(params) = message.get("params").and_then(Value::as_object) else {
+        return Ok(Some(jsonrpc_error(
+            id,
+            -32602,
+            "Malformed tools/call: missing params",
+        )));
+    };
+    let Some(tool_name) = params.get("name").and_then(Value::as_str) else {
+        return Ok(Some(jsonrpc_error(
+            id,
+            -32602,
+            "Malformed tools/call: missing params.name",
+        )));
+    };
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let call = ToolCall {
+        tool: gateway_tool_name(server_name, tool_name),
+        input: arguments,
+    };
+    let eval = decide_call(layout, &call).await?;
+    match &eval.decision {
+        Decision::Allow => Ok(None),
+        Decision::Gommage { reason, hard_stop } => Ok(Some(gateway_denied_response(
+            id, &call.tool, reason, *hard_stop, &eval,
+        ))),
+        Decision::AskPicto {
+            reason,
+            required_scope,
+        } => Ok(Some(gateway_ask_response(
+            id,
+            &call.tool,
+            reason,
+            required_scope,
+            &eval,
+        ))),
+    }
+}
+
+fn gateway_tool_name(server_name: &str, tool_name: &str) -> String {
+    format!(
+        "mcp__{}__{}",
+        sanitize_mcp_segment(server_name),
+        sanitize_mcp_segment(tool_name)
+    )
+}
+
+fn sanitize_mcp_segment(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "unnamed".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn gateway_denied_response(
+    id: Value,
+    tool: &str,
+    reason: &str,
+    hard_stop: bool,
+    eval: &EvalResult,
+) -> Value {
+    let prefix = if hard_stop {
+        "gommage denied MCP tool call (hard-stop)"
+    } else {
+        "gommage denied MCP tool call"
+    };
+    mcp_tool_error_response(id, format!("{prefix}: {reason}"), tool, eval)
+}
+
+fn gateway_ask_response(
+    id: Value,
+    tool: &str,
+    reason: &str,
+    required_scope: &str,
+    eval: &EvalResult,
+) -> Value {
+    mcp_tool_error_response(
+        id,
+        format!("gommage requires picto scope {required_scope:?}: {reason}"),
+        tool,
+        eval,
+    )
+}
+
+fn mcp_tool_error_response(id: Value, text: String, tool: &str, eval: &EvalResult) -> Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": {
+            "content": [{"type": "text", "text": text}],
+            "isError": true,
+            "_meta": {
+                "com.gommage/decision": {
+                "gateway_tool": tool,
+                "policy_version": eval.policy_version,
+                    "matched_rule": &eval.matched_rule,
+                    "capabilities": &eval.capabilities,
+                }
+            }
+        }
+    })
+}
+
+fn jsonrpc_error(id: Value, code: i64, message: &str) -> Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {
+            "code": code,
+            "message": message,
+        }
+    })
 }
 
 fn bypass_enabled() -> bool {
@@ -226,32 +487,9 @@ fn write_hook_response(decision: &str, reason: &str) -> Result<()> {
     Ok(())
 }
 
-fn handle_info_flag() -> Result<bool> {
-    let mut args = env::args().skip(1);
-    let Some(arg) = args.next() else {
-        return Ok(false);
-    };
-
-    if let Some(extra) = args.next() {
-        anyhow::bail!("unexpected argument {extra:?}; try --help");
-    }
-
-    match arg.as_str() {
-        "-V" | "--version" => {
-            println!("gommage-mcp {}", env!("CARGO_PKG_VERSION"));
-            Ok(true)
-        }
-        "-h" | "--help" => {
-            print_help();
-            Ok(true)
-        }
-        _ => anyhow::bail!("unexpected argument {arg:?}; try --help"),
-    }
-}
-
 fn print_help() {
     println!(
-        "gommage-mcp {}\n\nUSAGE:\n    gommage-mcp < hook.json\n\nReads one Claude Code PreToolUse hook payload from stdin and writes one permission response JSON object to stdout.\n\nOPTIONS:\n    -h, --help       Print help\n    -V, --version    Print version",
+        "gommage-mcp {}\n\nUSAGE:\n    gommage-mcp < hook.json\n    gommage-mcp --gateway [--server-name NAME] -- <upstream-command> [args...]\n\nReads one Claude Code PreToolUse hook payload from stdin and writes one permission response JSON object to stdout. Gateway mode proxies line-delimited MCP JSON-RPC over stdio, gates tools/call requests through Gommage, and returns MCP tool errors for denied calls without forwarding them upstream.\n\nOPTIONS:\n    --gateway             Run stdio MCP gateway mode\n    --server-name NAME    Server segment used for mcp__NAME__tool capability mapping\n    -h, --help            Print help\n    -V, --version         Print version",
         env!("CARGO_PKG_VERSION")
     );
 }
@@ -315,7 +553,7 @@ async fn forward_to_daemon(
     let req = serde_json::json!({ "op": "decide", "call": call });
     w.write_all(serde_json::to_string(&req)?.as_bytes()).await?;
     w.write_all(b"\n").await?;
-    let mut lines = BufReader::new(r).lines();
+    let mut lines = TokioBufReader::new(r).lines();
     let line = lines
         .next_line()
         .await?

@@ -5,7 +5,7 @@ use gommage_audit::{
 };
 use gommage_core::{
     Capability, Decision, MatchedRule, Policy, Rule, RuleDecision, evaluate, hardstop,
-    runtime::{Expedition, HomeLayout, default_policy_env},
+    runtime::{Expedition, HomeLayout, default_policy_env, load_active_policy},
 };
 use serde::Serialize;
 use std::process::ExitCode;
@@ -160,10 +160,12 @@ fn build_decision_trace_report(
     layout: &HomeLayout,
     entry: &AuditEntry,
 ) -> Result<ExplainDecisionTraceReport> {
-    let env = Expedition::load(&layout.expedition_file)?
-        .map(|e| e.policy_env())
+    let expedition = Expedition::load(&layout.expedition_file)?;
+    let env = expedition
+        .as_ref()
+        .map(Expedition::policy_env)
         .unwrap_or_else(default_policy_env);
-    let policy = Policy::load_from_dir(&layout.policy_dir, &env)
+    let policy = load_active_policy(layout, expedition.as_ref(), &env)
         .context("loading active policy for explain trace")?;
     let active_eval = evaluate(&entry.capabilities, &policy);
     let hard_stop = hardstop::check(&entry.capabilities);

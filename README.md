@@ -307,7 +307,9 @@ Stable automation contracts:
 | `repair agent <agent> --dry-run` | Inspect legacy/broken Gommage hook repair before mutating host config. |
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
 | `smoke --json` | Built-in semantic post-install checks. |
+| `sandbox advise --json` | Advisory native sandbox bridge guidance for Codex, bwrap, macOS Seatbelt, and AppArmor. This is not enforcement. |
 | `policy test --json` | Project-owned policy regression fixtures. |
+| `policy layers --json` | Active policy layer order, per-layer rule counts, and effective policy version hash. |
 | `policy lint --strict --json` | Strict authoring checks for duplicate names, exact-match shadowing, empty matches, empty patterns, and weak rule metadata. |
 | `replay --audit <file> --policy <dir> --json` | Re-evaluate historical audit decisions against a candidate policy. |
 | `policy diff --from <dir> --to <dir> --against <file> --json` | Compare two policy directories against the same historical audit decisions. |
@@ -634,6 +636,11 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
   confirmation-protected approval TTL/use-count presets
 - Built-in semantic smoke checks and project-owned policy regression fixtures
 - Capability mapping inspector for policy-authoring and mapper-debugging loops
+- Deterministic policy layering for explicit org policy, project-local policy,
+  and user policy, inspectable with `gommage policy layers --json`
+- Initial stdio MCP gateway mode in `gommage-mcp --gateway`, gating
+  `tools/call` requests before forwarding allowed calls to an upstream server
+- Advisory sandbox bridge output through `gommage sandbox advise`
 - Packaged `gommage-stdlib` crate assets for future crates.io support
 - Sigstore-signed binary release artifacts + installer verification
 - Determinism-critical deps pinned with `=x.y.z`, root workspace internal pins auto-synchronized for release PRs, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
@@ -646,7 +653,7 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
 - Rego policies via `regorus`
 - Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
-- Generic MCP server mode for agents without a PreToolUse concept
+- Broader MCP gateway hardening for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`
 - Native ntfy approval provider and richer editable approval forms on top of
   the generic webhook payload
@@ -659,7 +666,8 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
 - Push approvals (ntfy, Slack native)
 - Prometheus metrics endpoint
 - Team-shared picto store (encrypted on S3)
-- Policy inheritance (org → project → user)
+- Policy inheritance beyond the current explicit org/project/user directory
+  layering
 - Homebrew tap, AUR package, SBOM assets, and release provenance commands
 
 ## Not in scope

@@ -53,6 +53,34 @@ fn failing_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::Pat
     (bin, capture)
 }
 
+#[cfg(unix)]
+fn gateway_upstream(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let capture = temp.path().join("gateway-upstream.jsonl");
+    let script = temp.path().join("gateway-upstream.sh");
+    fs::write(
+        &script,
+        r#"#!/bin/sh
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$GOMMAGE_GATEWAY_CAPTURE"
+  case "$line" in
+    *tools/list*)
+      printf '{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"read_file","description":"read","inputSchema":{"type":"object"}}]}}\n'
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"forwarded"}],"isError":false}}\n'
+      ;;
+  esac
+done
+"#,
+    )
+    .unwrap();
+    let mut perms = fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script, perms).unwrap();
+    (script, capture)
+}
+
 #[test]
 fn fallback_path_writes_signed_audit_entry_when_daemon_is_absent() {
     let temp = tempdir().unwrap();
@@ -89,6 +117,118 @@ fn fallback_path_writes_signed_audit_entry_when_daemon_is_absent() {
     );
     let approvals = fs::read_to_string(&layout.approvals_log).unwrap();
     assert!(approvals.contains(r#""required_scope":"git.push:main""#));
+}
+
+#[test]
+#[cfg(unix)]
+fn gateway_forwards_allowed_tool_calls() {
+    let temp = tempdir().unwrap();
+    let layout = HomeLayout::at(&temp.path().join(".gommage"));
+    layout.ensure().unwrap();
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    copy_yaml_files(&repo_root.join("capabilities"), &layout.capabilities_dir);
+    fs::write(
+        layout.policy_dir.join("10-gateway.yaml"),
+        r#"
+- name: allow-gateway-read
+  decision: allow
+  match:
+    any_capability: ["mcp.read:mcp__fixture__read_file"]
+"#,
+    )
+    .unwrap();
+    let (upstream, capture) = gateway_upstream(&temp);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gommage-mcp"))
+        .env("GOMMAGE_HOME", &layout.root)
+        .env("GOMMAGE_GATEWAY_CAPTURE", &capture)
+        .args(["--gateway", "--server-name", "fixture", "--"])
+        .arg(&upstream)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"README.md"}}}
+"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(r#""text":"forwarded""#));
+    let captured = fs::read_to_string(capture).unwrap();
+    assert!(captured.contains(r#""method":"tools/call""#));
+    assert_eq!(
+        verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
+        1
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn gateway_denies_without_forwarding_tool_call() {
+    let temp = tempdir().unwrap();
+    let layout = HomeLayout::at(&temp.path().join(".gommage"));
+    layout.ensure().unwrap();
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    copy_yaml_files(&repo_root.join("capabilities"), &layout.capabilities_dir);
+    fs::write(
+        layout.policy_dir.join("10-gateway.yaml"),
+        r#"
+- name: deny-gateway-delete
+  decision: gommage
+  match:
+    any_capability: ["mcp.write:mcp__fixture__delete_file"]
+  reason: "delete through gateway is blocked"
+"#,
+    )
+    .unwrap();
+    let (upstream, capture) = gateway_upstream(&temp);
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_gommage-mcp"))
+        .env("GOMMAGE_HOME", &layout.root)
+        .env("GOMMAGE_GATEWAY_CAPTURE", &capture)
+        .args(["--gateway", "--server-name", "fixture", "--"])
+        .arg(&upstream)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"delete_file","arguments":{"path":"README.md"}}}
+"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains(r#""isError":true"#));
+    assert!(stdout.contains("delete through gateway is blocked"));
+    assert!(stdout.contains(r#""gateway_tool":"mcp__fixture__delete_file""#));
+    assert!(!capture.exists() || fs::read_to_string(capture).unwrap().is_empty());
+    assert_eq!(
+        verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
+        1
+    );
 }
 
 #[test]

@@ -185,6 +185,10 @@ run_capture "quickstart apply without daemon start" "quickstart.txt" \
 run_capture "verify readiness" "verify.json" gommage_cmd verify --json
 run_capture "public policy fixtures" "policy-fixtures.json" \
   gommage_cmd policy test "$public_fixture" --json
+run_capture "policy layers" "policy-layers.json" \
+  gommage_cmd policy layers --json
+run_capture "sandbox advice" "sandbox-advice.json" \
+  gommage_cmd sandbox advise --json
 run_capture "beta readiness" "beta-check.json" \
   gommage_cmd beta check --json --agent "$agent" --policy-test "$public_fixture"
 run_capture "agent status" "agent-status.json" \

@@ -114,6 +114,28 @@ CI re-runs the determinism suite **10 times** per build as an additional defense
 
 Every `Policy` carries a `version_hash` field — a SHA-256 over the concatenation of `(relative_file_path, substituted_file_contents)` in lexicographic order. Relative paths make the same policy tree hash identically under different `GOMMAGE_HOME` roots; substituted contents make different effective canvases produce different hashes. The hash goes into every audit entry so `gommage explain <id>` can report not just which rule fired, but which version of the rule set it was.
 
+When multiple policy layers are active, the hash also includes the layer name
+before each relative file path. Runtime layer order is:
+
+1. explicit org policy from `GOMMAGE_ORG_POLICY_DIR`
+2. explicit project policy from `GOMMAGE_PROJECT_POLICY_DIR`, or
+   `<expedition-root>/.gommage/policy.d` when an expedition is active
+3. user policy at `$GOMMAGE_HOME/policy.d`
+
+Policy evaluation is still first-match-wins after compiled hard-stops, so
+earlier layers have higher precedence. Use `gommage policy layers --json` to
+inspect the layer order and effective hash on a host.
+
+## MCP gateway path
+
+`gommage-mcp --gateway --server-name <name> -- <upstream-command>` is a stdio
+MCP proxy path for hosts whose native hook surface does not expose all tool
+calls. The gateway maps an MCP `tools/call` request to a Gommage tool name of
+`mcp__<name>__<tool>`, evaluates it, and only forwards the original JSON-RPC
+line to the upstream server when the decision resolves to allow. Denied and
+picto-required calls return MCP tool results with `isError: true`; they are not
+sent to the upstream process.
+
 ## Picto scope matching
 
 V0.1 uses **exact equality** between the required scope and the stored scope. No globbing, no hierarchy. Rationale: over-broad pictos are a security smell; we'd rather surface a second `ask` than silently auto-grant too much.

@@ -99,6 +99,14 @@ Codex ships OS-level confinement as a first-class feature — **use it**:
 
 Gommage + Codex is a layered posture: Codex's OS-level sandbox covers the file-touching gap that Gommage cannot see at the hook layer; Gommage governs the Bash surface declaratively and audits.
 
+For MCP tools that can be routed through a stdio proxy, `gommage-mcp
+--gateway --server-name <name> -- <upstream-command>` provides a narrower
+alternative to relying on the Codex hook. The gateway evaluates MCP
+`tools/call` requests as `mcp__<name>__<tool>`, forwards allowed calls, and
+returns an MCP tool error without forwarding denied or picto-required calls.
+This does not cover Codex built-in file tools and does not replace Codex's OS
+sandbox.
+
 Typical combos:
 
 ```sh
@@ -108,6 +116,9 @@ codex exec --sandbox read-only "audit this repo"
 # Refactor run — Codex can patch files within cwd (kernel-enforced),
 # Gommage governs any Bash the agent wants to run.
 codex exec --sandbox workspace-write "apply the refactor we discussed"
+
+# MCP server through Gommage's stdio gateway.
+gommage-mcp --gateway --server-name filesystem -- <stdio-mcp-server> .
 ```
 
 ### Wiring

@@ -112,46 +112,53 @@ pub struct Policy {
     pub version_hash: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyLayer {
+    pub name: String,
+    pub dir: PathBuf,
+}
+
+impl PolicyLayer {
+    pub fn new(name: impl Into<String>, dir: impl Into<PathBuf>) -> Self {
+        Self {
+            name: name.into(),
+            dir: dir.into(),
+        }
+    }
+}
+
 impl Policy {
     /// Load every `*.yaml` / `*.yml` file under `dir` in lexicographic filename order,
     /// substituting `${VAR}` references from `env` at load time.
     pub fn load_from_dir(dir: &Path, env: &HashMap<String, String>) -> Result<Self, GommageError> {
-        let mut files: Vec<PathBuf> = Vec::new();
-        if dir.exists() {
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_file()
-                    && path
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        .is_some_and(|e| e == "yaml" || e == "yml")
-                {
-                    files.push(path);
-                }
-            }
-        }
-        files.sort();
+        load_policy_files(
+            &collect_policy_files(dir)?,
+            env,
+            HashMode::Legacy { root: dir },
+        )
+    }
 
-        let mut rules: Vec<Rule> = Vec::new();
-        let mut version = sha2::Sha256::new();
-        use sha2::Digest as _;
-
-        for file in &files {
-            let raw = fs::read_to_string(file)?;
-            let substituted = substitute_env(&raw, env);
-            update_policy_hash(&mut version, dir, file, &substituted);
-            let raw_rules: Vec<RawRule> = serde_yaml::from_str(&substituted)?;
-            for (index, raw) in raw_rules.into_iter().enumerate() {
-                rules.push(compile_rule(raw, file.clone(), index)?);
-            }
+    /// Load policy files from ordered layers. Earlier layers have higher
+    /// precedence because evaluation is first-match-wins.
+    pub fn load_from_layers(
+        layers: &[PolicyLayer],
+        env: &HashMap<String, String>,
+    ) -> Result<Self, GommageError> {
+        if layers.len() == 1 && layers[0].name == "user" {
+            return Self::load_from_dir(&layers[0].dir, env);
         }
 
-        let version_hash = format!("sha256:{}", hex::encode(version.finalize()));
-        Ok(Policy {
-            rules,
-            version_hash,
-        })
+        let mut files = Vec::new();
+        for layer in layers {
+            for file in collect_policy_files(&layer.dir)? {
+                files.push(LayeredPolicyFile {
+                    layer_name: layer.name.clone(),
+                    layer_root: layer.dir.clone(),
+                    path: file.path,
+                });
+            }
+        }
+        load_policy_files(&files, env, HashMode::Layered)
     }
 
     /// Same as `load_from_dir` but from an already-parsed string (handy for tests).
@@ -180,6 +187,85 @@ impl Policy {
     }
 }
 
+#[derive(Debug)]
+struct LayeredPolicyFile {
+    layer_name: String,
+    layer_root: PathBuf,
+    path: PathBuf,
+}
+
+enum HashMode<'a> {
+    Legacy { root: &'a Path },
+    Layered,
+}
+
+fn collect_policy_files(dir: &Path) -> Result<Vec<LayeredPolicyFile>, GommageError> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    if dir.exists() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e == "yaml" || e == "yml")
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+
+    Ok(files
+        .into_iter()
+        .map(|path| LayeredPolicyFile {
+            layer_name: "user".to_string(),
+            layer_root: dir.to_path_buf(),
+            path,
+        })
+        .collect())
+}
+
+fn load_policy_files(
+    files: &[LayeredPolicyFile],
+    env: &HashMap<String, String>,
+    hash_mode: HashMode<'_>,
+) -> Result<Policy, GommageError> {
+    let mut rules: Vec<Rule> = Vec::new();
+    let mut version = sha2::Sha256::new();
+    use sha2::Digest as _;
+
+    for file in files {
+        let raw = fs::read_to_string(&file.path)?;
+        let substituted = substitute_env(&raw, env);
+        match hash_mode {
+            HashMode::Legacy { root } => {
+                update_policy_hash(&mut version, root, &file.path, &substituted);
+            }
+            HashMode::Layered => {
+                update_layered_policy_hash(
+                    &mut version,
+                    &file.layer_name,
+                    &file.layer_root,
+                    &file.path,
+                    &substituted,
+                );
+            }
+        }
+        let raw_rules: Vec<RawRule> = serde_yaml::from_str(&substituted)?;
+        for (index, raw) in raw_rules.into_iter().enumerate() {
+            rules.push(compile_rule(raw, file.path.clone(), index)?);
+        }
+    }
+
+    let version_hash = format!("sha256:{}", hex::encode(version.finalize()));
+    Ok(Policy {
+        rules,
+        version_hash,
+    })
+}
+
 fn update_policy_hash(
     hash: &mut sha2::Sha256,
     root: &Path,
@@ -194,6 +280,29 @@ fn update_policy_hash(
         .collect::<Vec<_>>()
         .join("/");
     hash.update(b"file\0");
+    hash.update(rel.as_bytes());
+    hash.update(b"\0content\0");
+    hash.update(substituted_contents.as_bytes());
+    hash.update(b"\0");
+}
+
+fn update_layered_policy_hash(
+    hash: &mut sha2::Sha256,
+    layer_name: &str,
+    layer_root: &Path,
+    file: &Path,
+    substituted_contents: &str,
+) {
+    use sha2::Digest as _;
+    let rel = file.strip_prefix(layer_root).unwrap_or(file);
+    let rel = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    hash.update(b"layer\0");
+    hash.update(layer_name.as_bytes());
+    hash.update(b"\0file\0");
     hash.update(rel.as_bytes());
     hash.update(b"\0content\0");
     hash.update(substituted_contents.as_bytes());
@@ -340,6 +449,88 @@ mod tests {
         let pa = Policy::from_yaml_string(yaml, &env_a, "10-default.yaml").unwrap();
         let pb = Policy::from_yaml_string(yaml, &env_b, "10-default.yaml").unwrap();
         assert_ne!(pa.version_hash, pb.version_hash);
+    }
+
+    #[test]
+    fn layered_policy_preserves_layer_order() {
+        let org = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        std::fs::write(
+            org.path().join("10-org.yaml"),
+            r#"
+- name: org-deny-secret
+  decision: gommage
+  match: { any_capability: ["fs.write:/repo/secret"] }
+  reason: "org wins"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            project.path().join("10-project.yaml"),
+            r#"
+- name: project-allow-secret
+  decision: allow
+  match: { any_capability: ["fs.write:/repo/secret"] }
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            user.path().join("10-user.yaml"),
+            r#"
+- name: user-allow-all
+  decision: allow
+  match: { any_capability: ["fs.write:*"] }
+"#,
+        )
+        .unwrap();
+
+        let policy = Policy::load_from_layers(
+            &[
+                PolicyLayer::new("org", org.path()),
+                PolicyLayer::new("project", project.path()),
+                PolicyLayer::new("user", user.path()),
+            ],
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(policy.rules[0].name, "org-deny-secret");
+        assert_eq!(policy.rules[1].name, "project-allow-secret");
+        assert_eq!(policy.rules[2].name, "user-allow-all");
+    }
+
+    #[test]
+    fn layered_policy_hash_includes_layer_name() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let yaml = r#"
+- name: allow-read
+  decision: allow
+  match:
+    any_capability: ["fs.read:/repo/**"]
+"#;
+        std::fs::write(a.path().join("10-default.yaml"), yaml).unwrap();
+        std::fs::write(b.path().join("10-default.yaml"), yaml).unwrap();
+
+        let org_user = Policy::load_from_layers(
+            &[
+                PolicyLayer::new("org", a.path()),
+                PolicyLayer::new("user", b.path()),
+            ],
+            &HashMap::new(),
+        )
+        .unwrap();
+        let project_user = Policy::load_from_layers(
+            &[
+                PolicyLayer::new("project", a.path()),
+                PolicyLayer::new("user", b.path()),
+            ],
+            &HashMap::new(),
+        )
+        .unwrap();
+
+        assert_ne!(org_user.version_hash, project_user.version_hash);
     }
 
     #[test]
