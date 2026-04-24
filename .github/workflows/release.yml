@@ -224,6 +224,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -312,6 +313,10 @@ jobs:
             --bundle "${bundle}" \
             --certificate-identity "${SIGNER_IDENTITY}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      - name: Attest artifact provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/${{ matrix.asset }}.tar.gz
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.UPLOAD_TAG }}
@@ -319,3 +324,59 @@ jobs:
             dist/${{ matrix.asset }}.tar.gz
             dist/${{ matrix.asset }}.tar.gz.sha256
             dist/${{ matrix.asset }}.tar.gz.sigstore.json
+
+  release-evidence:
+    name: release evidence
+    if: >
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gommage-cli-v'))
+      || github.event_name == 'workflow_dispatch'
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    env:
+      UPLOAD_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: Resolve and validate release tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            upload_tag="${{ github.event.inputs.tag }}"
+          else
+            upload_tag="${GITHUB_REF#refs/tags/}"
+          fi
+          expected_ref="refs/tags/${upload_tag}"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "::error::Release evidence is tied to ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
+            exit 1
+          fi
+          echo "UPLOAD_TAG=${upload_tag}" >> "$GITHUB_ENV"
+      - name: Prepare evidence directory
+        run: mkdir -p dist
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          artifact-name: gommage-${{ env.UPLOAD_TAG }}.cdx.json
+          output-file: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Upload SBOM release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release upload "${UPLOAD_TAG}" \
+            "dist/gommage-${UPLOAD_TAG}.cdx.json" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+      - name: Attest SBOM provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json

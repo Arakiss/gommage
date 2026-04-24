@@ -220,8 +220,9 @@ Features:
   - Keep the signed GitHub Release installer as the source of truth, but make
     native package-manager installs available for common operator paths.
 - SBOM and provenance
-  - Add SBOM assets, GitHub artifact attestations, and a `verify-release`
-    command for operators.
+  - Current release workflow generates CycloneDX SBOM assets and GitHub
+    artifact attestations for release artifacts; `scripts/verify-release.sh`
+    is the operator/package-manager verification surface.
 
 Primary code surfaces:
 
@@ -247,8 +248,9 @@ Exit criteria:
 4. Extend TUI watch with decision-stream and active-picto panes before remote
    approval providers.
 5. Ship MCP gateway before claiming broader host support.
-6. Ship package-manager integrations only after the signed release installer has
-   stayed green through multiple alpha releases.
+6. Ship package-manager integrations only after the signed release installer,
+   SBOM asset, and provenance verification path have stayed green through
+   multiple alpha releases.
 
 ## 1.0 Bar
 
@@ -279,8 +281,8 @@ Required trust qualities:
   anomalies, policy versions, expeditions, and signed lifecycle events.
 - Host support claims are narrow and evidence-backed. Unsupported hook timing is
   named as unsupported instead of hidden behind roadmap language.
-- Release assets include archives, checksums, Sigstore bundles, and provenance
-  evidence for every supported platform.
+- Release assets include archives, checksums, Sigstore bundles, SBOM evidence,
+  and provenance evidence for every supported platform.
 
 Required ecosystem qualities:
 

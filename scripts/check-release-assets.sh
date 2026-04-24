@@ -21,8 +21,9 @@ The check expects the current beta release channel shape:
   - 4 platform archives
   - 4 .sha256 checksum files
   - 4 .sigstore.json Sigstore bundles
+  - optional CycloneDX SBOM: gommage-<tag>.cdx.json
 
-Extra assets are reported as warnings but do not fail the check.
+Unknown extra assets are reported as warnings but do not fail the check.
 USAGE
 }
 
@@ -78,6 +79,12 @@ asset_count="$(printf '%s\n' "$asset_names" | awk 'NF { count += 1 } END { print
 archive_count="$(printf '%s\n' "$asset_names" | awk '/^gommage-(aarch64-darwin|aarch64-linux|x86_64-darwin|x86_64-linux)\.tar\.gz$/ { count += 1 } END { print count + 0 }')"
 checksum_count="$(printf '%s\n' "$asset_names" | awk '/^gommage-(aarch64-darwin|aarch64-linux|x86_64-darwin|x86_64-linux)\.tar\.gz\.sha256$/ { count += 1 } END { print count + 0 }')"
 sigstore_count="$(printf '%s\n' "$asset_names" | awk '/^gommage-(aarch64-darwin|aarch64-linux|x86_64-darwin|x86_64-linux)\.tar\.gz\.sigstore\.json$/ { count += 1 } END { print count + 0 }')"
+sbom_asset="gommage-$tag.cdx.json"
+if printf '%s\n' "$asset_names" | grep -Fx "$sbom_asset" >/dev/null 2>&1; then
+  sbom_count=1
+else
+  sbom_count=0
+fi
 
 expected_assets="
 gommage-aarch64-darwin.tar.gz
@@ -104,7 +111,8 @@ done
 
 unexpected=""
 for asset in $asset_names; do
-  if ! printf '%s\n' "$expected_assets" | grep -Fx "$asset" >/dev/null 2>&1; then
+  if ! printf '%s\n' "$expected_assets" | grep -Fx "$asset" >/dev/null 2>&1 \
+    && [ "$asset" != "$sbom_asset" ]; then
     unexpected="${unexpected}${unexpected:+
 }$asset"
   fi
@@ -113,7 +121,7 @@ done
 status="pass"
 if [ -n "$missing" ] || [ "$archive_count" -ne 4 ] || [ "$checksum_count" -ne 4 ] || [ "$sigstore_count" -ne 4 ]; then
   status="fail"
-elif [ "$asset_count" -ne 12 ] || [ -n "$unexpected" ]; then
+elif [ -n "$unexpected" ]; then
   status="warn"
 fi
 
@@ -148,13 +156,15 @@ if [ "$json" = "true" ]; then
   printf '    "assets": %s,\n' "$asset_count"
   printf '    "archives": %s,\n' "$archive_count"
   printf '    "checksums": %s,\n' "$checksum_count"
-  printf '    "sigstore_bundles": %s\n' "$sigstore_count"
+  printf '    "sigstore_bundles": %s,\n' "$sigstore_count"
+  printf '    "cyclonedx_sbom": %s\n' "$sbom_count"
   printf '  },\n'
   printf '  "expected": {\n'
-  printf '    "assets": 12,\n'
+  printf '    "required_assets": 12,\n'
   printf '    "archives": 4,\n'
   printf '    "checksums": 4,\n'
-  printf '    "sigstore_bundles": 4\n'
+  printf '    "sigstore_bundles": 4,\n'
+  printf '    "cyclonedx_sbom": "optional"\n'
   printf '  },\n'
   printf '  "missing": %s,\n' "$missing_json"
   printf '  "unexpected": %s\n' "$unexpected_json"
@@ -167,7 +177,7 @@ else
   echo "tag: $tag"
   echo "name: $release_name"
   echo "target: $release_target"
-  echo "assets: $asset_count total, $archive_count archives, $checksum_count checksums, $sigstore_count sigstore bundles"
+  echo "assets: $asset_count total, $archive_count archives, $checksum_count checksums, $sigstore_count sigstore bundles, $sbom_count CycloneDX SBOM"
   echo "url: $release_url"
   if [ -n "$missing" ]; then
     echo "missing:"

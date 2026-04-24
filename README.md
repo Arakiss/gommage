@@ -200,7 +200,7 @@ The canonical machine-readable command contract lives in
 [`docs/agent-command-manifest.json`](docs/agent-command-manifest.json).
 Host validation evidence lives in [`docs/host-smoke.md`](docs/host-smoke.md)
 and `scripts/host-smoke.sh`. Release asset evidence is scriptable through
-`scripts/check-release-assets.sh`.
+`scripts/check-release-assets.sh` and `scripts/verify-release.sh`.
 
 Install or update only the skill before operating the project:
 
@@ -611,6 +611,7 @@ execution order.
 
 ```sh
 sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-alpha.N> --json
+sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-alpha.N> --json
 GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent claude
 GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent codex
 ```
@@ -642,7 +643,8 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
   `tools/call` requests before forwarding allowed calls to an upstream server
 - Advisory sandbox bridge output through `gommage sandbox advise`
 - Packaged `gommage-stdlib` crate assets for future crates.io support
-- Sigstore-signed binary release artifacts + installer verification
+- Sigstore-signed binary release artifacts, release verification script,
+  CycloneDX SBOM generation, and GitHub artifact provenance attestations
 - Determinism-critical deps pinned with `=x.y.z`, root workspace internal pins auto-synchronized for release PRs, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
 
 **v1.0** — hackable by others
@@ -668,7 +670,7 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
 - Team-shared picto store (encrypted on S3)
 - Policy inheritance beyond the current explicit org/project/user directory
   layering
-- Homebrew tap, AUR package, SBOM assets, and release provenance commands
+- Homebrew tap and AUR package
 
 ## Not in scope
 

@@ -7,6 +7,14 @@ Actions. Each platform archive has three release assets:
 - `gommage-<arch>-<os>.tar.gz.sha256`
 - `gommage-<arch>-<os>.tar.gz.sigstore.json`
 
+New CLI releases produced by the current workflow also attach a CycloneDX SBOM:
+
+- `gommage-<tag>.cdx.json`
+
+Older alpha releases may not have the SBOM asset or GitHub artifact
+attestations. Treat that as historical release evidence, not the target release
+shape for beta.
+
 The `.sigstore.json` file is a Cosign bundle containing the signature,
 certificate, and transparency-log proof for the archive. The release workflow
 signs the archive with the GitHub Actions OIDC identity for the release tag:
@@ -48,6 +56,29 @@ cosign verify-blob "$asset" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 
 shasum -c "$asset.sha256"
+```
+
+Operator verification from a checkout:
+
+```sh
+sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-alpha.N
+sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-alpha.N --json
+```
+
+`verify-release.sh` downloads the platform archive, checksum, and Sigstore
+bundle; verifies the release-tag workflow identity; and checks GitHub artifact
+attestations when present. Use `--require-sbom` and `--require-provenance` for
+beta or package-manager release gates.
+
+GitHub artifact attestations are produced with `actions/attest` from the same
+tag-scoped release workflow that builds the archives. Verify them manually with:
+
+```sh
+gh attestation verify "$asset" \
+  --repo Arakiss/gommage \
+  --cert-identity "https://github.com/Arakiss/gommage/.github/workflows/release.yml@refs/tags/$tag" \
+  --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --source-ref "refs/tags/$tag"
 ```
 
 Installer flags:

@@ -14,7 +14,9 @@ curl --proto '=https' --tlsv1.2 -sSf \
 The installer downloads the `gommage-cli-v*` release archive for the current
 OS and architecture, verifies the Sigstore bundle, verifies the SHA-256
 checksum, and only then extracts `gommage`, `gommage-daemon`, and
-`gommage-mcp` into the install directory.
+`gommage-mcp` into the install directory. Operator/package-manager verification
+can additionally check the CycloneDX SBOM and GitHub artifact attestation with
+`scripts/verify-release.sh`.
 
 Treat `gommage-cli-v*` as the product release tag stream. The public GitHub
 Release title should read `Gommage vX.Y.Z...` because users install the product,
@@ -47,12 +49,17 @@ to `main`. This keeps old binary tags installable while the alpha skill evolves.
 
 ## crates.io status
 
-As of April 22, 2026, the `gommage-*` crates are not published on crates.io.
+As of April 24, 2026, the `gommage-*` crates are not published on crates.io.
 crates.io publishing itself does not require paid billing, but it does require
 a crates.io account, an API token, and an explicit maintainer decision to claim
 the package names. The manifests intentionally keep `publish = false` until the
 publish pipeline is ready. This prevents accidental partial publication while
 the API, CLI, and policy stdlib are still changing quickly.
+
+Credential blocker: no crates.io token is configured or assumed in the
+repository. First publication requires the maintainer to create/confirm the
+crates.io account, claim the package names in the order below, and only then
+flip `publish = false` in the corresponding manifests.
 
 Current evidence:
 
@@ -158,6 +165,20 @@ concrete `gommage-cli-v<version>` tags. Use the installer's `latest` resolution
 or placeholder tags such as `gommage-cli-vX.Y.Z-alpha.N` in examples. Changelogs
 remain the release-history surface for concrete tags.
 
+Release artifact verification is also a manual/network gate:
+
+```sh
+sh scripts/check-release-assets.sh --json
+sh scripts/verify-release.sh --json
+```
+
+Use stricter package-manager gates once the current release line has SBOM and
+GitHub artifact attestations:
+
+```sh
+sh scripts/verify-release.sh --require-sbom --require-provenance
+```
+
 ## Gates before flipping `publish = false`
 
 First-publish gates are sequential. Before `gommage-stdlib` exists on
@@ -200,5 +221,5 @@ The target state is:
   components skip GitHub Release publication.
 - crates.io provides `cargo install gommage-cli` for Rust-native users once the
   package gates above pass.
-- Release automation publishes crates only after the binary release, SBOM, and
-  Sigstore checks are green.
+- Release automation publishes crates only after the binary release, SBOM,
+  Sigstore, and GitHub artifact attestation checks are green.
