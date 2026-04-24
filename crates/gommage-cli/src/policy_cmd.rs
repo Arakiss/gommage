@@ -15,6 +15,7 @@ use std::{
 
 use crate::{
     input::read_tool_call_from_stdin,
+    policy_diff::{PolicyDiffOptions, cmd_policy_diff},
     smoke::{SmokeStatus, SmokeSummary},
     util::path_display,
 };
@@ -43,6 +44,8 @@ pub(crate) enum PolicyCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Compare two policy directories against historical audit decisions.
+    Diff(PolicyDiffOptions),
     /// Capture a tool call from stdin as a YAML policy fixture.
     #[command(alias = "capture")]
     Snapshot {
@@ -406,10 +409,14 @@ pub(crate) fn print_policy_test_report(report: &PolicyTestReport) {
 }
 
 pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode> {
-    if matches!(sub, PolicyCmd::Schema) {
-        println!("{}", POLICY_FIXTURE_SCHEMA.trim_end());
-        return Ok(ExitCode::SUCCESS);
-    }
+    let sub = match sub {
+        PolicyCmd::Schema => {
+            println!("{}", POLICY_FIXTURE_SCHEMA.trim_end());
+            return Ok(ExitCode::SUCCESS);
+        }
+        PolicyCmd::Diff(options) => return cmd_policy_diff(options),
+        sub => sub,
+    };
 
     layout.ensure()?;
     let env = Expedition::load(&layout.expedition_file)?
@@ -437,6 +444,7 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
             println!("ok {}", file.display());
         }
         PolicyCmd::Schema => unreachable!("policy schema returns before home validation"),
+        PolicyCmd::Diff(_) => unreachable!("policy diff returns before home validation"),
         PolicyCmd::Test { file, json } => {
             let report = build_policy_test_report(&layout, &env, &file)?;
             if json {

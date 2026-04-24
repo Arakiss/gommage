@@ -1,17 +1,17 @@
 use anyhow::{Context, Result};
-use gommage_audit::{AuditEntry, AuditEventEntry};
 use gommage_core::{
     Capability, Decision, MatchedRule, Policy, evaluate, runtime::default_policy_env,
 };
 use serde::Serialize;
 use std::{
-    fs::File,
-    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
-use crate::util::path_display;
+use crate::{
+    audit_replay::{decision_summary, read_audit_decisions},
+    util::path_display,
+};
 
 #[derive(Debug, Clone, clap::Args)]
 pub(crate) struct ReplayOptions {
@@ -96,32 +96,16 @@ fn build_replay_report(audit_path: &Path, policy_path: &Path) -> Result<ReplayRe
     let env = default_policy_env();
     let policy = Policy::load_from_dir(policy_path, &env)
         .with_context(|| format!("loading candidate policy {}", policy_path.display()))?;
-    let file = File::open(audit_path)
-        .with_context(|| format!("opening audit {}", audit_path.display()))?;
-    let reader = BufReader::new(file);
-
-    let mut summary = ReplaySummary::default();
+    let scan = read_audit_decisions(audit_path)?;
+    let mut summary = ReplaySummary {
+        skipped_events: scan.skipped_events,
+        skipped_blank_lines: scan.skipped_blank_lines,
+        ..ReplaySummary::default()
+    };
     let mut entries = Vec::new();
 
-    for (index, line) in reader.lines().enumerate() {
-        let line_no = index + 1;
-        let line = line.with_context(|| format!("reading audit line {line_no}"))?;
-        if line.trim().is_empty() {
-            summary.skipped_blank_lines += 1;
-            continue;
-        }
-
-        let value: serde_json::Value =
-            serde_json::from_str(&line).with_context(|| format!("parsing audit line {line_no}"))?;
-        if value.get("kind").and_then(|kind| kind.as_str()) == Some("event") {
-            let _event: AuditEventEntry = serde_json::from_value(value)
-                .with_context(|| format!("parsing audit event line {line_no}"))?;
-            summary.skipped_events += 1;
-            continue;
-        }
-
-        let entry: AuditEntry = serde_json::from_value(value)
-            .with_context(|| format!("parsing audit decision line {line_no}"))?;
+    for record in scan.decisions {
+        let entry = record.entry;
         let replay = evaluate(&entry.capabilities, &policy);
         let changed = entry.decision != replay.decision;
         let change = if changed {
@@ -134,7 +118,7 @@ fn build_replay_report(audit_path: &Path, policy_path: &Path) -> Result<ReplayRe
         summary.decisions += 1;
 
         entries.push(ReplayEntry {
-            line: line_no,
+            line: record.line,
             audit_id: entry.id,
             timestamp: entry.ts,
             tool: entry.tool,
@@ -192,19 +176,5 @@ fn print_replay_report(report: &ReplayReport) {
             decision_summary(&entry.original_decision),
             decision_summary(&entry.replayed_decision)
         );
-    }
-}
-
-fn decision_summary(decision: &Decision) -> String {
-    match decision {
-        Decision::Allow => "allow".to_string(),
-        Decision::AskPicto { required_scope, .. } => format!("ask_picto:{required_scope}"),
-        Decision::Gommage { hard_stop, .. } => {
-            if *hard_stop {
-                "gommage:hard_stop".to_string()
-            } else {
-                "gommage".to_string()
-            }
-        }
     }
 }

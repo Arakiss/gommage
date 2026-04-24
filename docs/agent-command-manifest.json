@@ -4,7 +4,9 @@
   "placeholders": {
     "{report_bundle}": "Temporary JSON output path provided by the contract test.",
     "{replay_audit}": "Temporary audit JSONL fixture provided by the contract test.",
-    "{replay_policy}": "Temporary policy directory fixture provided by the contract test."
+    "{replay_policy}": "Temporary policy directory fixture provided by the contract test.",
+    "{policy_diff_from}": "Temporary baseline policy directory fixture provided by the contract test.",
+    "{policy_diff_to}": "Temporary candidate policy directory fixture provided by the contract test."
   },
   "commands": [
     {
@@ -116,6 +118,22 @@
         "{replay_audit}",
         "--policy",
         "{replay_policy}",
+        "--json"
+      ]
+    },
+    {
+      "id": "policy_diff_json",
+      "purpose": "Compare two policy directories against historical audit decisions.",
+      "stdin_mode": "none",
+      "argv": [
+        "policy",
+        "diff",
+        "--from",
+        "{policy_diff_from}",
+        "--to",
+        "{policy_diff_to}",
+        "--against",
+        "{replay_audit}",
         "--json"
       ]
     },
