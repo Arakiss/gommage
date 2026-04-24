@@ -385,3 +385,32 @@ events, policy versions, and per-entry before/after decisions.
 
 Human output is intended for review. JSON output is the stable automation
 contract for CI evidence, release notes, or policy-authoring tools.
+
+## Explain Trace
+
+Use `gommage explain <audit-id> --trace --json` when a single audit decision
+needs deeper policy-authoring context. Trace JSON includes the audited decision,
+active-policy decision, policy-version comparison, current-policy rule order,
+shadowed rules that would also match after the winning rule, hard-stop context
+when present, and fixture-authoring hints.
+
+Audit decision entries intentionally store `input_hash` and emitted
+capabilities, not raw tool input. Trace reports `input_available: false` for
+historical decisions instead of reconstructing or guessing input.
+
+## Strict Policy Lint
+
+Use `gommage policy lint --strict --json` against the active policy directory,
+or `gommage policy lint <file> --strict --json` for a candidate file. Strict
+lint first performs normal parse/compile validation, then reports actionable
+authoring issues:
+
+- duplicate rule names
+- exact duplicate match clauses that would shadow later rules
+- empty rule names, empty capability patterns, and empty required scopes
+- rules with no match clauses
+- missing human review reasons as warnings
+
+The JSON report includes `status`, `summary.errors`, `summary.warnings`, and
+`issues[]` with stable `severity`, `code`, `file`, `rule_name`, and
+`rule_index` fields.

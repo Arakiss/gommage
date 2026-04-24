@@ -17,7 +17,7 @@ pub enum RuleDecision {
 }
 
 /// A raw rule as it appears in YAML. Not yet compiled: glob patterns are still strings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawRule {
     pub name: String,
     pub decision: RuleDecision,
@@ -31,7 +31,7 @@ pub struct RawRule {
     pub reason: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawMatch {
     #[serde(default)]
     pub any_capability: Vec<String>,

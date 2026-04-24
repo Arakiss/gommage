@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use clap::Subcommand;
 use gommage_core::{
     Capability, Decision, MatchedRule, Policy, ToolCall, evaluate,
+    policy::{RawMatch, RawRule, substitute_env},
     runtime::{Expedition, HomeLayout, default_policy_env},
 };
 use gommage_stdlib::{
@@ -9,6 +10,7 @@ use gommage_stdlib::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -33,8 +35,17 @@ pub(crate) enum PolicyCmd {
     },
     /// Parse and compile every policy file under policy.d/.
     Check,
-    /// Parse a single file.
-    Lint { file: PathBuf },
+    /// Parse policy files and optionally run strict authoring checks.
+    Lint {
+        #[arg(value_name = "FILE")]
+        file: Option<PathBuf>,
+        /// Detect duplicate names, empty matches, shadowed exact-match rules, and weak metadata.
+        #[arg(long)]
+        strict: bool,
+        /// Emit a stable machine-readable lint report.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the JSON Schema for policy test fixture files.
     Schema,
     /// Run YAML policy regression fixtures against the active home.
@@ -250,6 +261,66 @@ pub(crate) struct PolicyTestCaseResult {
 }
 
 #[derive(Debug, Serialize)]
+struct PolicyLintReport {
+    status: SmokeStatus,
+    target: String,
+    strict: bool,
+    files: usize,
+    rules: usize,
+    summary: PolicyLintSummary,
+    issues: Vec<PolicyLintIssue>,
+}
+
+impl PolicyLintReport {
+    fn exit_code(&self) -> ExitCode {
+        if self.summary.errors == 0 {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[derive(Debug, Default, Serialize)]
+struct PolicyLintSummary {
+    errors: usize,
+    warnings: usize,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum PolicyLintSeverity {
+    Error,
+    Warning,
+}
+
+impl PolicyLintSeverity {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PolicyLintIssue {
+    severity: PolicyLintSeverity,
+    code: &'static str,
+    message: String,
+    file: String,
+    rule_name: Option<String>,
+    rule_index: Option<usize>,
+}
+
+struct RawPolicyRuleRecord {
+    file: PathBuf,
+    file_display: String,
+    index: usize,
+    rule: RawRule,
+}
+
+#[derive(Debug, Serialize)]
 struct PolicySnapshotDocument {
     version: u32,
     cases: Vec<PolicySnapshotCase>,
@@ -389,6 +460,271 @@ pub(crate) fn build_policy_test_report(
     })
 }
 
+fn build_policy_lint_report(
+    layout: &HomeLayout,
+    env: &HashMap<String, String>,
+    file: Option<&Path>,
+    strict: bool,
+) -> Result<PolicyLintReport> {
+    let target = file
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| layout.policy_dir.clone());
+    let compiled_policy = if target.is_file() {
+        let raw = std::fs::read_to_string(&target)
+            .with_context(|| format!("reading policy file {}", target.display()))?;
+        Policy::from_yaml_string(&raw, env, &target.to_string_lossy())
+            .with_context(|| format!("linting policy file {}", target.display()))?
+    } else {
+        Policy::load_from_dir(&target, env)
+            .with_context(|| format!("linting policy directory {}", target.display()))?
+    };
+    let files = collect_policy_files(&target)?;
+    let records = parse_raw_policy_rules(&files, env)?;
+    let mut issues = Vec::new();
+    if strict {
+        collect_strict_policy_issues(&records, &mut issues);
+    }
+    let summary = summarize_policy_lint_issues(&issues);
+
+    Ok(PolicyLintReport {
+        status: if summary.errors == 0 {
+            SmokeStatus::Pass
+        } else {
+            SmokeStatus::Fail
+        },
+        target: path_display(&target),
+        strict,
+        files: files.len(),
+        rules: compiled_policy.rules.len(),
+        summary,
+        issues,
+    })
+}
+
+fn collect_policy_files(target: &Path) -> Result<Vec<PathBuf>> {
+    if target.is_file() {
+        return Ok(vec![target.to_path_buf()]);
+    }
+    let mut files = Vec::new();
+    if target.exists() {
+        for entry in std::fs::read_dir(target)
+            .with_context(|| format!("reading policy directory {}", target.display()))?
+        {
+            let path = entry?.path();
+            if path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension == "yaml" || extension == "yml")
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn parse_raw_policy_rules(
+    files: &[PathBuf],
+    env: &HashMap<String, String>,
+) -> Result<Vec<RawPolicyRuleRecord>> {
+    let mut records = Vec::new();
+    for file in files {
+        let raw = std::fs::read_to_string(file)
+            .with_context(|| format!("reading policy file {}", file.display()))?;
+        let substituted = substitute_env(&raw, env);
+        let rules: Vec<RawRule> = serde_yaml::from_str(&substituted)
+            .with_context(|| format!("parsing policy file {}", file.display()))?;
+        for (index, rule) in rules.into_iter().enumerate() {
+            records.push(RawPolicyRuleRecord {
+                file: file.clone(),
+                file_display: path_display(file),
+                index,
+                rule,
+            });
+        }
+    }
+    Ok(records)
+}
+
+fn collect_strict_policy_issues(
+    records: &[RawPolicyRuleRecord],
+    issues: &mut Vec<PolicyLintIssue>,
+) {
+    if records.is_empty() {
+        issues.push(PolicyLintIssue {
+            severity: PolicyLintSeverity::Error,
+            code: "no_policy_rules",
+            message: "strict lint requires at least one policy rule".to_string(),
+            file: "<policy>".to_string(),
+            rule_name: None,
+            rule_index: None,
+        });
+        return;
+    }
+
+    let mut names: HashMap<String, (String, usize)> = HashMap::new();
+    let mut match_keys: HashMap<String, (String, String, usize)> = HashMap::new();
+    for record in records {
+        if record.rule.name.trim().is_empty() {
+            push_lint_issue(
+                issues,
+                PolicyLintSeverity::Error,
+                "empty_rule_name",
+                "rule name must not be empty".to_string(),
+                record,
+            );
+        }
+        if let Some((file, index)) = names.insert(
+            record.rule.name.clone(),
+            (record.file_display.clone(), record.index),
+        ) {
+            push_lint_issue(
+                issues,
+                PolicyLintSeverity::Error,
+                "duplicate_rule_name",
+                format!("rule name duplicates an earlier rule at {file}:{index}"),
+                record,
+            );
+        }
+        if record.rule.reason.trim().is_empty() {
+            push_lint_issue(
+                issues,
+                PolicyLintSeverity::Warning,
+                "missing_reason",
+                "strict lint expects a human review reason".to_string(),
+                record,
+            );
+        }
+        if match_is_empty(&record.rule.r#match) {
+            push_lint_issue(
+                issues,
+                PolicyLintSeverity::Error,
+                "empty_match",
+                "rule has no match clauses and would match every capability set".to_string(),
+                record,
+            );
+        }
+        for pattern in all_match_patterns(&record.rule.r#match) {
+            if pattern.trim().is_empty() {
+                push_lint_issue(
+                    issues,
+                    PolicyLintSeverity::Error,
+                    "empty_capability_pattern",
+                    "capability patterns must not be empty".to_string(),
+                    record,
+                );
+            }
+        }
+        if record
+            .rule
+            .required_scope
+            .as_ref()
+            .is_some_and(|scope| scope.trim().is_empty())
+        {
+            push_lint_issue(
+                issues,
+                PolicyLintSeverity::Error,
+                "empty_required_scope",
+                "ask_picto required_scope must not be empty".to_string(),
+                record,
+            );
+        }
+
+        let match_key = serde_json::to_string(&record.rule.r#match)
+            .expect("RawMatch serialization is infallible");
+        if let Some((name, file, index)) = match_keys.insert(
+            match_key,
+            (
+                record.rule.name.clone(),
+                record.file_display.clone(),
+                record.index,
+            ),
+        ) {
+            push_lint_issue(
+                issues,
+                PolicyLintSeverity::Error,
+                "duplicate_match_shadowed",
+                format!(
+                    "same match clauses already appear on rule {name} at {file}:{index}; first match wins"
+                ),
+                record,
+            );
+        }
+    }
+}
+
+fn push_lint_issue(
+    issues: &mut Vec<PolicyLintIssue>,
+    severity: PolicyLintSeverity,
+    code: &'static str,
+    message: String,
+    record: &RawPolicyRuleRecord,
+) {
+    issues.push(PolicyLintIssue {
+        severity,
+        code,
+        message,
+        file: record.file.to_string_lossy().to_string(),
+        rule_name: Some(record.rule.name.clone()),
+        rule_index: Some(record.index),
+    });
+}
+
+fn match_is_empty(raw_match: &RawMatch) -> bool {
+    raw_match.any_capability.is_empty()
+        && raw_match.all_capability.is_empty()
+        && raw_match.none_capability.is_empty()
+}
+
+fn all_match_patterns(raw_match: &RawMatch) -> impl Iterator<Item = &String> {
+    raw_match
+        .any_capability
+        .iter()
+        .chain(raw_match.all_capability.iter())
+        .chain(raw_match.none_capability.iter())
+}
+
+fn summarize_policy_lint_issues(issues: &[PolicyLintIssue]) -> PolicyLintSummary {
+    let mut summary = PolicyLintSummary::default();
+    for issue in issues {
+        match issue.severity {
+            PolicyLintSeverity::Error => summary.errors += 1,
+            PolicyLintSeverity::Warning => summary.warnings += 1,
+        }
+    }
+    summary
+}
+
+fn print_policy_lint_report(report: &PolicyLintReport) {
+    println!("Gommage policy lint");
+    println!("status: {}", report.status.as_str());
+    println!("target: {}", report.target);
+    println!("strict: {}", report.strict);
+    println!("files: {}", report.files);
+    println!("rules: {}", report.rules);
+    if report.issues.is_empty() {
+        println!("issues: none");
+    } else {
+        println!("issues:");
+        for issue in &report.issues {
+            println!(
+                "  - {} {} {}:{} {}",
+                issue.severity.as_str(),
+                issue.code,
+                issue.file,
+                issue.rule_index.unwrap_or(0),
+                issue.message
+            );
+        }
+    }
+    println!(
+        "summary: {} error(s), {} warning(s)",
+        report.summary.errors, report.summary.warnings
+    );
+}
+
 pub(crate) fn print_policy_test_report(report: &PolicyTestReport) {
     for case in &report.cases {
         println!(
@@ -438,10 +774,14 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
             println!("ok {} rules loaded", pol.rules.len());
             println!("version: {}", pol.version_hash);
         }
-        PolicyCmd::Lint { file } => {
-            let raw = std::fs::read_to_string(&file)?;
-            let _ = Policy::from_yaml_string(&raw, &env, &file.to_string_lossy())?;
-            println!("ok {}", file.display());
+        PolicyCmd::Lint { file, strict, json } => {
+            let report = build_policy_lint_report(&layout, &env, file.as_deref(), strict)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_policy_lint_report(&report);
+            }
+            return Ok(report.exit_code());
         }
         PolicyCmd::Schema => unreachable!("policy schema returns before home validation"),
         PolicyCmd::Diff(_) => unreachable!("policy diff returns before home validation"),

@@ -220,6 +220,9 @@ enum Cmd {
         id: String,
         #[arg(long)]
         json: bool,
+        /// Include current-policy rule-order trace and fixture-authoring hints.
+        #[arg(long)]
+        trace: bool,
     },
 
     /// Verify the full audit log signature chain.
@@ -550,7 +553,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                 }
             }
         }
-        Cmd::Explain { id, json } => return cmd_explain(layout, &id, json),
+        Cmd::Explain { id, json, trace } => return cmd_explain(layout, &id, json, trace),
         Cmd::AuditVerify { explain, format } => return cmd_audit_verify(layout, explain, format),
         Cmd::Replay(options) => return cmd_replay(options),
         Cmd::Decide { pretty, hook } => {

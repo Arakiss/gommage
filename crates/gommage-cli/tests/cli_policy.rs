@@ -195,6 +195,83 @@ fn policy_snapshot_outputs_fixture_that_policy_test_accepts() {
 }
 
 #[test]
+fn policy_lint_strict_json_passes_stdlib() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home)
+        .args(["policy", "lint", "--strict", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"].as_str(), Some("pass"));
+    assert_eq!(report["strict"].as_bool(), Some(true));
+    assert!(report["rules"].as_u64().unwrap() > 0);
+    assert_eq!(report["summary"]["errors"].as_u64(), Some(0));
+    assert_eq!(report["issues"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn policy_lint_strict_json_fails_duplicate_rule_names() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let policy_file = temp.path().join("duplicate-policy.yaml");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    fs::write(
+        &policy_file,
+        r#"
+- name: duplicate
+  decision: allow
+  match:
+    any_capability: ["proc.exec:git status"]
+  reason: "first"
+- name: duplicate
+  decision: allow
+  match:
+    any_capability: ["proc.exec:git log"]
+  reason: "second"
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .args([
+            "policy",
+            "lint",
+            policy_file.to_str().unwrap(),
+            "--strict",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"].as_str(), Some("fail"));
+    assert!(
+        report["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"].as_str() == Some("duplicate_rule_name"))
+    );
+}
+
+#[test]
 fn policy_test_exits_nonzero_on_fixture_failure() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
