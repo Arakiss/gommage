@@ -108,6 +108,7 @@ The capture directory contains:
 | `policy-fixtures.json` | Public policy fixture library result. |
 | `tui-snapshot-all.txt` | Full operator dashboard snapshot. |
 | `tui-snapshot-onboarding.txt` | First-minute setup/recovery snapshot. |
+| `tui-snapshot-metrics.txt` | Local daemon health, active picto, approval, webhook DLQ, and audit counter snapshot. |
 | `tui-watch-approvals.txt` | Bounded approvals watch output. |
 | `tui-stream.txt` | Bounded operator stream output. |
 | `report-bundle.json` | Redacted diagnostic support bundle. |

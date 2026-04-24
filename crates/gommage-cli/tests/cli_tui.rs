@@ -210,6 +210,23 @@ fn tui_stream_ticks_prints_recent_decisions_without_ansi() {
             .and_then(|value| value.as_str()),
         Some("ask")
     );
+    assert!(
+        gommage(&home)
+            .args([
+                "grant",
+                "--scope",
+                "git.push:main",
+                "--ttl",
+                "10m",
+                "--uses",
+                "2",
+                "--reason",
+                "stream visibility test",
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
 
     let output = gommage(&home)
         .args([
@@ -231,9 +248,64 @@ fn tui_stream_ticks_prints_recent_decisions_without_ansi() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Gommage live decision stream"));
     assert!(stdout.contains("source: audit-log"));
+    assert!(stdout.contains("daemon: warn - not reachable"));
+    assert!(stdout.contains("pictos: 1 active"));
+    assert!(stdout.contains("next active picto: picto_"));
+    assert!(stdout.contains("metrics:"));
     assert!(stdout.contains("approval requested apr_"));
     assert!(stdout.contains("mcp__db__write_row"));
     assert!(stdout.contains("decision ask_picto"));
+    assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn tui_snapshot_metrics_reports_daemon_pictos_and_local_counters() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        gommage(&home)
+            .args([
+                "grant",
+                "--scope",
+                "git.push:main",
+                "--ttl",
+                "10m",
+                "--uses",
+                "1",
+                "--reason",
+                "metrics visibility test",
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home)
+        .args(["tui", "--snapshot", "--view", "metrics"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("operator:"));
+    assert!(stdout.contains("daemon: warn - not reachable"));
+    assert!(stdout.contains("pictos: 1 active"));
+    assert!(stdout.contains("next active picto: picto_"));
+    assert!(stdout.contains("metrics:"));
+    assert!(stdout.contains("picto events: 1 created, 0 consumed, 0 rejected"));
     assert!(!stdout.contains("\x1b["));
 }
 
@@ -276,6 +348,8 @@ fn tui_snapshot_view_all_includes_operator_sections() {
     assert!(stdout.contains("- pending approvals:"));
     assert!(stdout.contains("onboarding:"));
     assert!(stdout.contains("- safe first minute:"));
+    assert!(stdout.contains("metrics:"));
+    assert!(stdout.contains("- daemon:"));
     assert!(!stdout.contains("\x1b["));
 }
 
@@ -394,6 +468,11 @@ fn tui_approval_snapshot_lists_pending_requests() {
     assert!(stdout.contains("mcp__db__write_row"));
     assert!(stdout.contains("selected:"));
     assert!(stdout.contains("scope: mcp.write"));
+    assert!(stdout.contains("created:"));
+    assert!(stdout.contains("input: sha256:"));
+    assert!(stdout.contains("capabilities:"));
+    assert!(stdout.contains("current policy: ask_picto scope=mcp.write"));
+    assert!(stdout.contains("current rule:"));
     assert!(stdout.contains("gommage approval evidence apr_"));
     assert!(stdout.contains("gommage approval approve apr_"));
     assert!(stdout.contains("gommage approval replay apr_"));

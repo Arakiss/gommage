@@ -2,12 +2,15 @@ use anyhow::Result;
 use clap::ValueEnum;
 use gommage_audit::explain_log;
 use gommage_core::{
-    ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetterStore, CapabilityMapper, RuleDecision,
-    ToolCall, runtime::HomeLayout,
+    ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetterStore, CapabilityMapper, Decision,
+    RuleDecision, ToolCall, evaluate,
+    runtime::{HomeLayout, Runtime},
 };
 use std::{fs, path::Path};
 
-use crate::{doctor::build_doctor_report, util::path_display};
+use crate::{
+    doctor::build_doctor_report, operator_metrics::build_operator_telemetry, util::path_display,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum TuiView {
@@ -18,6 +21,7 @@ pub(crate) enum TuiView {
     Capabilities,
     Recovery,
     Onboarding,
+    Metrics,
     All,
 }
 
@@ -31,11 +35,12 @@ impl TuiView {
             TuiView::Capabilities => "capabilities",
             TuiView::Recovery => "recovery",
             TuiView::Onboarding => "onboarding",
+            TuiView::Metrics => "metrics",
             TuiView::All => "all",
         }
     }
 
-    pub(crate) fn interactive_views() -> [TuiView; 7] {
+    pub(crate) fn interactive_views() -> [TuiView; 8] {
         [
             TuiView::Dashboard,
             TuiView::Approvals,
@@ -44,6 +49,7 @@ impl TuiView {
             TuiView::Capabilities,
             TuiView::Recovery,
             TuiView::Onboarding,
+            TuiView::Metrics,
         ]
     }
 }
@@ -68,6 +74,7 @@ pub(crate) fn build_view_report(layout: &HomeLayout, view: TuiView) -> Result<Vi
         TuiView::Capabilities => capabilities_report(layout),
         TuiView::Recovery => recovery_report(layout),
         TuiView::Onboarding => onboarding_report(layout),
+        TuiView::Metrics => metrics_report(layout),
     })
 }
 
@@ -150,6 +157,8 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
             lines.push(format!("  id: {}", state.request.id));
             lines.push(format!("  tool: {}", state.request.tool));
             lines.push(format!("  scope: {}", state.request.required_scope));
+            lines.push(format!("  created: {}", state.request.created_at));
+            lines.push(format!("  input: {}", state.request.input_hash));
             lines.push(format!("  reason: {}", state.request.reason));
             lines.push(format!("  policy: {}", state.request.policy_version));
             if let Some(rule) = &state.request.matched_rule {
@@ -158,6 +167,8 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
                     rule.name, rule.file, rule.index
                 ));
             }
+            lines.extend(capability_preview(state.request.capabilities.iter()));
+            lines.extend(approval_policy_context(layout, state));
             lines.push(format!(
                 "  replay: gommage approval replay {} --json",
                 state.request.id
@@ -321,6 +332,31 @@ fn capabilities_report(layout: &HomeLayout) -> ViewReport {
     }
 }
 
+fn metrics_report(layout: &HomeLayout) -> ViewReport {
+    let telemetry = build_operator_telemetry(layout);
+    let mut lines = telemetry.snapshot_lines();
+    lines.push(format!(
+        "approval totals: {} total, {} pending",
+        telemetry.metrics.total_approvals, telemetry.metrics.pending_approvals
+    ));
+    lines.push(format!(
+        "picto events: {} created, {} consumed, {} rejected",
+        telemetry.metrics.picto_creations,
+        telemetry.metrics.picto_consumptions,
+        telemetry.metrics.picto_rejections
+    ));
+    ViewReport {
+        title: "metrics".to_string(),
+        lines,
+        next_actions: vec![
+            "gommage tui --stream --stream-ticks 5".to_string(),
+            "gommage audit-verify --explain".to_string(),
+            "gommage list --json".to_string(),
+            "gommage approval list --status all --json".to_string(),
+        ],
+    }
+}
+
 fn recovery_report(layout: &HomeLayout) -> ViewReport {
     let doctor = build_doctor_report(layout);
     let approvals = ApprovalStore::open(&layout.approvals_log)
@@ -462,6 +498,61 @@ fn decision_label(decision: RuleDecision) -> &'static str {
         RuleDecision::Allow => "allow",
         RuleDecision::Gommage => "gommage",
         RuleDecision::AskPicto => "ask_picto",
+    }
+}
+
+fn capability_preview<'a>(
+    capabilities: impl Iterator<Item = &'a gommage_core::Capability>,
+) -> Vec<String> {
+    let capabilities = capabilities.map(ToString::to_string).collect::<Vec<_>>();
+    if capabilities.is_empty() {
+        return vec!["  capabilities: none".to_string()];
+    }
+    let mut lines = vec![format!("  capabilities: {}", capabilities.len())];
+    for capability in capabilities.iter().take(4) {
+        lines.push(format!("    - {capability}"));
+    }
+    if capabilities.len() > 4 {
+        lines.push(format!("    - ... {} more", capabilities.len() - 4));
+    }
+    lines
+}
+
+fn approval_policy_context(
+    layout: &HomeLayout,
+    state: &gommage_core::ApprovalState,
+) -> Vec<String> {
+    match Runtime::open(HomeLayout::at(&layout.root)) {
+        Ok(rt) => {
+            let eval = evaluate(&state.request.capabilities, &rt.policy);
+            let mut lines = vec![
+                format!("  current policy: {}", decision_summary(&eval.decision)),
+                format!("  current version: {}", eval.policy_version),
+            ];
+            if let Some(rule) = eval.matched_rule {
+                lines.push(format!(
+                    "  current rule: {} ({}:{})",
+                    rule.name, rule.file, rule.index
+                ));
+            } else {
+                lines.push("  current rule: none".to_string());
+            }
+            lines
+        }
+        Err(error) => vec![format!("  current policy: unavailable - {error}")],
+    }
+}
+
+fn decision_summary(decision: &Decision) -> String {
+    match decision {
+        Decision::Allow => "allow".to_string(),
+        Decision::Gommage { reason, hard_stop } => {
+            format!("gommage hard_stop={hard_stop} reason={reason}")
+        }
+        Decision::AskPicto {
+            required_scope,
+            reason,
+        } => format!("ask_picto scope={required_scope} reason={reason}"),
     }
 }
 

@@ -77,14 +77,16 @@ The alpha distribution has two install surfaces:
 - **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
 - **Operator dashboard**: `gommage tui`, a dependency-free terminal command
   center for humans with readiness, approvals, policies, audit, capabilities,
-  recovery, and onboarding views. Use `gommage tui --snapshot --view all` for
+  recovery, onboarding, and local metrics views. Use `gommage tui --snapshot --view all` for
   issue reports and non-interactive shells, or
   `gommage tui --watch --watch-ticks 3` when a headless terminal should show
   live refreshes. Use `gommage tui --stream` for
   a compact decision/event feed backed by daemon IPC when the daemon is running,
-  with signed audit-log fallback for CI and local captures. Interactive
-  approvals can tune TTL/use-count presets before resolving pending requests,
-  and still require an explicit confirmation keystroke before mutating state.
+  with signed audit-log fallback for CI and local captures. Snapshot and stream
+  output include daemon reachability, active picto inventory, and local counters
+  so a human can see whether the operator loop is alive. Interactive approvals
+  can tune TTL/use-count presets before resolving pending requests, and still
+  require an explicit confirmation keystroke before mutating state.
 
 Only `gommage-cli-v*` is a user-facing product release. Older alpha history may
 show per-crate GitHub Releases for internal workspace components such as
@@ -313,8 +315,9 @@ Stable automation contracts:
 | `explain <audit-id> --trace --json` | Audit-entry trace over current policy rule order, active decision, shadowed matches, and fixture-authoring hints. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
-| `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, with signed audit-log fallback. |
+| `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, with signed audit-log fallback, daemon health, active pictos, and local counters. |
 | `tui --snapshot --view onboarding` | First-minute operator guide with safe setup, beta gate, report, and rollback commands. |
+| `tui --snapshot --view metrics` | Human local metrics summary for daemon reachability, active pictos, decisions, approvals, webhook DLQ, and audit anomalies. |
 | `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
@@ -381,6 +384,7 @@ gommage beta check --json --policy-test examples/policy-fixtures.yaml
 # Interactive approvals use t/T for TTL, u/U for uses, then A/D + y/n confirmation.
 gommage tui
 gommage tui --snapshot --view all
+gommage tui --snapshot --view metrics
 gommage tui --watch --watch-ticks 3 --view approvals
 gommage tui --stream --stream-ticks 5
 gommage tui --view approvals
@@ -625,7 +629,8 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
 - Dependency-free operator dashboard with `gommage tui`, `--snapshot`,
-  `--watch`, approvals/policies/audit/capabilities/recovery views, and
+  `--watch`, approvals/policies/audit/capabilities/recovery/metrics views,
+  daemon health, active picto inventory, local counters, and
   confirmation-protected approval TTL/use-count presets
 - Built-in semantic smoke checks and project-owned policy regression fixtures
 - Capability mapping inspector for policy-authoring and mapper-debugging loops

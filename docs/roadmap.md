@@ -128,8 +128,8 @@ Features:
     refreshes for demos, headless operators, and issue reports.
   - `gommage tui --stream --stream-ticks <n>` now provides a compact live
     decision/event feed backed by daemon IPC with signed audit-log fallback.
-    Next step: merge in active pictos and daemon health without making human
-    output an automation contract.
+    Snapshot and stream output now include daemon reachability, active pictos,
+    and local counters without making human output an automation contract.
 - Local picto approval flow
   - The CLI approval path, TUI approve/deny confirmation, and TUI TTL/use-count
     presets now exist. Next step is a richer inline form with editable reason
@@ -140,8 +140,10 @@ Features:
     HMAC-SHA256 signatures over `<timestamp>.<exact HTTP body>`. Next step is
     native provider callbacks and native ntfy provider support.
 - Metrics endpoint
-  - Local counters for decisions, denials, asks, picto outcomes, audit anomalies,
-    and daemon health.
+  - Local TUI counters now cover decisions, denials, asks, approval pressure,
+    picto outcomes, webhook DLQ entries, audit anomalies, and daemon health.
+    Next step: expose the same model through a dedicated endpoint when remote
+    operators need a stable machine contract.
 
 Primary code surfaces:
 

@@ -5,22 +5,28 @@
 `gommage tui` is the operator dashboard for humans. It renders the same
 high-level readiness model as `verify`, plus host-agent status, pending
 approvals, policy inventory, audit state, capability mapper state, recovery
-shortcuts, and next actions. Snapshot mode never mutates `GOMMAGE_HOME`; use it
+shortcuts, local metrics, active pictos, daemon health, and next actions.
+Snapshot mode never mutates `GOMMAGE_HOME`; use it
 when a terminal is non-interactive, when filing an issue, or when an agent needs
 to capture a human-readable report without ANSI control sequences. Automation
 should still parse the JSON commands below instead of the TUI.
 
-`gommage tui --view dashboard|approvals|policies|audit|capabilities|recovery|all`
+`gommage tui --view dashboard|approvals|policies|audit|capabilities|recovery|onboarding|metrics|all`
 selects operator views. `--view all` is the most useful issue-report snapshot:
 it includes readiness, pending approvals, policy inventory, signed audit
-summary, mapper inventory, and recovery shortcuts. `gommage tui --watch` prints
-the same report repeatedly as plain text; use `--watch-ticks <n>` to bound demos,
-CI artifacts, and issue-report captures. `gommage tui --stream` prints a compact
-live decision/event feed using daemon IPC when the daemon is reachable and the
-signed audit log otherwise. Interactive mode switches views with `1`-`6`. In the
-approvals view, `t/T` changes the TTL preset, `u/U` changes the use-count preset,
-and `A` / `D` stage an approve/deny action for the selected request. `y` is
-still required before mutating state.
+summary, mapper inventory, recovery shortcuts, and local metrics. `gommage tui
+--watch` prints the same report repeatedly as plain text; use
+`--watch-ticks <n>` to bound demos, CI artifacts, and issue-report captures.
+`gommage tui --stream` prints a compact live decision/event feed using daemon
+IPC when the daemon is reachable and the signed audit log otherwise. Stream and
+snapshot output include daemon reachability, active picto counts, pending
+approval counters, webhook DLQ counts, decision counters, and audit anomaly
+counts when verification is available. Interactive mode switches views with
+`1`-`8`. In the approvals view, `t/T` changes the TTL preset, `u/U` changes the
+use-count preset, and `A` / `D` stage an approve/deny action for the selected
+request. The selected approval preview includes request time, input hash,
+capabilities, stored rule, and current-policy replay context. `y` is still
+required before mutating state.
 The README embeds a sanitized animated demo at `docs/assets/tui-dashboard.gif`
 and keeps `docs/assets/tui-dashboard.svg` as a static fallback; update both
 assets whenever the TUI's primary sections or vocabulary change.
@@ -63,6 +69,7 @@ Run the aggregated gate with:
 ```sh
 gommage tui
 gommage tui --snapshot --view all
+gommage tui --snapshot --view metrics
 gommage tui --watch --watch-ticks 3 --view approvals
 gommage tui --stream --stream-ticks 5
 gommage verify --json
