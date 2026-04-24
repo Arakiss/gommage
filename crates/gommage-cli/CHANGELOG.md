@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.26.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.25.0-alpha.1...gommage-cli-v0.26.0-alpha.1) (2026-04-24)
+
+
+### Features
+
+* add policy diff ([833e2e7](https://github.com/Arakiss/gommage/commit/833e2e79c74d8e6a6af674a60352f3b3591bf67c))
+
 ## [0.25.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.24.0-alpha.1...gommage-cli-v0.25.0-alpha.1) (2026-04-24)
 
 
