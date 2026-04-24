@@ -302,6 +302,12 @@
       "argv": ["agent", "uninstall", "all", "--restore-backup", "--dry-run"]
     },
     {
+      "id": "repair_agent_dry_run",
+      "purpose": "Inspect legacy or broken agent hook repair without mutating host config.",
+      "stdin_mode": "none",
+      "argv": ["repair", "agent", "all", "--dry-run"]
+    },
+    {
       "id": "uninstall_dry_run",
       "purpose": "Inspect full cleanup without mutating state.",
       "stdin_mode": "none",

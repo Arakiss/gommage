@@ -502,7 +502,7 @@ fn install_json_hook_group(
     if replace_hooks {
         pre_tool_use.clear();
     } else {
-        pre_tool_use.retain(|entry| !json_hook_entry_contains_command(entry, "gommage-mcp"));
+        pre_tool_use.retain(|entry| !json_hook_entry_contains_command(entry, "gommage"));
         if !pre_tool_use.is_empty() {
             println!(
                 "warn {agent_name}: preserving existing PreToolUse hook group(s); use --replace-hooks to let Gommage own the hook surface"
@@ -550,7 +550,7 @@ fn json_hook_entry_contains_command(entry: &serde_json::Value, needle: &str) -> 
             hooks.iter().any(|hook| {
                 hook.get("command")
                     .and_then(|v| v.as_str())
-                    .is_some_and(|command| command.contains(needle))
+                    .is_some_and(|command| command.to_ascii_lowercase().contains(needle))
             })
         })
 }

@@ -25,6 +25,7 @@ mod mcp;
 mod policy_cmd;
 mod quickstart;
 mod quickstart_plan;
+mod repair;
 mod report;
 mod smoke;
 mod tui;
@@ -49,6 +50,7 @@ use mascot::{MascotOptions, print_mascot};
 use mcp::run_mcp;
 use policy_cmd::{PolicyCmd, cmd_policy};
 use quickstart::{QuickstartOptions, cmd_quickstart};
+use repair::{RepairCmd, cmd_repair};
 use report::{ReportCmd, cmd_report};
 use smoke::cmd_smoke;
 use tui::{TuiOptions, cmd_tui};
@@ -157,6 +159,10 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+
+    /// Repair old or broken Gommage host-agent wiring.
+    #[command(subcommand)]
+    Repair(RepairCmd),
 
     /// Start a new expedition (task context).
     #[command(subcommand)]
@@ -428,6 +434,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                 },
             );
         }
+        Cmd::Repair(sub) => return cmd_repair(sub, layout),
         Cmd::Expedition(sub) => return cmd_expedition(sub, layout),
         Cmd::Grant {
             scope,

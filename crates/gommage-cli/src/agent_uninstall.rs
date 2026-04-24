@@ -66,7 +66,7 @@ fn uninstall_claude(restore_backup: bool, dry_run: bool) -> Result<()> {
     }
 
     let mut settings = read_json_object(&settings_path)?;
-    let removed = remove_json_hook_groups(&mut settings, "/hooks/PreToolUse", "gommage-mcp");
+    let removed = remove_json_hook_groups(&mut settings, "/hooks/PreToolUse", "gommage");
     if removed == 0 {
         println!(
             "ok claude: no Gommage hook found at {}",
@@ -101,7 +101,7 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
     let mut removed_codex_hook = false;
     if hooks_path.exists() {
         let mut hooks = read_json_object(&hooks_path)?;
-        let removed = remove_json_hook_groups(&mut hooks, "/PreToolUse", "gommage-mcp");
+        let removed = remove_json_hook_groups(&mut hooks, "/PreToolUse", "gommage");
         if removed > 0 {
             removed_codex_hook = true;
             write_json(&hooks_path, &hooks, dry_run)?;
@@ -177,7 +177,7 @@ fn json_hook_entry_contains_command(entry: &serde_json::Value, needle: &str) -> 
         .any(|hook| {
             hook.get("command")
                 .and_then(|command| command.as_str())
-                .is_some_and(|command| command.contains(needle))
+                .is_some_and(|command| command.to_ascii_lowercase().contains(needle))
         })
 }
 

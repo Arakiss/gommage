@@ -113,7 +113,13 @@ imports, and generated narrow allow imports. Codex checks cover `hooks.json`,
 `config.toml`, the `PreToolUse` hook group, `features.codex_hooks`, and the
 configured sandbox mode. A missing hook or disabled hook feature is `fail`; a
 dangerous Codex sandbox is `warn` because Gommage currently governs only the
-Bash hook surface under Codex.
+Bash hook surface under Codex. Legacy Gommage hook commands and global or
+missing matchers are `warn`; inspect the repair plan before mutating:
+
+```sh
+gommage repair agent claude --dry-run
+gommage repair agent codex --dry-run
+```
 
 ## Approval diagnostics
 

@@ -37,6 +37,11 @@ Features:
   - Produces a support bundle with `verify --json`, `doctor --json`, agent
     status, release/version data, service state, policy hashes, and redacted
     config snippets.
+- `gommage repair agent claude|codex`
+  - Rewrites old or broken Gommage-owned hook groups to the current scoped hook
+    while preserving unrelated host hooks.
+  - Offers dry-run and backup-restore paths for alpha installations that block
+    the agent before normal troubleshooting can run.
 - Agent command manifest
   - A single versioned manifest defines stable commands used by README, skills,
     docs, and CI command-contract tests.
@@ -59,6 +64,8 @@ Exit criteria:
 - `quickstart --dry-run --json` is safe on a dirty real home.
 - Report bundles contain enough data to debug install failures without asking
   for raw dotfiles.
+- Legacy alpha hook repair is documented, dry-runnable, and tested for Claude
+  Code and Codex.
 - The documented CachyOS test path runs without deadlocking the agent.
 
 ## Milestone 1: Policy Authoring Flywheel

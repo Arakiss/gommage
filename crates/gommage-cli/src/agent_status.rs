@@ -174,6 +174,13 @@ fn build_claude_status_report(layout: &HomeLayout) -> AgentStatusReport {
             })),
         );
     }
+    push_hook_hygiene_report(
+        &mut report,
+        AgentKind::Claude,
+        &settings_path,
+        &settings,
+        "/hooks/PreToolUse",
+    );
 
     push_claude_import_status(
         &mut report,
@@ -238,6 +245,13 @@ fn build_codex_status_report() -> AgentStatusReport {
             })),
         );
     }
+    push_hook_hygiene_report(
+        &mut report,
+        AgentKind::Codex,
+        &hooks_path,
+        &hooks,
+        "/PreToolUse",
+    );
 
     let config = match read_toml_document(&config_path) {
         Ok(config) => config,
@@ -377,19 +391,110 @@ fn push_claude_import_status(
 }
 
 fn gommage_hook_matchers(root: &serde_json::Value, pointer: &str) -> Vec<String> {
+    gommage_hook_entries(root, pointer)
+        .into_iter()
+        .filter(|entry| entry.command.to_ascii_lowercase().contains("gommage-mcp"))
+        .map(|entry| entry.matcher)
+        .collect()
+}
+
+#[derive(Debug)]
+struct HookEntry {
+    matcher: String,
+    command: String,
+}
+
+fn push_hook_hygiene_report(
+    report: &mut AgentStatusReport,
+    agent: AgentKind,
+    path: &Path,
+    root: &serde_json::Value,
+    pointer: &str,
+) {
+    let entries = gommage_hook_entries(root, pointer);
+    let legacy = entries
+        .iter()
+        .filter(|entry| !entry.command.to_ascii_lowercase().contains("gommage-mcp"))
+        .map(hook_entry_json)
+        .collect::<Vec<_>>();
+    if !legacy.is_empty() {
+        report.push(
+            "legacy_hooks",
+            AgentStatus::Warn,
+            format!(
+                "legacy Gommage hook command(s) found; run `gommage repair agent {} --dry-run`",
+                agent.as_str()
+            ),
+            Some(serde_json::json!({
+                "path": path_display(path),
+                "pointer": pointer,
+                "hooks": legacy,
+                "repair": format!("gommage repair agent {} --dry-run", agent.as_str()),
+            })),
+        );
+    }
+
+    let aggressive = entries
+        .iter()
+        .filter(|entry| matcher_is_global(&entry.matcher))
+        .map(hook_entry_json)
+        .collect::<Vec<_>>();
+    if !aggressive.is_empty() {
+        report.push(
+            "hook_scope",
+            AgentStatus::Warn,
+            format!(
+                "Gommage hook matcher is global or missing; run `gommage repair agent {} --dry-run`",
+                agent.as_str()
+            ),
+            Some(serde_json::json!({
+                "path": path_display(path),
+                "pointer": pointer,
+                "hooks": aggressive,
+                "repair": format!("gommage repair agent {} --dry-run", agent.as_str()),
+            })),
+        );
+    }
+}
+
+fn gommage_hook_entries(root: &serde_json::Value, pointer: &str) -> Vec<HookEntry> {
     root.pointer(pointer)
         .and_then(|value| value.as_array())
         .into_iter()
         .flatten()
-        .filter(|entry| json_hook_entry_contains_command(entry, "gommage-mcp"))
-        .map(|entry| {
-            entry
+        .filter_map(|entry| {
+            let matcher = entry
                 .get("matcher")
                 .and_then(|value| value.as_str())
-                .unwrap_or("<missing matcher>")
-                .to_string()
+                .unwrap_or("")
+                .to_string();
+            let command = first_gommage_command(entry)?;
+            Some(HookEntry { matcher, command })
         })
         .collect()
+}
+
+fn first_gommage_command(entry: &serde_json::Value) -> Option<String> {
+    entry
+        .get("hooks")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|hook| hook.get("command").and_then(|command| command.as_str()))
+        .find(|command| command.to_ascii_lowercase().contains("gommage"))
+        .map(str::to_string)
+}
+
+fn matcher_is_global(matcher: &str) -> bool {
+    let matcher = matcher.trim();
+    matcher.is_empty() || matches!(matcher, "*" | ".*" | "all" | "All" | "ALL")
+}
+
+fn hook_entry_json(entry: &HookEntry) -> serde_json::Value {
+    serde_json::json!({
+        "matcher": if entry.matcher.is_empty() { "<missing>" } else { &entry.matcher },
+        "command": entry.command,
+    })
 }
 
 fn print_agent_status_report(report: &AgentStatusReport) {
@@ -413,17 +518,4 @@ fn agent_kind_name(agent: AgentKind) -> &'static str {
         AgentKind::Claude => "claude",
         AgentKind::Codex => "codex",
     }
-}
-
-fn json_hook_entry_contains_command(entry: &serde_json::Value, needle: &str) -> bool {
-    entry
-        .get("hooks")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .any(|hook| {
-            hook.get("command")
-                .and_then(|command| command.as_str())
-                .is_some_and(|command| command.contains(needle))
-        })
 }
