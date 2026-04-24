@@ -43,7 +43,7 @@ Evidence to save:
 
 ```sh
 gommage quickstart --agent claude --daemon --self-test
-gommage beta check --json --policy-test examples/policy-fixtures.yaml
+gommage beta check --json --agent claude --policy-test examples/policy-fixtures.yaml
 gommage verify --json
 gommage smoke --json
 gommage audit-verify --explain
@@ -118,6 +118,8 @@ Evidence to save:
 
 ```sh
 gommage report bundle --redact --output gommage-report.json
+gommage repair agent claude --dry-run
+gommage repair agent codex --dry-run
 gommage uninstall --all --restore-backup --purge-backups --dry-run
 gommage uninstall --all --restore-backup --purge-backups --yes
 gommage agent status claude --json

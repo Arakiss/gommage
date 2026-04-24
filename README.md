@@ -197,7 +197,8 @@ checklist lives in [`docs/beta-readiness.md`](docs/beta-readiness.md).
 The canonical machine-readable command contract lives in
 [`docs/agent-command-manifest.json`](docs/agent-command-manifest.json).
 Host validation evidence lives in [`docs/host-smoke.md`](docs/host-smoke.md)
-and `scripts/host-smoke.sh`.
+and `scripts/host-smoke.sh`. Release asset evidence is scriptable through
+`scripts/check-release-assets.sh`.
 
 Install or update only the skill before operating the project:
 
@@ -593,6 +594,12 @@ See [`docs/beta-readiness.md`](docs/beta-readiness.md) for the evidence
 required before public beta or launch announcements. See
 [`docs/roadmap.md`](docs/roadmap.md) for the detailed feature sequence and
 execution order.
+
+```sh
+sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-alpha.N> --json
+GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent claude
+GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent codex
+```
 
 **Current alpha line** — signed release-installer line
 - Daemon + CLI + PreToolUse hook adapter

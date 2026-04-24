@@ -53,7 +53,7 @@ issue:
 | Legacy repair | `gommage repair agent claude --dry-run` and `gommage repair agent codex --dry-run` show how old or broken alpha hooks would be rewritten without mutating host config. |
 | Policy fixtures | `examples/policy-fixtures.yaml` passes through `gommage policy test --json`, and any repository-specific fixture additions are documented or linked. |
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
-| Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host. |
+| Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host, including companion versions, selected-agent beta check, repair dry-runs, bounded TUI captures, report bundle, and rollback dry-run. |
 | CI | `ci`, `release`, `audit`, and `scorecard` are green on the release commit. |
 | Docs | README, diagnostics, agent compatibility, publishing, and release-signing docs match the current CLI. |
 | Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
@@ -90,8 +90,11 @@ These can remain open for beta if they are clearly documented:
 
 Use [`host-smoke.md`](host-smoke.md) and `scripts/host-smoke.sh` for host
 evidence. The default mode runs against a temporary `HOME`, applies quickstart
-without starting the daemon, captures `verify`, `agent status`, semantic smoke,
-the redacted report bundle, and an uninstall dry-run rollback plan.
+without starting the daemon, captures `verify`, selected-agent `beta check`,
+`agent status`, repair dry-runs, bounded TUI snapshots/watch/stream, semantic
+smoke, the redacted report bundle, and an uninstall dry-run rollback plan.
+Use `scripts/check-release-assets.sh --json` to collect the release artifact
+inventory for the same tracking issue.
 
 ## Tracking issue checklist
 
