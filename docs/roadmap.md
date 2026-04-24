@@ -80,9 +80,9 @@ Features:
   - Reports decisions that would change before the operator trusts the policy.
 - `gommage policy diff --from <dir> --to <dir> --against <audit.log>`
   - Summarizes allow-to-deny, deny-to-allow, and ask-scope changes.
-- `gommage policy suggest`
-  - Generates candidate YAML rules and fixture cases from audit logs, native
-    permissions, or captured hook payloads.
+- `gommage policy suggest --audit <audit.log>`
+  - Generates advisory candidate YAML rules and fixture drafts from audit logs
+    for decisions not covered by the active policy.
   - Never writes active policy without an explicit review/write flag.
 - `gommage explain --trace`
   - Shows canonical tool call, emitted capabilities, evaluated rule order,
@@ -94,10 +94,11 @@ Features:
 
 Current status:
 
-- Shipped: `replay` and `policy diff` have stable JSON reports over historical
-  audit capabilities; `explain --trace` and `policy lint --strict` cover the
-  first rule-order and strict authoring checks.
-- Remaining: `policy suggest` and deeper strict-lint reachability checks.
+- Shipped: `replay`, `policy diff`, and `policy suggest --audit` have stable
+  JSON reports over historical audit capabilities; `explain --trace` and
+  `policy lint --strict` cover the first rule-order and strict authoring checks.
+- Remaining: native-permission and captured-hook inputs for `policy suggest`,
+  plus deeper strict-lint reachability checks.
 
 Primary code surfaces:
 
@@ -232,8 +233,9 @@ Exit criteria:
 ## Recommended execution order
 
 1. Ship Milestone 0 before any public beta announcement.
-2. Ship `replay`, `policy diff`, and `explain --trace` before `policy suggest`.
-3. Ship `policy suggest` before community policy packs.
+2. Ship `replay`, `policy diff`, `explain --trace`, and audit-backed
+   `policy suggest` before community policy packs.
+3. Expand `policy suggest` inputs before signed community policy packs.
 4. Extend TUI watch with decision-stream and active-picto panes before remote
    approval providers.
 5. Ship MCP gateway before claiming broader host support.

@@ -309,6 +309,7 @@ Stable automation contracts:
 | `policy lint --strict --json` | Strict authoring checks for duplicate names, exact-match shadowing, empty matches, empty patterns, and weak rule metadata. |
 | `replay --audit <file> --policy <dir> --json` | Re-evaluate historical audit decisions against a candidate policy. |
 | `policy diff --from <dir> --to <dir> --against <file> --json` | Compare two policy directories against the same historical audit decisions. |
+| `policy suggest --audit <file> --json` | Generate advisory candidate rules and fixture drafts for audit decisions not covered by the active policy. |
 | `explain <audit-id> --trace --json` | Audit-entry trace over current policy rule order, active decision, shadowed matches, and fixture-authoring hints. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
@@ -428,6 +429,9 @@ gommage tail
 
 # Explain a past decision
 gommage explain <audit-id>
+
+# Suggest reviewed policy candidates from uncovered audit decisions
+gommage policy suggest --audit ~/.gommage/audit.log --json
 
 # Close the expedition (resets the canvas)
 gommage expedition end

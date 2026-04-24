@@ -386,6 +386,27 @@ events, policy versions, and per-entry before/after decisions.
 Human output is intended for review. JSON output is the stable automation
 contract for CI evidence, release notes, or policy-authoring tools.
 
+## Policy Suggest
+
+Use `gommage policy suggest --audit <audit.log> --json` to turn historical
+audit decisions into reviewed policy-authoring drafts. Suggest loads the active
+policy, evaluates each audited capability set, and skips decisions already
+covered by a current rule or hard-stop. It never writes active policy; JSON
+reports include `mutated: false`.
+
+Each suggestion includes:
+
+- a structured candidate rule plus `rule_yaml`
+- observed audit evidence, including the audited and active decisions
+- a fixture draft plus `fixture_yaml`
+- `review_required: true`
+
+Audit decisions intentionally store `input_hash` and emitted capabilities, not
+raw tool input. Suggested fixture drafts are therefore marked `usable: false`
+and `input_available: false` until the real tool payload is captured with
+`gommage policy snapshot` or `gommage policy snapshot --hook`, reviewed, and
+committed with the candidate rule.
+
 ## Explain Trace
 
 Use `gommage explain <audit-id> --trace --json` when a single audit decision
