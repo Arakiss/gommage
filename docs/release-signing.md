@@ -61,14 +61,16 @@ shasum -c "$asset.sha256"
 Operator verification from a checkout:
 
 ```sh
+gommage release verify --tag gommage-cli-vX.Y.Z-alpha.N
+gommage release verify --tag gommage-cli-vX.Y.Z-alpha.N --json
 sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-alpha.N
 sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-alpha.N --json
 ```
 
-`verify-release.sh` downloads the platform archive, checksum, and Sigstore
-bundle; verifies the release-tag workflow identity; and checks GitHub artifact
-attestations when present. Use `--require-sbom` and `--require-provenance` for
-beta or package-manager release gates.
+Both verification surfaces download the platform archive, checksum, and
+Sigstore bundle; verify the release-tag workflow identity; and check GitHub
+artifact attestations when present. Use `--require-sbom` and
+`--require-provenance` for beta or package-manager release gates.
 
 GitHub artifact attestations are produced with `actions/attest` from the same
 tag-scoped release workflow that builds the archives. Verify them manually with:

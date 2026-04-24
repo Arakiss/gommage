@@ -165,6 +165,23 @@ fn sandbox_advise_json_is_explicitly_advisory() {
 }
 
 #[test]
+fn release_verify_help_describes_strict_evidence_gates() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home)
+        .args(["release", "verify", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("--require-sbom"));
+    assert!(stdout.contains("--require-provenance"));
+    assert!(stdout.contains("--asset"));
+}
+
+#[test]
 fn map_json_reports_capabilities_without_policy_files() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

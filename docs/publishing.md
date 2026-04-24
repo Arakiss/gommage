@@ -16,7 +16,7 @@ OS and architecture, verifies the Sigstore bundle, verifies the SHA-256
 checksum, and only then extracts `gommage`, `gommage-daemon`, and
 `gommage-mcp` into the install directory. Operator/package-manager verification
 can additionally check the CycloneDX SBOM and GitHub artifact attestation with
-`scripts/verify-release.sh`.
+`gommage release verify` or `scripts/verify-release.sh`.
 
 Treat `gommage-cli-v*` as the product release tag stream. The public GitHub
 Release title should read `Gommage vX.Y.Z...` because users install the product,
@@ -169,6 +169,7 @@ Release artifact verification is also a manual/network gate:
 
 ```sh
 sh scripts/check-release-assets.sh --json
+gommage release verify --json
 sh scripts/verify-release.sh --json
 ```
 
@@ -176,6 +177,7 @@ Use stricter package-manager gates once the current release line has SBOM and
 GitHub artifact attestations:
 
 ```sh
+gommage release verify --require-sbom --require-provenance
 sh scripts/verify-release.sh --require-sbom --require-provenance
 ```
 

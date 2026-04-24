@@ -16,6 +16,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/Arakiss/g
 gommage --version
 gommage-mcp --version
 gommage-daemon --version
+gommage release verify --json
 # From a checkout used to collect release evidence.
 sh scripts/verify-release.sh --json
 ```

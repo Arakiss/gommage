@@ -183,7 +183,7 @@ Current alpha distribution:
 
 - GitHub Releases provide prebuilt `gommage`, `gommage-daemon`, and `gommage-mcp` archives.
 - The installer verifies Sigstore bundle identity and SHA-256 before extracting.
-- From a checkout, use `sh scripts/verify-release.sh --json` for operator release evidence; use `--require-sbom --require-provenance` for beta/package-manager gates.
+- Use `gommage release verify --json` for operator release evidence; from a checkout, `sh scripts/verify-release.sh --json` provides the same scriptable check. Use `--require-sbom --require-provenance` for beta/package-manager gates.
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.
 - crates.io is not the supported install path yet.

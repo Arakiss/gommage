@@ -221,8 +221,9 @@ Features:
     native package-manager installs available for common operator paths.
 - SBOM and provenance
   - Current release workflow generates CycloneDX SBOM assets and GitHub
-    artifact attestations for release artifacts; `scripts/verify-release.sh`
-    is the operator/package-manager verification surface.
+    artifact attestations for release artifacts; `gommage release verify` and
+    `scripts/verify-release.sh` are the operator/package-manager verification
+    surfaces.
 
 Primary code surfaces:
 
