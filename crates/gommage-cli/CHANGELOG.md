@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.31.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.30.0-alpha.1...gommage-cli-v0.31.0-alpha.1) (2026-04-24)
+
+
+### Features
+
+* add release verification command ([480e163](https://github.com/Arakiss/gommage/commit/480e16348d1e5648e3195e44932272cf3c1247ee))
+
 ## [0.30.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.29.0-alpha.1...gommage-cli-v0.30.0-alpha.1) (2026-04-24)
 
 
