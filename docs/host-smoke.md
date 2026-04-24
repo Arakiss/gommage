@@ -95,12 +95,23 @@ The capture directory contains:
 | File | Purpose |
 |---|---|
 | `version.txt` | CLI version used for the run. |
+| `gommage-daemon-version.txt` | Daemon companion binary version. |
+| `gommage-mcp-version.txt` | MCP hook adapter companion binary version. |
 | `quickstart-plan.json` | Dry-run setup mutations before writes. |
 | `quickstart.txt` | Applied quickstart output with daemon-no-start. |
 | `verify.json` | Aggregated readiness gate. |
+| `beta-check.json` | Selected-agent beta readiness gate with public policy fixtures. |
 | `agent-status.json` | Selected host-agent hook status. |
+| `repair-claude-dry-run.txt` | Claude legacy hook repair plan without mutation. |
+| `repair-codex-dry-run.txt` | Codex legacy hook repair plan without mutation. |
 | `smoke.json` | Built-in semantic policy smoke report. |
+| `policy-fixtures.json` | Public policy fixture library result. |
+| `tui-snapshot-all.txt` | Full operator dashboard snapshot. |
+| `tui-snapshot-onboarding.txt` | First-minute setup/recovery snapshot. |
+| `tui-watch-approvals.txt` | Bounded approvals watch output. |
+| `tui-stream.txt` | Bounded operator stream output. |
 | `report-bundle.json` | Redacted diagnostic support bundle. |
+| `report-bundle.out` | Report bundle command output. |
 | `uninstall-dry-run.txt` | Rollback plan for review. |
 | `summary.env` | Mode, agent, daemon manager, and capture metadata. |
 

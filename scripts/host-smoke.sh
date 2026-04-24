@@ -26,8 +26,9 @@ Options:
   --yes                    Confirm real-home mutation.
   -h, --help               Show this help.
 
-The script never runs destructive cleanup. It captures `gommage uninstall
---all --dry-run` so the operator can review rollback before executing it.
+The script never runs destructive cleanup. It captures bounded TUI views,
+repair dry-runs, and `gommage uninstall --all --dry-run` so the operator can
+review rollback before executing it.
 USAGE
 }
 
@@ -108,6 +109,17 @@ gommage_cmd() {
   fi
 }
 
+gommage_companion_cmd() {
+  binary="$1"
+  shift
+  if [ -n "${GOMMAGE_BIN:-}" ]; then
+    bin_dir="$(CDPATH='' cd -- "$(dirname -- "$GOMMAGE_BIN")" && pwd)"
+    "$bin_dir/$binary" "$@"
+  else
+    "$binary" "$@"
+  fi
+}
+
 tmp_root=""
 cleanup() {
   if [ -n "$tmp_root" ] && [ "$keep_temp" != "true" ]; then
@@ -160,6 +172,10 @@ run_capture() {
 }
 
 run_capture "gommage version" "version.txt" gommage_cmd --version
+run_capture "gommage-daemon version" "gommage-daemon-version.txt" \
+  gommage_companion_cmd gommage-daemon --version
+run_capture "gommage-mcp version" "gommage-mcp-version.txt" \
+  gommage_companion_cmd gommage-mcp --version
 run_capture "quickstart dry-run plan" "quickstart-plan.json" \
   gommage_cmd quickstart --agent "$agent" --daemon --daemon-manager "$daemon_manager" \
     --dry-run --json
@@ -170,10 +186,22 @@ run_capture "verify readiness" "verify.json" gommage_cmd verify --json
 run_capture "public policy fixtures" "policy-fixtures.json" \
   gommage_cmd policy test "$public_fixture" --json
 run_capture "beta readiness" "beta-check.json" \
-  gommage_cmd beta check --json --policy-test "$public_fixture"
+  gommage_cmd beta check --json --agent "$agent" --policy-test "$public_fixture"
 run_capture "agent status" "agent-status.json" \
   gommage_cmd agent status "$agent" --json
+run_capture "claude repair dry-run" "repair-claude-dry-run.txt" \
+  gommage_cmd repair agent claude --dry-run
+run_capture "codex repair dry-run" "repair-codex-dry-run.txt" \
+  gommage_cmd repair agent codex --dry-run
 run_capture "semantic smoke" "smoke.json" gommage_cmd smoke --json
+run_capture "operator TUI snapshot" "tui-snapshot-all.txt" \
+  gommage_cmd tui --snapshot --view all
+run_capture "operator TUI onboarding snapshot" "tui-snapshot-onboarding.txt" \
+  gommage_cmd tui --snapshot --view onboarding
+run_capture "operator TUI approvals watch" "tui-watch-approvals.txt" \
+  gommage_cmd tui --watch --watch-ticks 2 --view approvals
+run_capture "operator TUI stream" "tui-stream.txt" \
+  gommage_cmd tui --stream --stream-ticks 1
 run_capture "redacted report bundle" "report-bundle.out" \
   gommage_cmd report bundle --redact --force --output "$capture_dir/report-bundle.json"
 run_capture "rollback dry-run" "uninstall-dry-run.txt" \
