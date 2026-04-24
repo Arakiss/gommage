@@ -138,6 +138,12 @@
       ]
     },
     {
+      "id": "policy_suggest_json",
+      "purpose": "Generate advisory policy rule and fixture drafts for uncovered audit decisions.",
+      "stdin_mode": "none",
+      "argv": ["policy", "suggest", "--audit", "{replay_audit}", "--json"]
+    },
+    {
       "id": "tui_snapshot_all",
       "purpose": "Capture the human operator snapshot without ANSI output.",
       "stdin_mode": "none",
