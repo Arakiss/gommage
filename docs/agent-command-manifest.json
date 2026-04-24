@@ -162,6 +162,12 @@
       "argv": ["tui", "--snapshot", "--view", "approvals"]
     },
     {
+      "id": "tui_snapshot_metrics",
+      "purpose": "Capture local operator metrics, daemon health, and picto inventory without ANSI output.",
+      "stdin_mode": "none",
+      "argv": ["tui", "--snapshot", "--view", "metrics"]
+    },
+    {
       "id": "tui_watch_approvals",
       "purpose": "Capture bounded approval inbox refresh frames without ANSI output.",
       "stdin_mode": "none",

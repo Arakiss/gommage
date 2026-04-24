@@ -31,13 +31,14 @@ gommage quickstart --agent claude --daemon --dry-run --json
 gommage agent status claude --json
 gommage tui --snapshot --view all
 gommage tui --snapshot --view onboarding
+gommage tui --snapshot --view metrics
 ```
 
 Evidence to save:
 
 - quickstart JSON plan
 - current host-agent status
-- plain-text TUI snapshot and onboarding view
+- plain-text TUI snapshot, onboarding view, and metrics view
 
 ## 3. Quickstart And Verify
 
@@ -59,6 +60,9 @@ Expected result:
 - `smoke --json` is `pass`
 - bounded TUI watch prints two plain-text frames and no ANSI escapes
 - bounded TUI stream prints recent decision/event rows and no ANSI escapes
+- stream and metrics snapshots show daemon reachability, active pictos, local
+  counters, webhook DLQ count, and audit anomaly count when verification is
+  available
 
 ## 4. Approval Flow
 

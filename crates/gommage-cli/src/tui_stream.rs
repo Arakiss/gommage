@@ -8,6 +8,8 @@ use std::{
     time::Duration,
 };
 
+use crate::operator_metrics::build_operator_telemetry;
+
 pub(crate) fn print_stream(
     layout: &HomeLayout,
     refresh: Duration,
@@ -33,6 +35,10 @@ pub(crate) fn print_stream(
         writeln!(stdout, "Gommage live decision stream")?;
         writeln!(stdout, "home: {}", layout.root.display())?;
         writeln!(stdout, "source: {}", snapshot.source)?;
+        let telemetry = build_operator_telemetry(layout);
+        for line in telemetry.snapshot_lines() {
+            writeln!(stdout, "{line}")?;
+        }
         writeln!(stdout, "events:")?;
         if snapshot.items.is_empty() {
             writeln!(stdout, "- no recent audit entries")?;

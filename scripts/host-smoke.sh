@@ -198,6 +198,8 @@ run_capture "operator TUI snapshot" "tui-snapshot-all.txt" \
   gommage_cmd tui --snapshot --view all
 run_capture "operator TUI onboarding snapshot" "tui-snapshot-onboarding.txt" \
   gommage_cmd tui --snapshot --view onboarding
+run_capture "operator TUI metrics snapshot" "tui-snapshot-metrics.txt" \
+  gommage_cmd tui --snapshot --view metrics
 run_capture "operator TUI approvals watch" "tui-watch-approvals.txt" \
   gommage_cmd tui --watch --watch-ticks 2 --view approvals
 run_capture "operator TUI stream" "tui-stream.txt" \

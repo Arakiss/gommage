@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1400" height="940" viewBox="0 0 1400 940" role="img" aria-labelledby="title desc">
   <title id="title">Gommage operator dashboard TUI snapshot</title>
-  <desc id="desc">A terminal snapshot of gommage tui showing readiness, approvals, approval draft controls, policy, audit, capability, and recovery views.</desc>
+  <desc id="desc">A terminal snapshot of gommage tui showing readiness, approvals, approval draft controls, daemon health, picto inventory, local metrics, policy, audit, capability, and recovery views.</desc>
   <defs>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000000" flood-opacity="0.5"/>
@@ -29,6 +29,7 @@
     <text x="90" y="258" fill="#94a3b8">status: <tspan fill="#fbbf24" font-weight="700">warn</tspan></text>
     <text x="90" y="290" fill="#94a3b8">summary: 3 check(s): <tspan fill="#22c55e">1 ok</tspan>, <tspan fill="#fbbf24">2 warn</tspan>, <tspan fill="#f87171">0 fail</tspan>, 0 skip</text>
     <text x="90" y="322" fill="#94a3b8">focus: doctor <tspan fill="#fbbf24">[warn]</tspan> operable, but review warnings before trusting a hook</text>
+    <text x="90" y="354" fill="#94a3b8">operator: daemon <tspan fill="#fbbf24">[warn]</tspan> · pictos 1 active · metrics 2 decisions, 0 anomalies</text>
 
     <text x="90" y="380" fill="#38bdf8" font-size="23" font-weight="700">readiness:</text>
     <text x="118" y="414" fill="#e2e8f0">- doctor <tspan fill="#fbbf24">[warn]</tspan> 0 failure(s), 2 warning(s)</text>

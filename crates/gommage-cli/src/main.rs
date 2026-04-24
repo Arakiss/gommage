@@ -23,6 +23,7 @@ mod input;
 mod map;
 mod mascot;
 mod mcp;
+mod operator_metrics;
 mod policy_cmd;
 mod policy_diff;
 mod quickstart;

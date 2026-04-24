@@ -12,6 +12,7 @@ use crate::{
     agent_status::build_agent_status_report,
     doctor::{DoctorStatus, build_doctor_report},
     gestral::{UiStatus, color_enabled, truncate_plain},
+    operator_metrics::build_operator_telemetry,
     smoke::{SmokeStatus, build_smoke_report},
     tui_actions::{ApprovalDraft, PendingTuiAction, execute_tui_action},
     tui_render::{RenderState, render_lines},
@@ -215,6 +216,11 @@ fn print_snapshot(layout: &HomeLayout, dashboard: &Dashboard, view: TuiView) -> 
         );
     }
     println!();
+    println!("operator:");
+    for line in build_operator_telemetry(layout).snapshot_lines() {
+        println!("- {line}");
+    }
+    println!();
     println!("readiness:");
     for row in &dashboard.rows {
         println!(
@@ -385,6 +391,7 @@ fn run_interactive(
                         b'5' => view = TuiView::Capabilities,
                         b'6' => view = TuiView::Recovery,
                         b'7' => view = TuiView::Onboarding,
+                        b'8' => view = TuiView::Metrics,
                         b't' if view == TuiView::Approvals => {
                             approval_draft.cycle_ttl(false);
                             notice = Some(format!(
