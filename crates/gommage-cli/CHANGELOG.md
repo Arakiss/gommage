@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.30.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.29.0-alpha.1...gommage-cli-v0.30.0-alpha.1) (2026-04-24)
+
+
+### Features
+
+* expand coverage beyond hooks ([722a1e1](https://github.com/Arakiss/gommage/commit/722a1e13b375fafb6da0c1cff86cb3ff75533696))
+
 ## [0.29.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.28.0-alpha.1...gommage-cli-v0.29.0-alpha.1) (2026-04-24)
 
 
