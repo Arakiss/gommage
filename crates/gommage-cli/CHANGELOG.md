@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.24.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.23.0-alpha.1...gommage-cli-v0.24.0-alpha.1) (2026-04-24)
+
+
+### Features
+
+* add legacy agent repair ([625cff6](https://github.com/Arakiss/gommage/commit/625cff667d8ddf896a5eab44d044d1255b647042))
+
 ## [0.23.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.22.0-alpha.1...gommage-cli-v0.23.0-alpha.1) (2026-04-23)
 
 
