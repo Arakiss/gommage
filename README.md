@@ -306,8 +306,10 @@ Stable automation contracts:
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
 | `smoke --json` | Built-in semantic post-install checks. |
 | `policy test --json` | Project-owned policy regression fixtures. |
+| `policy lint --strict --json` | Strict authoring checks for duplicate names, exact-match shadowing, empty matches, empty patterns, and weak rule metadata. |
 | `replay --audit <file> --policy <dir> --json` | Re-evaluate historical audit decisions against a candidate policy. |
 | `policy diff --from <dir> --to <dir> --against <file> --json` | Compare two policy directories against the same historical audit decisions. |
+| `explain <audit-id> --trace --json` | Audit-entry trace over current policy rule order, active decision, shadowed matches, and fixture-authoring hints. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
 | `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, with signed audit-log fallback. |
@@ -630,8 +632,7 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
 **v1.0** — hackable by others
 - Dry-run quickstart planning, redacted support bundles, and a host E2E smoke
   matrix for beta-grade operator safety
-- Policy suggestions, richer explain traces, and strict policy linting for the
-  policy-authoring loop
+- Policy suggestions for the policy-authoring loop
 - crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
 - Broader Codex coverage once upstream `PreToolUse` widens past Bash (openai/codex#16732)

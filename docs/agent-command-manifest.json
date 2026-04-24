@@ -276,6 +276,12 @@
       "argv": ["policy", "check"]
     },
     {
+      "id": "policy_lint_strict_json",
+      "purpose": "Run strict policy authoring checks against the active policy directory.",
+      "stdin_mode": "none",
+      "argv": ["policy", "lint", "--strict", "--json"]
+    },
+    {
       "id": "policy_test_json",
       "purpose": "Run a fixture file directly.",
       "stdin_mode": "none",

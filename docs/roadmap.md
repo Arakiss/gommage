@@ -95,8 +95,9 @@ Features:
 Current status:
 
 - Shipped: `replay` and `policy diff` have stable JSON reports over historical
-  audit capabilities.
-- Remaining: `policy suggest`, `explain --trace`, and strict policy linting.
+  audit capabilities; `explain --trace` and `policy lint --strict` cover the
+  first rule-order and strict authoring checks.
+- Remaining: `policy suggest` and deeper strict-lint reachability checks.
 
 Primary code surfaces:
 

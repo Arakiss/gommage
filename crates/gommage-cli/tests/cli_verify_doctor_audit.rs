@@ -395,6 +395,82 @@ fn explain_prints_structured_decision_for_exact_audit_id() {
 }
 
 #[test]
+fn explain_trace_json_reports_rule_order_and_fixture_hints() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let mut child = gommage(&home)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main"}}"#,
+        )
+        .unwrap();
+    assert!(child.wait_with_output().unwrap().status.success());
+
+    let audit = fs::read_to_string(home.join("audit.log")).unwrap();
+    let decision_line = audit
+        .lines()
+        .find(|line| {
+            serde_json::from_str::<serde_json::Value>(line)
+                .ok()
+                .and_then(|value| value.get("tool").cloned())
+                .is_some()
+        })
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(decision_line).unwrap();
+    let id = value.get("id").and_then(|v| v.as_str()).unwrap();
+
+    let output = gommage(&home)
+        .args(["explain", id, "--trace", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["kind"].as_str(), Some("decision"));
+    assert_eq!(report["input_available"].as_bool(), Some(false));
+    assert_eq!(
+        report["active_matched_rule"]["name"].as_str(),
+        Some("gate-main-push")
+    );
+    assert!(
+        report["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| rule["name"].as_str() == Some("gate-main-push")
+                && rule["outcome"].as_str() == Some("matched"))
+    );
+    assert!(
+        report["fixture_hints"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|hint| hint.as_str().unwrap().contains("gommage replay"))
+    );
+}
+
+#[test]
 fn audit_verify_explain_human_prints_forensic_summary() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
