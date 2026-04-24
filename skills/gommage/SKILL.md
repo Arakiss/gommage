@@ -110,7 +110,7 @@ cargo install --path crates/gommage-daemon --force
 cargo install --path crates/gommage-mcp --force
 ```
 
-Do not recommend `cargo install gommage-cli` yet. As of April 21, 2026, the `gommage-*` crates are not published on crates.io and the manifests intentionally keep `publish = false`. The bundled stdlib is packaged in `gommage-stdlib`, but the full publish gate still needs to pass before crates.io becomes a supported install path.
+Do not recommend `cargo install gommage-cli` yet. As of April 24, 2026, the `gommage-*` crates are not published on crates.io and the manifests intentionally keep `publish = false`. The bundled stdlib is packaged in `gommage-stdlib`, but the full publish gate still needs to pass before crates.io becomes a supported install path.
 
 ## Agent Notes
 
@@ -183,6 +183,7 @@ Current alpha distribution:
 
 - GitHub Releases provide prebuilt `gommage`, `gommage-daemon`, and `gommage-mcp` archives.
 - The installer verifies Sigstore bundle identity and SHA-256 before extracting.
+- From a checkout, use `sh scripts/verify-release.sh --json` for operator release evidence; use `--require-sbom --require-provenance` for beta/package-manager gates.
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.
 - crates.io is not the supported install path yet.

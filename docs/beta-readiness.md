@@ -38,7 +38,8 @@ issue:
 | Gate | Evidence |
 |---|---|
 | Installer | Fresh temp-home install from the latest `gommage-cli-v*` release. |
-| Release assets | 12 CLI release assets: 4 archives, 4 checksums, 4 Sigstore bundles. |
+| Release assets | Required CLI release assets: 4 archives, 4 checksums, 4 Sigstore bundles, plus CycloneDX SBOM for current release-line builds. |
+| Release verification | `scripts/verify-release.sh --json` passes for the current platform; package-manager/beta gates use `--require-sbom --require-provenance`. |
 | Binary introspection | `gommage`, `gommage-daemon`, and `gommage-mcp` all support `--version`. |
 | Home setup | `gommage init` and `gommage policy init --stdlib` succeed in a clean home. |
 | Beta gate | `gommage beta check --json --policy-test examples/policy-fixtures.yaml` exits with `pass` or documented `warn` and includes actionable `next` entries. |
@@ -65,8 +66,8 @@ issue:
 
 Treat these as beta blockers:
 
-- A verified installer release is missing any archive, checksum, or Sigstore
-  bundle for a supported platform.
+- A verified installer release is missing any archive, checksum, Sigstore
+  bundle, SBOM, or required provenance evidence for a supported platform.
 - `gommage verify --json` cannot distinguish warning from failure.
 - A documented quickstart command fails on a clean macOS or Linux account.
 - A companion binary cannot be introspected with `--version`.
@@ -96,8 +97,9 @@ evidence. The default mode runs against a temporary `HOME`, applies quickstart
 without starting the daemon, captures `verify`, selected-agent `beta check`,
 `agent status`, repair dry-runs, bounded TUI snapshots/watch/stream, semantic
 smoke, the redacted report bundle, and an uninstall dry-run rollback plan.
-Use `scripts/check-release-assets.sh --json` to collect the release artifact
-inventory for the same tracking issue.
+Use `scripts/check-release-assets.sh --json` and
+`scripts/verify-release.sh --json` to collect the release artifact inventory
+and platform verification evidence for the same tracking issue.
 
 ## Tracking issue checklist
 
