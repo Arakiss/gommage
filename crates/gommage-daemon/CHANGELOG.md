@@ -1,5 +1,12 @@
 # Changelog — gommage-daemon
 
+## [0.5.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.4.1-alpha.1...gommage-daemon-v0.5.0-alpha.1) (2026-04-23)
+
+
+### Features
+
+* make approval webhooks recoverable ([4075edd](https://github.com/Arakiss/gommage/commit/4075eddc5242c56c68ea1af74b411c2c5d15ce2e))
+
 ## [0.4.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.4.0-alpha.1...gommage-daemon-v0.4.1-alpha.1) (2026-04-23)
 
 ## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.3.1-alpha.1...gommage-daemon-v0.4.0-alpha.1) (2026-04-23)
