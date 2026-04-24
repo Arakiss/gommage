@@ -428,9 +428,9 @@ historical decisions instead of reconstructing or guessing input.
 
 ## Strict Policy Lint
 
-Use `gommage policy lint --strict --json` against the active policy directory,
-or `gommage policy lint <file> --strict --json` for a candidate file. Strict
-lint first performs normal parse/compile validation, then reports actionable
+Use `gommage policy lint --strict --json` against the active policy layers, or
+`gommage policy lint <file> --strict --json` for a candidate file. Strict lint
+first performs normal parse/compile validation, then reports actionable
 authoring issues:
 
 - duplicate rule names
@@ -442,3 +442,41 @@ authoring issues:
 The JSON report includes `status`, `summary.errors`, `summary.warnings`, and
 `issues[]` with stable `severity`, `code`, `file`, `rule_name`, and
 `rule_index` fields.
+
+## Policy Layers
+
+Use `gommage policy layers --json` to inspect the effective policy order and
+hash. Runtime decisions load policy in this order:
+
+1. explicit org policy from `GOMMAGE_ORG_POLICY_DIR`, when set
+2. explicit project policy from `GOMMAGE_PROJECT_POLICY_DIR`, when set
+3. otherwise project-local policy at `<expedition-root>/.gommage/policy.d`,
+   when an expedition is active and that directory exists
+4. user policy at `$GOMMAGE_HOME/policy.d`
+
+Evaluation remains first-match-wins after compiled hard-stops. Earlier layers
+therefore have higher policy precedence than later layers. The effective policy
+hash includes layer names and relative file paths whenever more than one layer
+is active, so org/project/user order changes are visible in audit evidence.
+
+## MCP Gateway
+
+`gommage-mcp --gateway --server-name <name> -- <upstream-command> [args...]`
+starts an initial stdio MCP gateway. It reads line-delimited JSON-RPC, gates
+`tools/call` requests through the active Gommage policy as
+`mcp__<name>__<tool>`, forwards allowed calls to the upstream server, and
+returns an MCP tool result with `isError: true` for denied or picto-required
+calls without forwarding them upstream.
+
+The gateway is intentionally narrow in this alpha line: it is for stdio MCP
+servers and preserves non-`tools/call` requests by forwarding them to the
+upstream process. Use the existing `mcp.*` stdlib capabilities to gate by
+read-like, write-like, or generic MCP tool names.
+
+## Sandbox Advice
+
+Use `gommage sandbox advise --json` to print advisory native sandbox bridge
+guidance for Codex, bwrap, macOS Seatbelt, and AppArmor. The report always
+sets `advisory_only: true` and includes a warning that Gommage does not enforce
+OS confinement. Treat the output as a review starter for the host sandbox layer,
+not as a generated security profile.

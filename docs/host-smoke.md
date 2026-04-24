@@ -106,6 +106,8 @@ The capture directory contains:
 | `repair-codex-dry-run.txt` | Codex legacy hook repair plan without mutation. |
 | `smoke.json` | Built-in semantic policy smoke report. |
 | `policy-fixtures.json` | Public policy fixture library result. |
+| `policy-layers.json` | Active policy layer order and effective hash. |
+| `sandbox-advice.json` | Advisory native sandbox bridge report. |
 | `tui-snapshot-all.txt` | Full operator dashboard snapshot. |
 | `tui-snapshot-onboarding.txt` | First-minute setup/recovery snapshot. |
 | `tui-snapshot-metrics.txt` | Local daemon health, active picto, approval, webhook DLQ, and audit counter snapshot. |

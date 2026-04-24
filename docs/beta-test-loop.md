@@ -47,6 +47,8 @@ gommage quickstart --agent claude --daemon --self-test
 gommage beta check --json --agent claude --policy-test examples/policy-fixtures.yaml
 gommage verify --json
 gommage smoke --json
+gommage policy layers --json
+gommage sandbox advise --json
 gommage audit-verify --explain
 gommage tui --watch --watch-ticks 2 --view approvals
 gommage tui --stream --stream-ticks 1 --stream-limit 8
@@ -58,6 +60,8 @@ Expected result:
 - `beta check --json` is `pass` or a documented `warn`
 - `verify --json` is `pass` or a documented `warn`
 - `smoke --json` is `pass`
+- `policy layers --json` shows user policy and any explicit org/project layers
+- `sandbox advise --json` is marked advisory only
 - bounded TUI watch prints two plain-text frames and no ANSI escapes
 - bounded TUI stream prints recent decision/event rows and no ANSI escapes
 - stream and metrics snapshots show daemon reachability, active pictos, local

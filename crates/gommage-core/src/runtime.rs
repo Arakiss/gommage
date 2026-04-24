@@ -4,7 +4,9 @@
 //! `~/.gommage/`. This module deliberately does *not* do policy evaluation —
 //! that stays pure in `evaluator.rs`.
 
-use crate::{ApprovalStore, CapabilityMapper, PictoStore, Policy, error::GommageError};
+use crate::{
+    ApprovalStore, CapabilityMapper, PictoStore, Policy, error::GommageError, policy::PolicyLayer,
+};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
@@ -33,6 +35,63 @@ pub fn default_policy_env() -> HashMap<String, String> {
         env.insert("HOME".into(), home);
     }
     env
+}
+
+const ORG_POLICY_DIR_ENV: &str = "GOMMAGE_ORG_POLICY_DIR";
+const PROJECT_POLICY_DIR_ENV: &str = "GOMMAGE_PROJECT_POLICY_DIR";
+
+pub fn active_policy_layers(
+    layout: &HomeLayout,
+    expedition: Option<&Expedition>,
+) -> Result<Vec<PolicyLayer>, GommageError> {
+    let mut layers = Vec::new();
+    if let Some(dir) = explicit_policy_dir(ORG_POLICY_DIR_ENV)? {
+        push_policy_layer(&mut layers, "org", dir);
+    }
+    if let Some(dir) = explicit_policy_dir(PROJECT_POLICY_DIR_ENV)? {
+        push_policy_layer(&mut layers, "project", dir);
+    } else if let Some(expedition) = expedition {
+        let dir = expedition.root.join(".gommage").join("policy.d");
+        if dir.is_dir() {
+            push_policy_layer(&mut layers, "project", dir);
+        }
+    }
+    push_policy_layer(&mut layers, "user", layout.policy_dir.clone());
+    Ok(layers)
+}
+
+pub fn load_active_policy(
+    layout: &HomeLayout,
+    expedition: Option<&Expedition>,
+    env: &HashMap<String, String>,
+) -> Result<Policy, GommageError> {
+    let layers = active_policy_layers(layout, expedition)?;
+    Policy::load_from_layers(&layers, env)
+}
+
+fn explicit_policy_dir(var: &str) -> Result<Option<PathBuf>, GommageError> {
+    let Ok(raw) = std::env::var(var) else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let path = PathBuf::from(trimmed);
+    if !path.is_dir() {
+        return Err(GommageError::Policy(format!(
+            "{var} points to {}, but it is not a directory",
+            path.display()
+        )));
+    }
+    Ok(Some(path))
+}
+
+fn push_policy_layer(layers: &mut Vec<PolicyLayer>, name: &str, dir: PathBuf) {
+    if layers.iter().any(|layer| layer.dir == dir) {
+        return;
+    }
+    layers.push(PolicyLayer::new(name, dir));
 }
 
 pub struct HomeLayout {
@@ -178,7 +237,7 @@ impl Runtime {
             .map(Expedition::policy_env)
             .unwrap_or_else(default_policy_env);
         let mapper = CapabilityMapper::load_from_dir(&layout.capabilities_dir)?;
-        let policy = Policy::load_from_dir(&layout.policy_dir, &env)?;
+        let policy = load_active_policy(&layout, expedition.as_ref(), &env)?;
         let pictos = PictoStore::open(&layout.pictos_db)?;
         let approvals = ApprovalStore::open(&layout.approvals_log);
         Ok(Runtime {
@@ -199,7 +258,7 @@ impl Runtime {
             .map(Expedition::policy_env)
             .unwrap_or_else(default_policy_env);
         self.mapper = CapabilityMapper::load_from_dir(&self.layout.capabilities_dir)?;
-        self.policy = Policy::load_from_dir(&self.layout.policy_dir, &env)?;
+        self.policy = load_active_policy(&self.layout, self.expedition.as_ref(), &env)?;
         Ok(())
     }
 }
@@ -235,5 +294,29 @@ mod tests {
         assert_eq!(back.name, exp.name);
         Expedition::clear(&layout.expedition_file).unwrap();
         assert!(Expedition::load(&layout.expedition_file).unwrap().is_none());
+    }
+
+    #[test]
+    fn active_policy_layers_include_project_before_user() {
+        let td = tempdir().unwrap();
+        let home = td.path().join("home");
+        let project = td.path().join("project");
+        let project_policy = project.join(".gommage/policy.d");
+        fs::create_dir_all(&project_policy).unwrap();
+        let layout = HomeLayout::at(&home);
+        layout.ensure().unwrap();
+        let expedition = Expedition {
+            name: "project".into(),
+            root: project.clone(),
+            started_at: time::OffsetDateTime::now_utc(),
+        };
+
+        let layers = active_policy_layers(&layout, Some(&expedition)).unwrap();
+
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].name, "project");
+        assert_eq!(layers[0].dir, project_policy);
+        assert_eq!(layers[1].name, "user");
+        assert_eq!(layers[1].dir, layout.policy_dir);
     }
 }

@@ -121,6 +121,50 @@ fn policy_init_stdlib_installs_loadable_defaults() {
 }
 
 #[test]
+fn sandbox_advise_json_is_explicitly_advisory() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home)
+        .args(["sandbox", "advise", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"].as_str(), Some("pass"));
+    assert_eq!(report["advisory_only"].as_bool(), Some(true));
+    assert!(
+        report["warning"]
+            .as_str()
+            .unwrap()
+            .contains("does not enforce OS confinement")
+    );
+    let targets = report["suggestions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|suggestion| suggestion["target"].as_str())
+        .collect::<Vec<_>>();
+    assert!(targets.contains(&"codex"));
+    assert!(targets.contains(&"bwrap"));
+    assert!(targets.contains(&"macos-seatbelt"));
+    assert!(targets.contains(&"apparmor"));
+}
+
+#[test]
 fn map_json_reports_capabilities_without_policy_files() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

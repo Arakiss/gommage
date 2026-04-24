@@ -31,6 +31,7 @@ mod quickstart_plan;
 mod repair;
 mod replay;
 mod report;
+mod sandbox;
 mod smoke;
 mod tui;
 mod tui_actions;
@@ -57,6 +58,7 @@ use quickstart::{QuickstartOptions, cmd_quickstart};
 use repair::{RepairCmd, cmd_repair};
 use replay::{ReplayOptions, cmd_replay};
 use report::{ReportCmd, cmd_report};
+use sandbox::{SandboxCmd, cmd_sandbox};
 use smoke::cmd_smoke;
 use tui::{TuiOptions, cmd_tui};
 use tui_views::TuiView;
@@ -289,6 +291,10 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+
+    /// Print advisory native sandbox bridge guidance.
+    #[command(subcommand)]
+    Sandbox(SandboxCmd),
 
     /// Open the operator dashboard TUI.
     Tui {
@@ -573,6 +579,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Verify { json, policy_tests } => return cmd_verify(layout, json, policy_tests),
         Cmd::Report(sub) => return cmd_report(sub, layout),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
+        Cmd::Sandbox(sub) => return cmd_sandbox(sub, layout),
         Cmd::Tui {
             agents,
             view,

@@ -171,14 +171,20 @@ Features:
 - MCP gateway mode
   - A policy-enforcing MCP proxy for agents whose native hook surface is missing
     or incomplete.
+  - Initial stdio gateway exists in `gommage-mcp --gateway`; remaining work is
+    broader transport hardening and host integration docs.
 - Project-local harness mode
   - `gommage project init` creates reviewed fixtures and project policy that can
     be layered with user policy.
 - Policy inheritance
   - Explicit precedence: hard-stops, org, project, user imports, local pictos.
+  - Current implementation supports explicit org/project/user policy
+    directories plus expedition-root project policy.
 - Sandbox bridge
   - Generate Codex, bwrap, AppArmor, or macOS Seatbelt suggestions from policy
     intent, documented as advisory confinement helpers.
+  - Current `gommage sandbox advise` output is intentionally advisory and does
+    not claim native enforcement.
 
 Primary code surfaces:
 

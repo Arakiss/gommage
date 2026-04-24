@@ -32,5 +32,5 @@ pub use evaluator::{Decision, EvalResult, MatchedRule, evaluate};
 pub use hardstop::HardStopHit;
 pub use mapper::CapabilityMapper;
 pub use picto::{Picto, PictoConsume, PictoLookup, PictoStatus, PictoStore};
-pub use policy::{Match, Policy, Rule, RuleDecision};
+pub use policy::{Match, Policy, PolicyLayer, Rule, RuleDecision};
 pub use toolcall::ToolCall;

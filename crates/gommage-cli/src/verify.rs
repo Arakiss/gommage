@@ -160,34 +160,38 @@ pub(crate) fn build_verify_report(
         }
     };
 
-    let policy_env = Expedition::load(&layout.expedition_file)
+    let policy_context = Expedition::load(&layout.expedition_file)
         .map(|expedition| {
-            expedition
-                .map(|expedition| expedition.policy_env())
-                .unwrap_or_else(default_policy_env)
+            let env = expedition
+                .as_ref()
+                .map(Expedition::policy_env)
+                .unwrap_or_else(default_policy_env);
+            (expedition, env)
         })
         .map_err(|error| format!("loading expedition policy environment: {error}"));
 
     let mut policy_tests = Vec::new();
     for file in policy_test_files {
-        let section = match &policy_env {
-            Ok(env) => match build_policy_test_report(layout, env, file) {
-                Ok(report) => {
-                    let status = VerifyStatus::from_smoke(report.status);
-                    VerifyPolicyTestSection {
-                        file: path_display(file),
-                        status,
-                        report: Some(report),
-                        error: None,
+        let section = match &policy_context {
+            Ok((expedition, env)) => {
+                match build_policy_test_report(layout, expedition.as_ref(), env, file) {
+                    Ok(report) => {
+                        let status = VerifyStatus::from_smoke(report.status);
+                        VerifyPolicyTestSection {
+                            file: path_display(file),
+                            status,
+                            report: Some(report),
+                            error: None,
+                        }
                     }
+                    Err(error) => VerifyPolicyTestSection {
+                        file: path_display(file),
+                        status: VerifyStatus::Fail,
+                        report: None,
+                        error: Some(error.to_string()),
+                    },
                 }
-                Err(error) => VerifyPolicyTestSection {
-                    file: path_display(file),
-                    status: VerifyStatus::Fail,
-                    report: None,
-                    error: Some(error.to_string()),
-                },
-            },
+            }
             Err(error) => VerifyPolicyTestSection {
                 file: path_display(file),
                 status: VerifyStatus::Fail,

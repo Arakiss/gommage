@@ -226,6 +226,103 @@ fn policy_lint_strict_json_passes_stdlib() {
 }
 
 #[test]
+fn policy_layers_json_reports_project_before_user_and_decide_uses_it() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let project = temp.path().join("project");
+    let project_policy_dir = project.join(".gommage/policy.d");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    fs::create_dir_all(home.join("capabilities.d")).unwrap();
+    fs::create_dir_all(home.join("policy.d")).unwrap();
+    fs::create_dir_all(&project_policy_dir).unwrap();
+    fs::write(
+        home.join("capabilities.d/bash.yaml"),
+        r#"
+- name: bash-proc-exec
+  tool: Bash
+  emit:
+    - "proc.exec:${input.command}"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project_policy_dir.join("10-project.yaml"),
+        r#"
+- name: project-deny-status
+  decision: gommage
+  match:
+    any_capability: ["proc.exec:git status"]
+  reason: "project policy wins"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join("policy.d/90-user.yaml"),
+        r#"
+- name: user-allow-status
+  decision: allow
+  match:
+    any_capability: ["proc.exec:git status"]
+"#,
+    )
+    .unwrap();
+    assert!(
+        gommage(&home)
+            .args([
+                "expedition",
+                "start",
+                "phase-10",
+                "--root",
+                project.to_str().unwrap()
+            ])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let layers = gommage(&home)
+        .args(["policy", "layers", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        layers.status.success(),
+        "{}",
+        String::from_utf8_lossy(&layers.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&layers.stdout).unwrap();
+    assert_eq!(report["status"].as_str(), Some("pass"));
+    assert_eq!(report["layers"][0]["name"].as_str(), Some("project"));
+    assert_eq!(report["layers"][1]["name"].as_str(), Some("user"));
+    assert_eq!(report["layers"][0]["rules"].as_u64(), Some(1));
+    assert_eq!(report["layers"][1]["rules"].as_u64(), Some(1));
+
+    let mut child = gommage(&home)
+        .arg("decide")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"tool":"Bash","input":{"command":"git status"}}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let decision: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(decision["decision"]["kind"].as_str(), Some("gommage"));
+    assert_eq!(
+        decision["matched_rule"]["name"].as_str(),
+        Some("project-deny-status")
+    );
+}
+
+#[test]
 fn policy_lint_strict_json_fails_duplicate_rule_names() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

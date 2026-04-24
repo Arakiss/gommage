@@ -87,13 +87,20 @@ sandboxing and host-agent config review for that boundary.
 
 ### 2.3 Malicious repository or working tree
 
-An agent operating on a repo containing hostile content — a symlinked `README.md` pointing at `/etc/shadow`, a `policy.d/` override placed under the repo by an attacker, a file named `../../../etc/passwd` — should not be able to extract capabilities Gommage wouldn't otherwise grant.
+An agent operating on a repo containing hostile content — a symlinked `README.md` pointing at `/etc/shadow`, a project-local `.gommage/policy.d/` override placed under the repo by an attacker, a file named `../../../etc/passwd` — should not be able to extract capabilities Gommage wouldn't otherwise grant.
 
 Gommage's input specification (see Section 3) treats paths as **opaque strings**: no symlink resolution, no relative-path collapsing, no case-folding. The capability mapper renders `fs.read:<literal path as sent by the agent>`. Globs in policy match on that literal.
 
 **Implication**: your policy patterns should account for likely variations. For example, `fs.write:${EXPEDITION_ROOT}/**` does NOT match `fs.write:/symlink/to/expedition/root/x.txt` because Gommage does not resolve the symlink — the agent would have to produce the canonical path in its tool call for the allow to apply. This is deliberate: the decision boundary is the _string the agent emits_, not the filesystem state.
 
 **Users must**: configure their agent to canonicalize paths before tool use (`realpath`, `fs.realpath` in Node, etc.). Or accept the conservative posture: ambiguous paths get denied by the fail-closed default.
+
+Project-local policy is loaded only when an operator opts into a project layer
+through `GOMMAGE_PROJECT_POLICY_DIR` or starts an expedition whose root contains
+`.gommage/policy.d`. Treat project policy files as reviewed code. Org policy
+from `GOMMAGE_ORG_POLICY_DIR` loads before project policy, and user policy loads
+after project policy; `gommage policy layers --json` shows the exact active
+order and hash.
 
 ### 2.4 Forged or tampered picto store
 

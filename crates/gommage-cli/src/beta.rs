@@ -233,31 +233,35 @@ fn push_policy_fixture_checks(
         return;
     }
 
-    let env = Expedition::load(&layout.expedition_file)
+    let context = Expedition::load(&layout.expedition_file)
         .map(|expedition| {
-            expedition
-                .map(|expedition| expedition.policy_env())
-                .unwrap_or_else(default_policy_env)
+            let env = expedition
+                .as_ref()
+                .map(Expedition::policy_env)
+                .unwrap_or_else(default_policy_env);
+            (expedition, env)
         })
         .map_err(|error| format!("loading expedition policy environment: {error}"));
 
     for file in policy_tests {
-        let (status, message, details) = match &env {
-            Ok(env) => match build_policy_test_report(layout, env, file) {
-                Ok(report) => (
-                    beta_status_from_smoke(report.status),
-                    format!(
-                        "{} passed, {} failed",
-                        report.summary.passed, report.summary.failed
+        let (status, message, details) = match &context {
+            Ok((expedition, env)) => {
+                match build_policy_test_report(layout, expedition.as_ref(), env, file) {
+                    Ok(report) => (
+                        beta_status_from_smoke(report.status),
+                        format!(
+                            "{} passed, {} failed",
+                            report.summary.passed, report.summary.failed
+                        ),
+                        Some(serde_json::json!({
+                            "status": report.status,
+                            "passed": report.summary.passed,
+                            "failed": report.summary.failed,
+                        })),
                     ),
-                    Some(serde_json::json!({
-                        "status": report.status,
-                        "passed": report.summary.passed,
-                        "failed": report.summary.failed,
-                    })),
-                ),
-                Err(error) => (BetaStatus::Fail, error.to_string(), None),
-            },
+                    Err(error) => (BetaStatus::Fail, error.to_string(), None),
+                }
+            }
             Err(error) => (BetaStatus::Fail, error.clone(), None),
         };
         checks.push(BetaCheck {

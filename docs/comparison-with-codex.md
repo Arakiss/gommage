@@ -12,6 +12,7 @@ Gommage works with Codex today, but the split of responsibilities is different f
 ## What Gommage adds on top of Codex
 
 - **Declarative policy that stacks with the sandbox.** You don't replace `--sandbox workspace-write`; you add a second layer that decides which commands within that sandbox are acceptable right now, in this expedition.
+- **Advisory sandbox bridge.** `gommage sandbox advise --json` prints reviewed starter commands for native sandbox layers, always marked advisory only.
 - **Break-glass pictos.** Codex's approval policy is either "ask every time" or "auto-approve"; it does not have a signed, TTL'd, usage-bounded primitive. Gommage does.
 - **Auditable decisions.** Codex logs sessions; Gommage records each decision with rule name, policy version hash, and signed line in the audit log.
 
@@ -33,6 +34,12 @@ codex exec --sandbox read-only "audit the repo and summarise findings"
 # still goes through Gommage policy.
 codex exec --sandbox workspace-write "apply the refactor we discussed"
 ```
+
+If a third-party stdio MCP server can be launched through a proxy, route it
+through `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
+That path gates MCP `tools/call` requests as `mcp__<name>__<tool>` before
+forwarding. It does not cover Codex built-in file tools and does not replace
+Codex's OS sandbox.
 
 ## How they stack
 

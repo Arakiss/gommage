@@ -109,6 +109,12 @@
       "argv": ["smoke", "--json"]
     },
     {
+      "id": "sandbox_advise_json",
+      "purpose": "Print advisory native sandbox bridge guidance.",
+      "stdin_mode": "none",
+      "argv": ["sandbox", "advise", "--json"]
+    },
+    {
       "id": "replay_json",
       "purpose": "Replay historical audit decisions against a candidate policy.",
       "stdin_mode": "none",
@@ -286,6 +292,12 @@
       "purpose": "Validate active policy files.",
       "stdin_mode": "none",
       "argv": ["policy", "check"]
+    },
+    {
+      "id": "policy_layers_json",
+      "purpose": "Inspect active policy layer order and effective policy hash.",
+      "stdin_mode": "none",
+      "argv": ["policy", "layers", "--json"]
     },
     {
       "id": "policy_lint_strict_json",
