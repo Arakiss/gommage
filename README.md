@@ -306,6 +306,7 @@ Stable automation contracts:
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
 | `smoke --json` | Built-in semantic post-install checks. |
 | `policy test --json` | Project-owned policy regression fixtures. |
+| `replay --audit <file> --policy <dir> --json` | Re-evaluate historical audit decisions against a candidate policy. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
 | `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, with signed audit-log fallback. |

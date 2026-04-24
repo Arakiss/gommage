@@ -26,6 +26,7 @@ mod policy_cmd;
 mod quickstart;
 mod quickstart_plan;
 mod repair;
+mod replay;
 mod report;
 mod smoke;
 mod tui;
@@ -51,6 +52,7 @@ use mcp::run_mcp;
 use policy_cmd::{PolicyCmd, cmd_policy};
 use quickstart::{QuickstartOptions, cmd_quickstart};
 use repair::{RepairCmd, cmd_repair};
+use replay::{ReplayOptions, cmd_replay};
 use report::{ReportCmd, cmd_report};
 use smoke::cmd_smoke;
 use tui::{TuiOptions, cmd_tui};
@@ -231,6 +233,9 @@ enum Cmd {
         #[arg(long, value_enum, requires = "explain")]
         format: Option<AuditExplainFormat>,
     },
+
+    /// Replay historical audit decisions against a candidate policy directory.
+    Replay(ReplayOptions),
 
     /// Evaluate a tool call JSON from stdin. Useful for tests and MCP adapters.
     Decide {
@@ -545,6 +550,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         }
         Cmd::Explain { id, json } => return cmd_explain(layout, &id, json),
         Cmd::AuditVerify { explain, format } => return cmd_audit_verify(layout, explain, format),
+        Cmd::Replay(options) => return cmd_replay(options),
         Cmd::Decide { pretty, hook } => {
             let call = read_tool_call_from_stdin(hook)?;
             let rt = Runtime::open(layout)?;
