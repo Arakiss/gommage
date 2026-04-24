@@ -14,13 +14,30 @@ export GOMMAGE_SYSTEMD_USER_DIR="$tmp/systemd-user"
 export GOMMAGE_CONTRACT_REPORT="$tmp/report-bundle.json"
 export GOMMAGE_CONTRACT_REPLAY_AUDIT="$tmp/replay-audit.log"
 export GOMMAGE_CONTRACT_REPLAY_POLICY="$tmp/replay-policy.d"
+export GOMMAGE_CONTRACT_POLICY_DIFF_FROM="$tmp/policy-diff-from.d"
+export GOMMAGE_CONTRACT_POLICY_DIFF_TO="$tmp/policy-diff-to.d"
 mkdir -p "$(dirname "$GOMMAGE_CLAUDE_SETTINGS")" "$(dirname "$GOMMAGE_CODEX_HOOKS")"
 mkdir -p "$GOMMAGE_CONTRACT_REPLAY_POLICY"
+mkdir -p "$GOMMAGE_CONTRACT_POLICY_DIFF_FROM" "$GOMMAGE_CONTRACT_POLICY_DIFF_TO"
 printf '{"permissions":{"allow":["Bash","Read(./docs/**)"],"deny":["Read(./secrets/**)"]}}\n' > "$GOMMAGE_CLAUDE_SETTINGS"
 printf 'sandbox_mode = "workspace-write"\n[features]\n' > "$GOMMAGE_CODEX_CONFIG"
 cat > "$GOMMAGE_CONTRACT_REPLAY_POLICY/10-contract.yaml" <<'EOF'
 - name: allow-contract-status
   decision: allow
+  match:
+    any_capability: ["proc.exec:git status"]
+  reason: "contract fixture"
+EOF
+cat > "$GOMMAGE_CONTRACT_POLICY_DIFF_FROM/10-contract.yaml" <<'EOF'
+- name: allow-contract-status
+  decision: allow
+  match:
+    any_capability: ["proc.exec:git status"]
+  reason: "contract fixture"
+EOF
+cat > "$GOMMAGE_CONTRACT_POLICY_DIFF_TO/10-contract.yaml" <<'EOF'
+- name: deny-contract-status
+  decision: gommage
   match:
     any_capability: ["proc.exec:git status"]
   reason: "contract fixture"
@@ -70,6 +87,8 @@ for command in manifest["commands"]:
         os.environ["GOMMAGE_CONTRACT_REPORT"] if arg == "{report_bundle}"
         else os.environ["GOMMAGE_CONTRACT_REPLAY_AUDIT"] if arg == "{replay_audit}"
         else os.environ["GOMMAGE_CONTRACT_REPLAY_POLICY"] if arg == "{replay_policy}"
+        else os.environ["GOMMAGE_CONTRACT_POLICY_DIFF_FROM"] if arg == "{policy_diff_from}"
+        else os.environ["GOMMAGE_CONTRACT_POLICY_DIFF_TO"] if arg == "{policy_diff_to}"
         else arg
         for arg in command["argv"]
     ]

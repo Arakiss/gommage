@@ -376,3 +376,12 @@ The JSON report includes top-level `status`, `replay_policy_version`,
 `summary`, and per-entry original/replayed decisions, matched rules, policy
 versions, capabilities, and `changed` status. Treat changed entries as review
 items before adopting the candidate policy.
+
+Use `gommage policy diff --from <dir> --to <dir> --against <audit.log> --json`
+to compare two policy directories against the same historical audit decision
+entries. Diff uses the signed audit capabilities just like replay, evaluates
+both policy sets, and reports decision changes, matched-rule changes, skipped
+events, policy versions, and per-entry before/after decisions.
+
+Human output is intended for review. JSON output is the stable automation
+contract for CI evidence, release notes, or policy-authoring tools.

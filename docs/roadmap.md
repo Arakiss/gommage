@@ -92,6 +92,12 @@ Features:
     picto scopes, mapper rules without fixtures, and capabilities no mapper can
     emit.
 
+Current status:
+
+- Shipped: `replay` and `policy diff` have stable JSON reports over historical
+  audit capabilities.
+- Remaining: `policy suggest`, `explain --trace`, and strict policy linting.
+
 Primary code surfaces:
 
 - `crates/gommage-cli/src/audit_cmd.rs`
