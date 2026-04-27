@@ -42,7 +42,7 @@ jobs:
       - name: Tag internal components without GitHub Releases
         run: sh scripts/tag-skipped-release-please-components.sh
       - id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v5
         env:
           # release-please-action v4.4.1 still declares node20; opt in early to
           # GitHub's Node 24 runtime before the hosted-runner default changes.
