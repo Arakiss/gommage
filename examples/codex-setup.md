@@ -5,7 +5,7 @@ Codex CLI's `PreToolUse` hook schema is near-identical to Claude Code's: same
 config location. The existing `gommage-mcp` binary is schema-compatible with
 both — Codex just points its hook at it.
 
-> **Current Gommage alpha scope caveat**:
+> **Current Gommage beta scope caveat**:
 > Codex upstream widened hooks in `rust-v0.124.0` so they can observe
 > `apply_patch`, MCP tools, and long-running Bash sessions. Gommage's current
 > `quickstart --agent codex` still installs a Bash-scoped matcher and the

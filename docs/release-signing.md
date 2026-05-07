@@ -48,7 +48,7 @@ Manual verification:
 
 ```sh
 asset=gommage-x86_64-darwin.tar.gz
-tag=gommage-cli-vX.Y.Z-alpha.N
+tag=gommage-cli-vX.Y.Z-beta.N
 
 cosign verify-blob "$asset" \
   --bundle "$asset.sigstore.json" \
@@ -61,10 +61,10 @@ shasum -c "$asset.sha256"
 Operator verification from a checkout:
 
 ```sh
-gommage release verify --tag gommage-cli-vX.Y.Z-alpha.N
-gommage release verify --tag gommage-cli-vX.Y.Z-alpha.N --json
-sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-alpha.N
-sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-alpha.N --json
+gommage release verify --tag gommage-cli-vX.Y.Z-beta.N
+gommage release verify --tag gommage-cli-vX.Y.Z-beta.N --json
+sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-beta.N
+sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-beta.N --json
 ```
 
 Both verification surfaces download the platform archive, checksum, and
@@ -87,7 +87,7 @@ Installer flags:
 
 ```sh
 sh scripts/install.sh --help
-sh scripts/install.sh --version gommage-cli-vX.Y.Z-alpha.N
+sh scripts/install.sh --version gommage-cli-vX.Y.Z-beta.N
 sh scripts/install.sh --bin-dir "$HOME/.local/bin"
 sh scripts/install.sh --with-skill --skill-agent codex --skill-agent claude
 sh scripts/install.sh --skill-only --skill-agent codex --skill-agent claude

@@ -3,6 +3,27 @@
 This directory contains repository-owned operator recipes and the public policy
 fixture contract used in docs, beta gates, and CI.
 
+## Launch demo
+
+[`launch-demo/`](launch-demo/) documents the public local-first demo. The
+script lives at [`../scripts/launch-demo.sh`](../scripts/launch-demo.sh) and
+captures the beta story in one isolated run:
+
+- dry-run and applied quickstart;
+- `ask_picto` for `git push origin main`;
+- one-use `git.push:main` picto grant;
+- allowed retry after the picto is minted;
+- hard-stop deny for `rm -rf /`;
+- signed audit verification;
+- `state.sqlite` rebuild/verify/stats;
+- policy fixture and beta gate evidence.
+
+Run it from a checkout:
+
+```sh
+sh scripts/launch-demo.sh
+```
+
 ## Public policy fixture library
 
 `policy-fixtures.yaml` is the canonical example fixture file for Gommage. It

@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to retroactively build + attach binaries to (e.g. gommage-cli-vX.Y.Z-alpha.N)"
+        description: "Existing tag to retroactively build + attach binaries to (e.g. gommage-cli-vX.Y.Z-beta.N)"
         required: true
         type: string
 
@@ -143,7 +143,7 @@ jobs:
 
           echo "Dispatching ci.yml for release PR branch ${pr_branch}"
           gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
-      - name: Mark alpha releases as prereleases
+      - name: Mark prereleases
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -159,7 +159,7 @@ jobs:
             .filter(([key, value]) => {
               return (key === "tag_name" || key.endsWith("--tag_name"))
                 && typeof value === "string"
-                && value.includes("-alpha.");
+                && (value.includes("-alpha.") || value.includes("-beta."));
             })
             .map(([, value]) => value))]
             .sort();
@@ -170,7 +170,7 @@ jobs:
           )"
 
           if [[ -z "${tags}" ]]; then
-            echo "No alpha release tags emitted by release-please."
+            echo "No prerelease tags emitted by release-please."
             exit 0
           fi
 

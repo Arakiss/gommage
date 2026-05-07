@@ -53,6 +53,9 @@ gommage verify --json
 gommage smoke --json
 gommage policy layers --json
 gommage sandbox advise --json
+gommage state rebuild --json
+gommage state verify --json
+gommage state stats --json
 gommage audit-verify --explain
 gommage tui --watch --watch-ticks 2 --view approvals
 gommage tui --stream --stream-ticks 1 --stream-limit 8
@@ -66,6 +69,8 @@ Expected result:
 - `smoke --json` is `pass`
 - `policy layers --json` shows user policy and any explicit org/project layers
 - `sandbox advise --json` is marked advisory only
+- `state verify --json` reports `ok` after rebuild and states that
+  `state.sqlite` matches the current audit ledger
 - bounded TUI watch prints two plain-text frames and no ANSI escapes
 - bounded TUI stream prints recent decision/event rows and no ANSI escapes
 - stream and metrics snapshots show daemon reachability, active pictos, local

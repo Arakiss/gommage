@@ -189,8 +189,6 @@ run_capture "policy layers" "policy-layers.json" \
   gommage_cmd policy layers --json
 run_capture "sandbox advice" "sandbox-advice.json" \
   gommage_cmd sandbox advise --json
-run_capture "beta readiness" "beta-check.json" \
-  gommage_cmd beta check --json --agent "$agent" --policy-test "$public_fixture"
 run_capture "agent status" "agent-status.json" \
   gommage_cmd agent status "$agent" --json
 run_capture "claude repair dry-run" "repair-claude-dry-run.txt" \
@@ -198,6 +196,14 @@ run_capture "claude repair dry-run" "repair-claude-dry-run.txt" \
 run_capture "codex repair dry-run" "repair-codex-dry-run.txt" \
   gommage_cmd repair agent codex --dry-run
 run_capture "semantic smoke" "smoke.json" gommage_cmd smoke --json
+run_capture "rebuild state index" "state-rebuild.json" \
+  gommage_cmd state rebuild --json
+run_capture "verify state index" "state-verify.json" \
+  gommage_cmd state verify --json
+run_capture "state counters" "state-stats.json" \
+  gommage_cmd state stats --json
+run_capture "beta readiness" "beta-check.json" \
+  gommage_cmd beta check --json --agent "$agent" --policy-test "$public_fixture"
 run_capture "operator TUI snapshot" "tui-snapshot-all.txt" \
   gommage_cmd tui --snapshot --view all
 run_capture "operator TUI onboarding snapshot" "tui-snapshot-onboarding.txt" \

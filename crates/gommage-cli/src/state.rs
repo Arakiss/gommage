@@ -369,6 +369,13 @@ fn rebuild_state(layout: &HomeLayout) -> Result<StateRebuildReport> {
     })
 }
 
+pub(crate) fn build_state_readiness(
+    layout: &HomeLayout,
+    strong_hash: bool,
+) -> Result<StateReadiness> {
+    verify_state(layout, strong_hash)
+}
+
 fn verify_state(layout: &HomeLayout, strong_hash: bool) -> Result<StateReadiness> {
     let fingerprint = audit_fingerprint(&layout.audit_log)?;
     if !layout.state_db.exists() {

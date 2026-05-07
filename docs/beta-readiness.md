@@ -1,8 +1,8 @@
 # Beta Readiness
 
-Gommage is still alpha. The beta line starts when a new operator can install,
-verify, and operate the harness without reading source code or guessing which
-warnings matter.
+The beta line is justified only when a new operator can install, verify, and
+operate the harness without reading source code or guessing which warnings
+matter.
 
 This document is the launch gate for public announcements. A checked item needs
 evidence: a command, workflow run, release artifact, issue, or explicit product
@@ -44,8 +44,10 @@ issue:
 | Home setup | `gommage init` and `gommage policy init --stdlib` succeed in a clean home. |
 | Beta gate | `gommage beta check --json --policy-test examples/policy-fixtures.yaml` exits with `pass` or documented `warn` and includes actionable `next` entries. |
 | Readiness gate | `gommage verify --json` exits with `pass` or documented `warn`. |
+| State index | `gommage state rebuild --json`, `gommage state verify --json`, and `gommage state stats --json` prove `state.sqlite` is current and remains a rebuildable read-model over signed `audit.log`. |
 | Quickstart self-test | `gommage quickstart --self-test` reaches the same readiness gate after setup. |
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
+| Launch demo | `sh scripts/launch-demo.sh` completes in an isolated home and captures ask-picto, one-use picto allow, hard-stop deny, audit verification, state-index verification, policy fixtures, beta check, and TUI snapshot evidence. |
 | Operator TUI | `gommage tui --snapshot --view all` shows summary, focus, readiness rows, approvals, policy, audit, capability, recovery, onboarding, local metrics, daemon health, active pictos, and next actions on a clean pre-init home and after quickstart. `gommage tui --snapshot --view onboarding` gives a first-minute setup/recovery path. `gommage tui --snapshot --view metrics` shows local counters, webhook DLQ count, audit anomaly count, daemon reachability, and picto inventory. `gommage tui --watch --watch-ticks 2 --view approvals` produces bounded plain-text refreshes without ANSI escapes. `gommage tui --stream --stream-ticks 1` shows recent decision/event rows through daemon IPC when available and falls back to signed audit log reads while still showing daemon/picto/metrics context. |
 | Approval flow | An `ask_picto` decision creates an approval request; `gommage tui --view approvals` can tune TTL/use-count presets and approve/deny with confirmation; `gommage approval approve <id>` mints an exact-scope picto; the next matching call consumes it; `audit-verify --explain` verifies the signed evidence. |
 | Approval replay/evidence | `gommage approval replay <id> --json` compares stored request semantics with current policy; `gommage approval evidence <id> --redact` exports request state, relevant audit lines, verification summary, and next commands. |
@@ -60,7 +62,7 @@ issue:
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
 | Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host, including companion versions, selected-agent beta check, repair dry-runs, bounded TUI captures, report bundle, and rollback dry-run. |
 | CI | `ci`, `release`, `audit`, and `scorecard` are green on the release commit. |
-| Docs | README, existing-setups, diagnostics, agent compatibility, publishing, release-signing docs, and the `skills/gommage` agent skill match the current CLI. |
+| Docs | README, beta contract, existing-setups, diagnostics, agent compatibility, publishing, release-signing docs, examples, and the `skills/gommage` agent skill match the current CLI. |
 | Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
 
 ## Blocking issues
@@ -78,7 +80,7 @@ Treat these as beta blockers:
   changelog evidence.
 - A known host-agent bypass is documented as supported behavior.
 
-## Non-blocking alpha limitations
+## Non-blocking beta limitations
 
 These can remain open for beta if they are clearly documented:
 
