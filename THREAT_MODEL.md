@@ -187,6 +187,7 @@ What the evaluator **does not** read, by deliberate omission:
 - Current working directory, environment variables, user identity, hostname.
 - System clock, wall time, duration since last call.
 - Previous tool calls, prior audit log entries, the agent's transcript.
+- `state.sqlite` read-model contents.
 - Filesystem state: existence, permissions, symlink targets, file contents.
 - Network state, DNS, TLS.
 
@@ -237,11 +238,18 @@ The "zero heuristics" claim specifically means: **no component of the decision r
 │   ├── capabilities.d/        │
 │   ├── pictos.sqlite          │
 │   ├── audit.log (signed)     │
+│   ├── state.sqlite (cache)   │
 │   └── key.ed25519 (chmod 0600)│
 └──────────────────────────────┘
 ```
 
 **TCB (Trusted Computing Base)**: the user's UID, the daemon binary, and the `~/.gommage/` directory. Everything outside that boundary (agent, repo contents, network) is treated as untrusted input.
+
+`state.sqlite` is inside the trusted home because it may contain indexed audit
+metadata, but it is not trusted for permission decisions. It is a local
+read-model that can be deleted and rebuilt from `audit.log`; forged or stale
+state can mislead an operator view until `gommage state verify`/`rebuild`, but
+cannot make the evaluator allow a tool call.
 
 ---
 

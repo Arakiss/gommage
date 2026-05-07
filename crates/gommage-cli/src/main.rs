@@ -35,6 +35,7 @@ mod replay;
 mod report;
 mod sandbox;
 mod smoke;
+mod state;
 mod tui;
 mod tui_actions;
 mod tui_render;
@@ -64,6 +65,7 @@ use replay::{ReplayOptions, cmd_replay};
 use report::{ReportCmd, cmd_report};
 use sandbox::{SandboxCmd, cmd_sandbox};
 use smoke::cmd_smoke;
+use state::{StateCmd, cmd_state};
 use tui::{TuiOptions, cmd_tui};
 use tui_views::TuiView;
 use uninstall::{UninstallOptions, cmd_uninstall};
@@ -306,6 +308,10 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+
+    /// Manage the rebuildable local SQLite state index.
+    #[command(subcommand)]
+    State(StateCmd),
 
     /// Print advisory native sandbox bridge guidance.
     #[command(subcommand)]
@@ -598,6 +604,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Release(sub) => return cmd_release(sub),
         Cmd::Report(sub) => return cmd_report(sub, layout),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
+        Cmd::State(sub) => return cmd_state(sub, layout),
         Cmd::Sandbox(sub) => return cmd_sandbox(sub, layout),
         Cmd::Tui {
             agents,

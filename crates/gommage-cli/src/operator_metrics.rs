@@ -5,7 +5,7 @@ use gommage_core::{
 };
 use time::OffsetDateTime;
 
-use crate::gestral::UiStatus;
+use crate::{gestral::UiStatus, state::load_counters_if_quick_current};
 
 #[derive(Debug, Clone)]
 pub(crate) struct OperatorTelemetry {
@@ -174,6 +174,22 @@ impl LocalMetrics {
 
 fn local_metrics(layout: &HomeLayout) -> LocalMetrics {
     let mut metrics = LocalMetrics::default();
+    if let Some(counters) = load_counters_if_quick_current(layout) {
+        metrics.audit_entries = counters.audit_entries;
+        metrics.decisions = counters.decisions;
+        metrics.allows = counters.allows;
+        metrics.asks = counters.asks;
+        metrics.denies = counters.denies;
+        metrics.hard_stops = counters.hard_stops;
+        metrics.approval_requests = counters.approval_requests;
+        metrics.approval_resolutions = counters.approval_resolutions;
+        metrics.picto_creations = counters.picto_creations;
+        metrics.picto_consumptions = counters.picto_consumptions;
+        metrics.picto_rejections = counters.picto_rejections;
+        metrics.webhook_dead_letters = counters.webhook_dead_letters;
+    } else {
+        add_audit_metrics(layout, &mut metrics);
+    }
     match ApprovalStore::open(&layout.approvals_log).list() {
         Ok(states) => {
             metrics.total_approvals = states.len();
@@ -188,7 +204,6 @@ fn local_metrics(layout: &HomeLayout) -> LocalMetrics {
         ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
             .count()
             .unwrap_or(0);
-    add_audit_metrics(layout, &mut metrics);
     if layout.audit_log.exists()
         && let Ok(verifying_key) = layout.load_verifying_key()
         && let Ok(report) = explain_log(&layout.audit_log, &verifying_key)

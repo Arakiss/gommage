@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use crate::operator_metrics::build_operator_telemetry;
+use crate::{operator_metrics::build_operator_telemetry, state::recent_items_if_quick_current};
 
 pub(crate) fn print_stream(
     layout: &HomeLayout,
@@ -72,6 +72,12 @@ fn load_stream_snapshot(layout: &HomeLayout, limit: usize) -> StreamSnapshot {
     if let Some(items) = daemon_recent_audit(layout, limit) {
         return StreamSnapshot {
             source: "daemon-ipc",
+            items,
+        };
+    }
+    if let Some(items) = recent_items_if_quick_current(layout, limit) {
+        return StreamSnapshot {
+            source: "state.sqlite",
             items,
         };
     }

@@ -399,8 +399,11 @@ Stable automation contracts:
 | `policy suggest --audit <file> --json` | Generate advisory candidate rules and fixture drafts for audit decisions not covered by the active policy. |
 | `explain <audit-id> --trace --json` | Audit-entry trace over current policy rule order, active decision, shadowed matches, and fixture-authoring hints. |
 | `audit-verify --explain` | Signed audit verification JSON for automation. |
+| `state rebuild --json` | Rebuild the local `state.sqlite` read-model from the signed `audit.log` ledger. |
+| `state verify --json` | Check whether `state.sqlite` matches the current audit ledger. |
+| `state stats --json` | Read fast local counters from `state.sqlite`; use `state rebuild` when stale. |
 | `tui --watch --watch-ticks <n>` | Bounded plain-text operator refreshes for demos, CI artifacts, and headless issue reports. |
-| `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, with signed audit-log fallback, daemon health, active pictos, and local counters. |
+| `tui --stream --stream-ticks <n>` | Bounded live decision/event feed using daemon IPC when available, then current `state.sqlite`, then signed audit-log fallback, plus daemon health, active pictos, and local counters. |
 | `tui --snapshot --view onboarding` | First-minute operator guide with safe setup, beta gate, report, and rollback commands. |
 | `tui --snapshot --view metrics` | Human local metrics summary for daemon reachability, active pictos, decisions, approvals, webhook DLQ, and audit anomalies. |
 | `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
@@ -599,9 +602,25 @@ Details are documented in [`docs/diagnostics.md`](docs/diagnostics.md).
                                │  ├─ approvals.jsonl │
                                │  ├─ pictos.sqlite   │
                                │  ├─ audit.log       │
+                               │  ├─ state.sqlite    │
                                │  └─ key.ed25519     │
                                └─────────────────────┘
 ```
+
+`audit.log` is the signed forensic ledger and remains the source of truth.
+`state.sqlite` is a rebuildable local read-model for fast operator queries:
+
+```sh
+gommage state rebuild
+gommage state verify --json
+gommage state stats --json
+gommage state vacuum
+gommage state reset --dry-run
+```
+
+Deleting `state.sqlite` never deletes permissions, pictos, approvals, or audit
+evidence. Rebuild it from the signed audit ledger when `state verify` reports a
+stale index.
 
 Full details in [`docs/architecture.md`](docs/architecture.md).
 
@@ -720,6 +739,8 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
   canonical string `<timestamp>.<exact HTTP body>` via `--signing-secret` or
   `GOMMAGE_APPROVAL_WEBHOOK_SECRET`
 - Append-only signed audit log
+- Rebuildable SQLite read-model for fast local audit counters and operator
+  streams while keeping `audit.log` authoritative
 - Hardcoded hard-stop set
 - Repository-distributed agent skill for Gommage setup and operation
 - Dependency-free operator dashboard with `gommage tui`, `--snapshot`,

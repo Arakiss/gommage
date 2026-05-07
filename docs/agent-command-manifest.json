@@ -383,6 +383,36 @@
       "argv": ["audit-verify", "--explain"]
     },
     {
+      "id": "state_rebuild_json",
+      "purpose": "Rebuild the local SQLite state read-model from the signed audit ledger.",
+      "stdin_mode": "none",
+      "argv": ["state", "rebuild", "--json"]
+    },
+    {
+      "id": "state_verify_json",
+      "purpose": "Verify whether state.sqlite matches the current audit ledger.",
+      "stdin_mode": "none",
+      "argv": ["state", "verify", "--json"]
+    },
+    {
+      "id": "state_stats_json",
+      "purpose": "Read fast local audit counters from state.sqlite.",
+      "stdin_mode": "none",
+      "argv": ["state", "stats", "--json"]
+    },
+    {
+      "id": "state_vacuum",
+      "purpose": "Vacuum the rebuildable SQLite state read-model.",
+      "stdin_mode": "none",
+      "argv": ["state", "vacuum"]
+    },
+    {
+      "id": "state_reset_dry_run",
+      "purpose": "Inspect rebuildable state index removal without touching audit evidence.",
+      "stdin_mode": "none",
+      "argv": ["state", "reset", "--dry-run"]
+    },
+    {
       "id": "agent_uninstall_dry_run",
       "purpose": "Inspect reversible agent hook cleanup.",
       "stdin_mode": "none",
