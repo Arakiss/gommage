@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.35.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.34.0-beta.1...gommage-cli-v0.35.0-beta.1) (2026-05-07)
+
+
+### Features
+
+* expose hook coexistence dry-run plan ([9d2b990](https://github.com/Arakiss/gommage/commit/9d2b9905ef711fcfd80ab4491dcf4231d92536b9))
+
 ## [0.34.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.33.0-alpha.1...gommage-cli-v0.34.0-beta.1) (2026-05-07)
 
 
