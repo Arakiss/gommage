@@ -19,6 +19,7 @@ mod beta;
 mod daemon;
 mod doctor;
 mod gestral;
+mod harness;
 mod input;
 mod map;
 mod mascot;
@@ -50,6 +51,7 @@ use audit_cmd::{AuditExplainFormat, cmd_audit_verify, cmd_explain, print_log};
 use beta::{BetaCmd, cmd_beta};
 use daemon::{DaemonCmd, ServiceManager, cmd_daemon};
 use doctor::cmd_doctor;
+use harness::{HarnessCmd, cmd_harness};
 use input::{evaluate_only, read_tool_call_from_stdin};
 use map::cmd_map;
 use mascot::{MascotOptions, print_mascot};
@@ -122,6 +124,9 @@ enum Cmd {
         /// Emit a machine-readable dry-run plan. Requires --dry-run.
         #[arg(long, requires = "dry_run")]
         json: bool,
+        /// Include a human-readable harness explanation in dry-run output.
+        #[arg(long, requires = "dry_run")]
+        explain: bool,
     },
 
     /// Install or inspect host-agent integrations.
@@ -283,6 +288,10 @@ enum Cmd {
         policy_tests: Vec<PathBuf>,
     },
 
+    /// Diagnose and explain host-agent harness integration state.
+    #[command(subcommand)]
+    Harness(HarnessCmd),
+
     /// Inspect or verify published release artifacts.
     #[command(subcommand)]
     Release(ReleaseCmd),
@@ -408,6 +417,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             no_self_test,
             dry_run,
             json,
+            explain,
         } => {
             return cmd_quickstart(
                 layout,
@@ -422,6 +432,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     self_test: self_test || !no_self_test,
                     dry_run,
                     json,
+                    explain,
                 },
             );
         }
@@ -583,6 +594,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Map { json, hook } => return cmd_map(layout, json, hook),
         Cmd::Doctor { json } => return cmd_doctor(layout, json),
         Cmd::Verify { json, policy_tests } => return cmd_verify(layout, json, policy_tests),
+        Cmd::Harness(sub) => return cmd_harness(sub, layout),
         Cmd::Release(sub) => return cmd_release(sub),
         Cmd::Report(sub) => return cmd_report(sub, layout),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),

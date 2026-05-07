@@ -452,6 +452,28 @@ fn quickstart_dry_run_json_reports_plan_without_writes() {
             .and_then(|value| value.as_bool()),
         Some(true)
     );
+    assert_eq!(
+        report
+            .pointer("/explanation/installation_mode")
+            .and_then(|value| value.as_str()),
+        Some("coexistence")
+    );
+    assert!(
+        report
+            .pointer("/explanation/agent_guidance/0/operator_notes")
+            .and_then(|value| value.as_array())
+            .unwrap()
+            .iter()
+            .any(|note| note
+                .as_str()
+                .is_some_and(|note| note.contains("permissions.allow imports")))
+    );
+    assert_eq!(
+        report
+            .pointer("/explanation/context_files/0")
+            .and_then(|value| value.as_str()),
+        Some(home.join("AGENT_CONTEXT.md").to_str().unwrap())
+    );
     let operations = report
         .get("operations")
         .and_then(|value| value.as_array())
@@ -469,4 +491,68 @@ fn quickstart_dry_run_json_reports_plan_without_writes() {
     assert!(!home.exists());
     assert!(!systemd.join("gommage-daemon.service").exists());
     assert_eq!(fs::read_to_string(&settings).unwrap(), original_settings);
+}
+
+#[test]
+fn quickstart_dry_run_explain_prints_harness_guidance() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, "{}").unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["quickstart", "--agent", "claude", "--dry-run", "--explain"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("explain mode: coexistence"));
+    assert!(stdout.contains("explain claude: posture="));
+    assert!(stdout.contains("next: gommage harness diagnose --json"));
+    assert!(stdout.contains("plan harness-context"));
+    assert!(!home.exists());
+}
+
+#[test]
+fn quickstart_writes_agent_context_files() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, "{}").unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["quickstart", "--agent", "claude", "--no-self-test"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("ok harness context"));
+
+    let context = fs::read_to_string(home.join("AGENT_CONTEXT.md")).unwrap();
+    assert!(context.contains("# Gommage Local Integration Context"));
+    assert!(context.contains("Default install mode"));
+
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join("integration-report.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        report
+            .pointer("/agents/0/agent")
+            .and_then(|value| value.as_str()),
+        Some("claude")
+    );
 }

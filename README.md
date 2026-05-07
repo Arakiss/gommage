@@ -19,6 +19,12 @@
 
 > **Development status: alpha.** Gommage is public, installable, and being tested end-to-end, but it is under intensive development and the operator experience is still changing quickly. Expect breaking CLI/config changes, rough installation edges, and policy/mapping gaps until the project reaches a beta line. Use it first on non-critical repositories, keep your agent's native sandbox/permission layer enabled, and review generated policies before trusting them.
 
+> **AI agent bootstrap:** before diagnosing, installing, or changing Gommage,
+> install or read [`skills/gommage`](skills/gommage). That skill is the
+> canonical agent-facing operating guide. On a local machine, start with
+> `gommage harness diagnose --json` or `gommage harness explain` so the agent
+> reads the effective host setup instead of inferring it from generic docs.
+
 Gommage is one component in an **AI agent harness engineering** stack: the layer
 that turns observed tool calls into deterministic, reviewable permission
 decisions. It supports **Claude Code** and **OpenAI Codex CLI** today via their
@@ -140,7 +146,9 @@ the signed audit log records the decision.
 For mature dotfiles, use this order:
 
 ```sh
+gommage harness diagnose --json
 gommage quickstart --agent claude --daemon --dry-run --json
+gommage quickstart --agent claude --daemon --dry-run --explain
 gommage quickstart --agent codex --daemon --dry-run --json
 gommage agent status claude --json
 gommage agent status codex --json
@@ -154,6 +162,12 @@ or `gommage map --json --hook`, then add a capability mapper and policy fixture
 before relying on it. See [`docs/existing-setups.md`](docs/existing-setups.md)
 for the full migration and dual-agent guidance.
 
+After a real quickstart, Gommage writes an agent-readable local summary into
+`$GOMMAGE_HOME/AGENT_CONTEXT.md` and
+`$GOMMAGE_HOME/integration-report.json`. These files describe the effective
+install mode, preserved hooks, imported native permissions, coverage boundaries,
+and next diagnostic commands for future Claude/Codex sessions.
+
 ## Versioning and changelog
 
 Gommage follows **Semantic Versioning**, with pre-1.0 rules applied strictly:
@@ -162,6 +176,11 @@ Gommage follows **Semantic Versioning**, with pre-1.0 rules applied strictly:
 - Compatible fixes and internal hardening use **patch** bumps.
 - Release notes are generated through **release-please** from Conventional Commits; do not tag releases manually.
 - Repo-level changes are tracked in [`CHANGELOG.md`](CHANGELOG.md); crate-level changes live in `crates/*/CHANGELOG.md`.
+
+The project stays on `*-alpha.*` prerelease versions until the beta-readiness
+gate has linked evidence for install, host wiring, harness context, diagnostics,
+release assets, docs, and rollback. The presence of `gommage beta check` means
+"run the beta gate"; it does not mean the current release line is beta.
 
 The beta bar is not "more features". It is stable install, stable hook wiring,
 stable docs, crates.io publishing, healthy changelogs, and a green determinism
@@ -268,7 +287,10 @@ curl --proto '=https' --tlsv1.2 -sSf \
 Primary setup and readiness commands:
 
 ```sh
+gommage harness diagnose --json
+gommage harness explain --agent claude
 gommage quickstart --agent claude --daemon --dry-run --json
+gommage quickstart --agent claude --daemon --dry-run --explain
 gommage quickstart --agent claude --daemon --self-test
 gommage quickstart --agent codex --daemon --self-test
 gommage beta check --json
@@ -350,6 +372,10 @@ Stable automation contracts:
 | Surface | Use it for |
 |---|---|
 | `quickstart --dry-run --json` | Inspect planned setup mutations, backups, hooks, imports, daemon service files, and self-test checks before touching a real home. |
+| `quickstart --dry-run --explain` | Print the same setup posture in human/agent-readable language without writing files. |
+| `harness diagnose --json` | Inspect host hooks, imported permission posture, coverage boundaries, and next commands without installing anything. |
+| `harness explain` | Print the local setup context in Markdown for Claude/Codex sessions. |
+| `harness write-context --dry-run` | Inspect the generated `AGENT_CONTEXT.md` and `integration-report.json` writes before refreshing local context files. |
 | `beta check --json` | One host-level beta gate for agents and testers: doctor, smoke, agent status, optional policy fixtures, dashboard availability, and next steps. |
 | `verify --json` | Default readiness gate for installers, CI, and agents. |
 | `report bundle --redact` | Support artifact for install or host-integration failures without exposing secrets. |
