@@ -88,7 +88,9 @@ coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
 
 The alpha distribution has two install surfaces:
 
-- **Runtime binaries**: `gommage`, `gommage-daemon`, and `gommage-mcp`, installed through the verified GitHub Release installer.
+- **Runtime binaries**: the verified GitHub Release archive contains
+  `gommage`, `gommage-daemon`, and `gommage-mcp`, and the installer copies all
+  three into the selected bin directory.
 - **Agent skill**: [`skills/gommage`](skills/gommage), installed into Codex or Claude Code so future agent sessions know how to install, verify, troubleshoot, and operate Gommage correctly.
 - **Operator dashboard**: `gommage tui`, a dependency-free terminal command
   center for humans with readiness, approvals, policies, audit, capabilities,
@@ -192,6 +194,10 @@ should follow [`docs/beta-test-loop.md`](docs/beta-test-loop.md).
 
 Install the binaries first. Add `--with-skill` when you want the installer to
 also install the Gommage agent skill for Codex, Claude Code, or both.
+Installing the `gommage-mcp` binary does not automatically register an MCP
+gateway for every MCP server on the host; `quickstart` wires supported agent
+hooks to `gommage-mcp`, and explicit MCP proxying still uses
+`gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
 
 ```sh
 # macOS / Linux — alpha one-liner
