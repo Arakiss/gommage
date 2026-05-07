@@ -505,57 +505,57 @@ fn quick_current(layout: &HomeLayout) -> bool {
 
 fn load_counters(layout: &HomeLayout) -> Result<StateCounters> {
     let conn = open_state_readonly(&layout.state_db)?;
-    let mut counters = StateCounters::default();
-    counters.audit_entries = scalar_usize(&conn, "SELECT COUNT(*) FROM audit_records")?;
-    counters.decisions = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE record_kind = 'decision'",
-    )?;
-    counters.events = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE record_kind = 'event'",
-    )?;
-    counters.allows = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE decision_kind = 'allow'",
-    )?;
-    counters.asks = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE decision_kind = 'ask_picto'",
-    )?;
-    counters.denies = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE decision_kind = 'gommage'",
-    )?;
-    counters.hard_stops = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE hard_stop = 1",
-    )?;
-    counters.approval_requests = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE event_type = 'approval_requested'",
-    )?;
-    counters.approval_resolutions = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE event_type = 'approval_resolved'",
-    )?;
-    counters.picto_creations = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE event_type = 'picto_created'",
-    )?;
-    counters.picto_consumptions = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE event_type = 'picto_consumed'",
-    )?;
-    counters.picto_rejections = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE event_type = 'picto_rejected'",
-    )?;
-    counters.webhook_dead_letters = scalar_usize(
-        &conn,
-        "SELECT COUNT(*) FROM audit_records WHERE event_type = 'approval_webhook_dead_lettered'",
-    )?;
-    Ok(counters)
+    Ok(StateCounters {
+        audit_entries: scalar_usize(&conn, "SELECT COUNT(*) FROM audit_records")?,
+        decisions: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE record_kind = 'decision'",
+        )?,
+        events: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE record_kind = 'event'",
+        )?,
+        allows: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE decision_kind = 'allow'",
+        )?,
+        asks: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE decision_kind = 'ask_picto'",
+        )?,
+        denies: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE decision_kind = 'gommage'",
+        )?,
+        hard_stops: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE hard_stop = 1",
+        )?,
+        approval_requests: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE event_type = 'approval_requested'",
+        )?,
+        approval_resolutions: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE event_type = 'approval_resolved'",
+        )?,
+        picto_creations: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE event_type = 'picto_created'",
+        )?,
+        picto_consumptions: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE event_type = 'picto_consumed'",
+        )?,
+        picto_rejections: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE event_type = 'picto_rejected'",
+        )?,
+        webhook_dead_letters: scalar_usize(
+            &conn,
+            "SELECT COUNT(*) FROM audit_records WHERE event_type = 'approval_webhook_dead_lettered'",
+        )?,
+    })
 }
 
 fn load_recent_items(layout: &HomeLayout, limit: usize) -> Result<Vec<AuditStreamItem>> {
