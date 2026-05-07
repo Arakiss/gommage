@@ -17,6 +17,7 @@
                                                                          │  approvals.jsonl │
                                                                          │  pictos.sqlite   │
                                                                          │  audit.log       │
+                                                                         │  state.sqlite    │
                                                                          │  key.ed25519     │
                                                                          └──────────────────┘
 
@@ -32,6 +33,11 @@
 Three binaries, one root. The CLI and daemon share state by convention: both
 read the same YAML files, both open the same SQLite picto store, and both
 append or replay the same approval inbox.
+
+`audit.log` is the forensic source of truth for decisions and lifecycle events.
+`state.sqlite` is a rebuildable read-model owned by the CLI for fast operator
+queries. It indexes signed audit entries after `gommage state rebuild`; it is
+safe to delete, and no permission decision reads from it.
 
 ## Request lifecycle
 
@@ -98,7 +104,12 @@ proves.
 
 4. **Audit log is append-only and line-signed.** Killing the daemon mid-write corrupts at most one line; all prior lines remain independently verifiable.
 
-5. **Socket is user-local.** `~/.gommage/gommage.sock`, owner-only permissions. No TCP in v0.1.
+5. **State index is rebuildable.** `state.sqlite` can accelerate TUI metrics,
+   recent stream fallback, and local counters, but it is never an evaluator
+   input. If stale or missing, operator views fall back to the signed audit
+   log.
+
+6. **Socket is user-local.** `~/.gommage/gommage.sock`, owner-only permissions. No TCP in v0.1.
 
 ## Determinism
 

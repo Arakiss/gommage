@@ -56,6 +56,25 @@ default format is JSON for agent and CI automation. Use
 status, verified-entry count, key fingerprint, bypass counters,
 policy-version list, expedition list, and anomaly list.
 
+`gommage state` manages `~/.gommage/state.sqlite`, a rebuildable SQLite
+read-model for fast local operator queries. It is not a permission authority:
+`audit.log` remains the signed source of truth. Use:
+
+```sh
+gommage state rebuild --json
+gommage state verify --json
+gommage state stats --json
+gommage state vacuum
+gommage state reset --dry-run
+```
+
+`state rebuild` verifies the audit ledger before indexing critical records.
+Policy-version changes and timestamp-order warnings are preserved as forensic
+signals, but malformed entries, bad signatures, or hard-stop bypass anomalies
+block rebuild. `state verify` reports `warn` when the audit log changed after
+the last rebuild. TUI metrics and stream views use the index only when it is
+current; otherwise they fall back to the signed audit log.
+
 ## Exit codes
 
 | Status | Exit code | Meaning |
