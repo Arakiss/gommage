@@ -40,6 +40,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage quickstart --dry-run --json` emits a stable machine-readable setup
   plan covering home paths, stdlib files, agent hooks, native permission
   imports, daemon service plans, backup expectations, and self-test checks.
+- Quickstart dry-run plans now report hook coexistence strategy and per-group
+  preserve/remove actions, making mature Claude/Codex homes reviewable before
+  install.
 - `gommage report bundle --redact --output <file>` writes a diagnostic support
   bundle with CLI/host metadata, redacted environment hints, doctor/verify
   reports, agent status, daemon service hints, and policy/capability inventory.

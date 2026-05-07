@@ -31,6 +31,15 @@ gommage verify --json
 gommage uninstall --all --dry-run
 ```
 
+Use `agent_integrations[].hook.strategy` and
+`agent_integrations[].hook.existing_hook_groups` in the dry-run JSON as the
+local source of truth for hook mutation. In the default
+`append_preserving_unrelated` strategy, unrelated hook groups are marked
+`would_preserve` and stale Gommage-owned hook groups are marked
+`would_remove_stale_gommage`. `--replace-hooks` changes the strategy to
+`replace_all_existing` and is the only default path that removes unrelated hook
+groups.
+
 ## Agent-Readable Setup Reports
 
 Gommage does not rely on Claude Code or Codex inferring the install posture from

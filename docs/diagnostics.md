@@ -53,6 +53,13 @@ commands. After a real quickstart, Gommage writes the same local context to
 `$GOMMAGE_HOME/AGENT_CONTEXT.md` and
 `$GOMMAGE_HOME/integration-report.json`.
 
+`gommage quickstart --dry-run --json` is the setup mutation plan. For homes
+with existing hooks, inspect `agent_integrations[].hook.strategy`,
+`existing_hook_group_count`, `preserved_hook_group_count`, and
+`existing_hook_groups[].action` before running the real install. The default
+strategy is `append_preserving_unrelated`; `replace_all_existing` appears only
+when `--replace-hooks` is passed.
+
 `gommage smoke` is the semantic health check. It runs built-in tool-call fixtures against the active capability mappers and policy set without writing audit entries or consuming pictos. Use `gommage smoke --json` after installing policies or changing policy packs.
 
 `gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
