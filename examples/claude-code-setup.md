@@ -20,6 +20,10 @@ That command:
 - installs bundled policies and capability mappers;
 - imports supported `permissions.deny` entries from `~/.claude/settings.json`
   into `~/.gommage/policy.d/05-claude-import.yaml`;
+- imports supported `permissions.allow` entries into
+  `~/.gommage/policy.d/90-claude-allow-import.yaml`, including broad supported
+  entries such as `Bash`; the import loads late so hard-stops, deny imports,
+  deny rules, and ask rules still win;
 - installs the Claude `PreToolUse` hook, preserving existing hooks unless you
   pass `--replace-hooks`;
 - installs and starts the user-level daemon service;
@@ -35,6 +39,19 @@ Claude `PreToolUse` surface:
 ```sh
 gommage quickstart --agent claude --daemon --replace-hooks
 ```
+
+For mature Claude homes, inspect the plan first:
+
+```sh
+gommage quickstart --agent claude --daemon --dry-run --json
+gommage agent status claude --json
+gommage repair agent claude --dry-run
+gommage uninstall --all --dry-run
+```
+
+Keeping existing hooks and Gommage together is supported. The first layer to
+deny a call determines what the agent sees; if an existing hook blocks before
+Gommage evaluates, Gommage cannot audit that decision.
 
 ## 3. Daemon service controls
 

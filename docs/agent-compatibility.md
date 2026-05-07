@@ -1,10 +1,19 @@
 # Agent compatibility matrix
 
-What Gommage sees, what it does not, and what can bypass it per agent. This page is written against **current upstream state (April 2026)**. If an agent changes its hook surface, this page moves accordingly; the packaged capability mapper stdlib in `crates/gommage-stdlib/capabilities/` is agent-agnostic and usually does not need code changes. The repository-root `capabilities/` directory is a review-friendly mirror kept in sync by CI.
+What Gommage sees, what it does not, and what can bypass it per agent. This
+page is written against the Gommage alpha line and upstream agent behavior known
+on **2026-05-07**. If an agent changes its hook surface, this page moves
+accordingly; the packaged capability mapper stdlib in
+`crates/gommage-stdlib/capabilities/` is agent-agnostic and usually does not
+need code changes. The repository-root `capabilities/` directory is a
+review-friendly mirror kept in sync by CI.
 
 If an item is listed as "Bypasses Gommage", that is not a vulnerability — it is the boundary of what a PreToolUse-level interception layer can observe. Stack OS-level confinement (AppArmor, SELinux, `seccomp-bpf`, macOS Seatbelt, Codex `--sandbox`) under Gommage for anything you need caught below the agent layer.
 
 After installing an integration, run `gommage verify --json` to verify the operator path and built-in mapper + policy semantics. If the repository carries policy fixtures, run `gommage verify --json --policy-test <file>` before trusting the hook. A top-level verify `warn` is still an operable install when the only warnings are the missing first audit log or missing daemon socket. A top-level verify `fail` means the hook should not be trusted yet. See [`diagnostics.md`](diagnostics.md).
+
+For migration guidance on mature homes, custom hooks, dual-agent flows, and
+rollback, see [`existing-setups.md`](existing-setups.md).
 
 ---
 
@@ -28,15 +37,17 @@ After installing an integration, run `gommage verify --json` to verify the opera
 
 To extend coverage, add a mapper rule under `~/.gommage/capabilities.d/` — Claude Code forwards the full `tool_name` + `tool_input` object on every hook call. The stdlib defaults intentionally require pictos for WebFetch, WebSearch, write-like MCP tools, and unclassified MCP calls.
 
-`gommage quickstart --agent claude` installs the hook and imports supported
-`permissions.deny` entries from `~/.claude/settings.json` into
-`~/.gommage/policy.d/05-claude-import.yaml`. Narrow supported
-`permissions.allow` entries such as `Bash(git status *)` and
-`Read(./docs/**)` are imported into
-`~/.gommage/policy.d/90-claude-allow-import.yaml`, which loads after bundled
-deny and ask rules so Gommage guardrails still win. Broad native allow rules
-such as `Bash` or `*` stay in Claude's config; Gommage remains fail-closed
-unless a policy rule allows the mapped capability.
+`gommage quickstart --agent claude` installs the hook, preserving unrelated
+existing `PreToolUse` hook groups unless `--replace-hooks` is passed. It imports
+supported `permissions.deny` entries from `~/.claude/settings.json` into
+`~/.gommage/policy.d/05-claude-import.yaml`. It also imports supported
+`permissions.allow` entries such as `Bash`, `Bash(git status *)`, and
+`Read(./docs/**)` into `~/.gommage/policy.d/90-claude-allow-import.yaml`, which
+loads after bundled hard-stops, deny imports, deny rules, and ask rules. That
+ordering preserves the user's existing Claude posture without letting broad
+native allows override Gommage guardrails. Use
+`--no-import-native-permissions` when you want to author the initial Gommage
+policy manually instead of importing Claude's native permissions.
 
 Verify the host wiring after quickstart with:
 
@@ -68,24 +79,61 @@ See [`examples/claude-code-setup.md`](../examples/claude-code-setup.md).
 
 ---
 
+## Existing Claude Hook Stacks
+
+Existing hooks and Gommage can coexist. The default installer appends a Gommage
+hook group and leaves unrelated shell hooks in place. If an older hook denies a
+call before Gommage evaluates it, the agent sees that older hook's message and
+Gommage has no decision to audit. If Gommage denies or asks, the agent receives
+the Gommage reason and the signed audit log records it.
+
+Use this sequence before changing a mature Claude home:
+
+```sh
+gommage quickstart --agent claude --daemon --dry-run --json
+gommage agent status claude --json
+gommage repair agent claude --dry-run
+gommage uninstall --all --dry-run
+```
+
+`--replace-hooks` is a migration flag, not the default safety path.
+
 ## OpenAI Codex CLI
 
 ### What Gommage sees via `PreToolUse` hook
 
-Codex's `PreToolUse` hook (as of the 2026-04 upstream state, tracked at [openai/codex#16732](https://github.com/openai/codex/issues/16732)) fires **only for `Bash` tool calls**. Every file-touching tool Codex has built in (its `read_file`, `apply_patch`, and MCP-delivered file tools) goes through without entering Gommage's decision path.
+There are two separate facts to keep straight:
 
-| Tool | Hook fires? | Capability produced |
-|---|---|---|
-| `Bash` | **yes** | same as Claude Code's Bash mapping |
-| `read_file` (Codex built-in) | no | — |
-| `apply_patch` / `str_replace` (Codex built-in) | no | — |
-| MCP-delivered tools | no (at the PreToolUse layer) | — |
+1. **Upstream Codex hook surface.** Codex `rust-v0.124.0` widened hooks so they
+   can observe `apply_patch`, MCP tools, and long-running Bash sessions
+   ([openai/codex#18391](https://github.com/openai/codex/pull/18391),
+   [release notes](https://github.com/openai/codex/releases/tag/rust-v0.124.0)).
+   Older Codex releases, including the `0.118.0` line that originally exposed
+   [openai/codex#16732](https://github.com/openai/codex/issues/16732), were
+   effectively Bash-only for this use case.
+2. **Gommage alpha default wiring.** `gommage quickstart --agent codex`
+   currently installs a `Bash` matcher and the bundled stdlib maps Bash
+   commands. Gommage has not yet shipped default Codex `apply_patch` or Codex
+   MCP mappers.
+
+| Tool | Upstream Codex 0.124+ hook surface | Gommage quickstart default | Capability produced today |
+|---|---|---|---|
+| `Bash` | yes | yes | same as Claude Code's Bash mapping |
+| long-running Bash session | yes | partially, through Bash hook payloads Gommage receives | same as Bash when emitted as `Bash` |
+| `apply_patch` | yes | no default matcher/mapper yet | none unless the operator adds local mapper + hook coverage |
+| Codex MCP tools | yes | no default matcher/mapper yet | none unless routed through `gommage-mcp --gateway` or custom mapper + hook coverage |
+| built-in read-only file inspection | not claimed by Gommage | no | none |
 
 ### Bypasses Gommage under Codex
 
-- Every file read and file edit Codex performs via its internal tools.
-- Every MCP tool Codex calls through.
-- Any action the approval policy auto-approves at the sandbox layer before the hook fires.
+- Any Codex tool call that is not matched by the installed Gommage hook group.
+  In the current alpha quickstart, that means non-Bash Codex hook events.
+- Built-in file reads or other internal Codex tools for which no upstream hook
+  payload is emitted or no Gommage mapper exists.
+- Codex MCP calls unless they are routed through `gommage-mcp --gateway` or the
+  operator intentionally wires and tests Codex MCP hook coverage.
+- Any action the approval policy auto-approves or blocks before the Gommage hook
+  path receives a call.
 
 ### Recommended stack
 
@@ -97,7 +145,11 @@ Codex ships OS-level confinement as a first-class feature — **use it**:
 | `--sandbox workspace-write` | anywhere | cwd only | none | allowed via hook |
 | `--sandbox danger-full-access` | anywhere | anywhere | anywhere | allowed via hook |
 
-Gommage + Codex is a layered posture: Codex's OS-level sandbox covers the file-touching gap that Gommage cannot see at the hook layer; Gommage governs the Bash surface declaratively and audits.
+Gommage + Codex is a layered posture: Codex's OS-level sandbox covers file and
+network boundaries that are below, outside, or not yet mapped by Gommage;
+Gommage governs the installed hook surface declaratively and audits it. In the
+current Gommage alpha, that installed Codex surface is Bash unless the operator
+adds custom hook/mapping coverage.
 
 For MCP tools that can be routed through a stdio proxy, `gommage-mcp
 --gateway --server-name <name> -- <upstream-command>` provides a narrower
@@ -110,11 +162,11 @@ sandbox.
 Typical combos:
 
 ```sh
-# Audit run — read-only, Gommage governs the occasional shell call.
+# Audit run — read-only, Gommage governs shell calls it sees.
 codex exec --sandbox read-only "audit this repo"
 
 # Refactor run — Codex can patch files within cwd (kernel-enforced),
-# Gommage governs any Bash the agent wants to run.
+# Gommage governs any Bash the agent wants to run under the default integration.
 codex exec --sandbox workspace-write "apply the refactor we discussed"
 
 # MCP server through Gommage's stdio gateway.
@@ -127,7 +179,13 @@ See [`examples/codex-setup.md`](../examples/codex-setup.md).
 `gommage quickstart --agent codex` writes `~/.codex/hooks.json` and enables
 `features.codex_hooks = true`, but it does not convert Codex's OS sandbox or
 approval policy into Gommage YAML. Those native controls remain authoritative
-for non-Bash surfaces.
+for surfaces outside Gommage's installed matcher and mapper coverage.
+
+Because upstream Codex now supports more hook events than Gommage's default
+Codex integration wires, do not widen the matcher by hand and assume security
+coverage. If you experiment with `apply_patch` or MCP hook matching, add local
+capability mappers, capture real payloads with `gommage map --json --hook`, and
+commit policy fixtures before trusting the result.
 
 Verify the host wiring after quickstart with:
 
@@ -137,7 +195,30 @@ gommage agent status codex --json
 
 This checks `hooks.json`, `config.toml`, `features.codex_hooks`, the installed
 `PreToolUse` hook group, and warns when `sandbox_mode = "danger-full-access"`
-because Codex file and MCP tools remain outside Gommage's current hook coverage.
+because Gommage's current default Codex integration is still Bash-scoped and
+Codex's sandbox remains the file/MCP safety boundary.
+
+## Dual-Agent And Nested-Agent Flows
+
+When one agent launches another, Gommage only sees the layer whose hook is
+installed and whose tool call is emitted by that host.
+
+For example, if Claude Code runs
+`tmux send-keys -t codex 'codex exec ...'`, the Claude hook sees the outer
+`tmux send-keys` Bash command. It does not automatically see the commands Codex
+runs inside that tmux session. Those inner calls are governed only if the Codex
+session uses a `CODEX_HOME` with Gommage's Codex hook installed and the tool call
+falls inside Codex/Gommage's mapped hook surface.
+
+For reproducible orchestrator/executor setups:
+
+- use the same `GOMMAGE_HOME` or a deliberate org/project policy layer for both
+  agents;
+- run `gommage agent status claude --json` and
+  `gommage agent status codex --json` before the run;
+- inspect active policy order with `gommage policy layers --json`;
+- make handoff files robust against partial executor output; a denied inner
+  call should be treated as an executor failure, not as valid research.
 
 ---
 

@@ -294,7 +294,7 @@ fn build_codex_status_report() -> AgentStatusReport {
         Some("danger-full-access") => report.push(
             "sandbox",
             AgentStatus::Warn,
-            "Codex sandbox_mode is danger-full-access; file and MCP tools remain outside Gommage hook coverage",
+            "Codex sandbox_mode is danger-full-access; Gommage's default Codex integration is Bash-scoped, so sandboxing remains the file/MCP boundary",
             Some(serde_json::json!({
                 "path": path_display(&config_path),
                 "sandbox_mode": sandbox_mode,

@@ -1,12 +1,22 @@
 # Comparison with OpenAI Codex CLI's native permission layer
 
-Gommage works with Codex today, but the split of responsibilities is different from the Claude Code integration — Codex's built-in model is stronger (OS-level sandboxing) and narrower (hook only fires for Bash). Read this page before deploying Gommage on a Codex workflow.
+Gommage works with Codex today, but the split of responsibilities is different
+from the Claude Code integration. Codex's built-in model is stronger at the OS
+boundary because it ships native sandbox modes. Gommage's current alpha
+integration with Codex is narrower than modern Codex itself: the default
+Gommage quickstart still wires a Bash-scoped hook, while Codex 0.124+ can emit
+additional hook events for `apply_patch`, MCP tools, and long-running Bash
+sessions. Read this page before deploying Gommage on a Codex workflow.
 
 ## What Codex ships
 
 - **Sandbox modes.** `--sandbox read-only` (default), `--sandbox workspace-write`, `--sandbox danger-full-access`. Enforced at the OS — macOS Seatbelt, Linux `bwrap + seccomp`. These are real confinement, not policy in userspace.
 - **Approval policy.** Determines when Codex prompts before executing a sandbox-allowed action. Configured via CLI flags and `~/.codex/config.toml`.
-- **`PreToolUse` hook.** Lives in `~/.codex/hooks.json` (user) or `.codex/hooks.json` (repo). Currently **fires only for Bash tool calls** (upstream: openai/codex#16732). Schema is near-identical to Claude Code's — same `permissionDecision` / `permissionDecisionReason` contract.
+- **`PreToolUse` hook.** Lives in Codex hook configuration. Older Codex
+  releases were effectively Bash-only for Gommage's use case. Codex
+  `rust-v0.124.0` widened hooks to observe `apply_patch`, MCP tools, and
+  long-running Bash sessions. Gommage's default Codex quickstart has not yet
+  widened its matcher and bundled mappers to that full upstream surface.
 - **MCP bidirectional.** Codex can consume external MCP servers and be wrapped as one.
 
 ## What Gommage adds on top of Codex
@@ -18,28 +28,32 @@ Gommage works with Codex today, but the split of responsibilities is different f
 
 ## Current scope limitation
 
-Because Codex's `PreToolUse` hook only intercepts Bash, Gommage under Codex **does not see**:
+Because Gommage's current Codex quickstart installs a Bash-scoped matcher,
+Gommage under Codex **does not see by default**:
 
-- File reads via Codex's internal `read_file` / `apply_patch` tools
-- File writes / edits via Codex's internal tools
-- MCP tool calls Codex issues to other MCP servers
+- `apply_patch` hook events emitted by modern Codex;
+- MCP tool hook events emitted by modern Codex;
+- built-in file reads or other internal tools that do not have a Gommage mapper;
+- any tool call blocked or approved before the Gommage hook path sees it.
 
-For those, Codex's `--sandbox` modes are the authoritative layer. A typical combo:
+For those, Codex's `--sandbox` modes remain the authoritative layer unless you
+add and test local Gommage hook/mapping coverage. A typical combo:
 
 ```sh
 # Exploratory: OS-confined to reads + Gommage policy on the occasional Bash.
 codex exec --sandbox read-only "audit the repo and summarise findings"
 
-# Editing: Codex can write inside the cwd (sandbox), but any shell command
-# still goes through Gommage policy.
+# Editing: Codex can write inside the cwd (sandbox), while Bash commands still
+# go through Gommage policy under the default integration.
 codex exec --sandbox workspace-write "apply the refactor we discussed"
 ```
 
 If a third-party stdio MCP server can be launched through a proxy, route it
 through `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
 That path gates MCP `tools/call` requests as `mcp__<name>__<tool>` before
-forwarding. It does not cover Codex built-in file tools and does not replace
-Codex's OS sandbox.
+forwarding. It is intentionally explicit: only the stdio MCP server you wrap is
+proxied through Gommage. It does not cover Codex built-in file tools and does
+not replace Codex's OS sandbox.
 
 ## How they stack
 
@@ -52,8 +66,8 @@ Codex's OS sandbox.
 │  2. Approval policy?         │   ←— ~/.codex/config.toml
 │     (ask / auto-approve)     │
 │                              │
-│  3. If Bash: PreToolUse hook │   ←— ~/.codex/hooks.json → gommage-mcp
-│     → Gommage evaluates      │
+│  3. Matched PreToolUse hook  │   ←— Codex hook config → gommage-mcp
+│     → Gommage evaluates      │       (Bash by default in Gommage alpha)
 │                              │
 │  4. OS sandbox                │   ←— Seatbelt / bwrap+seccomp
 │     (--sandbox mode)         │
@@ -62,19 +76,28 @@ Codex's OS sandbox.
 └──────────────────────────────┘
 ```
 
-Gommage sits at step 3. Steps 1–2 are Codex; step 4 is your kernel.
+Gommage sits at step 3 for tool calls matched by the installed hook group and
+mapped by Gommage's capability rules. Steps 1-2 are Codex; step 4 is your
+kernel.
 
 ## When to prefer Codex + Gommage over Claude Code + Gommage
 
 - You want OS-level confinement as a second layer (Codex has, Claude Code does not).
-- Your workload is Bash-heavy and the hook surface gap is acceptable.
+- Your workload is Bash-heavy or you are willing to add tested mapper coverage
+  for any newer Codex hook events you enable manually.
 - You already use Codex for other reasons (OpenAI account, platform policies).
 
 ## When to prefer Claude Code + Gommage
 
-- You need Gommage to see Read / Write / Edit / Glob / Grep / WebFetch / MCP tool calls, not just Bash.
+- You need Gommage to see Read / Write / Edit / Glob / Grep / WebFetch and
+  Claude-style MCP tool names through the default integration today.
 - You don't need or want OS-level sandboxing (or you're layering your own: containers, nsjail, etc.).
 
 ## Roadmap alignment
 
-When upstream Codex expands `PreToolUse` beyond Bash (tracked at openai/codex#16732), Gommage's capability mappers will grow matching rules and the coverage gap closes automatically — no Gommage version bump needed for a policy-pack update, just a YAML drop.
+Upstream Codex has already widened the hook surface beyond Bash in the 0.124
+line. Gommage still needs explicit product work before claiming that coverage
+by default: widened Codex matcher installation, stdlib mappers for Codex
+`apply_patch` and MCP payloads, fixture coverage, and updated host smoke
+evidence. Until then, treat non-Bash Codex coverage as an experimental local
+extension, not a supported default.

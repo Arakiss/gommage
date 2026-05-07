@@ -197,7 +197,7 @@ fn install_codex(
     );
     if sandbox_mode.as_deref() == Some("danger-full-access") {
         println!(
-            "warn codex: sandbox_mode is danger-full-access; Gommage can govern Bash, but Codex file/MCP tools are still outside Gommage's hook coverage"
+            "warn codex: sandbox_mode is danger-full-access; Gommage's default Codex integration governs Bash only, so keep Codex sandboxing enabled for file/MCP boundaries"
         );
     }
     println!(

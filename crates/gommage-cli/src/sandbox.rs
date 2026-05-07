@@ -83,7 +83,7 @@ fn build_sandbox_advice(layout: &HomeLayout) -> Result<SandboxAdviceReport> {
             target: "codex",
             command: "codex exec --sandbox workspace-write <task>".to_string(),
             notes: vec![
-                "Codex sandboxing remains the OS-level authority for file and MCP tools."
+                "Codex sandboxing remains the OS-level authority for file and MCP boundaries that are outside Gommage's installed matcher and mapper coverage."
                     .to_string(),
                 "Use read-only for audit tasks and workspace-write only when the project tree should be writable."
                     .to_string(),
