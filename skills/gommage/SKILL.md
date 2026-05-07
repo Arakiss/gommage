@@ -5,11 +5,18 @@ description: Install, configure, verify, troubleshoot, or operate the Gommage po
 
 # Gommage
 
-Gommage is an alpha policy-as-code harness for AI coding agent tool calls. It is
+Gommage is a beta policy-as-code harness for AI coding agent tool calls. It is
 not an OS sandbox; keep the agent's native sandbox or permission layer enabled
 unless the user explicitly chooses otherwise. For existing harnesses, treat
 Gommage as a coexistence layer first: inspect dry-runs and status reports before
 asking it to replace any host hooks.
+
+The beta contract is explicit and evidence-driven. Read
+`docs/beta-contract.md` before claiming beta readiness, and use
+`docs/beta-readiness.md` as the launch gate. The existence of
+`gommage beta check` means "run the beta gate"; it does not mean the current
+host is healthy until the command returns `pass` or an understood, documented
+`warn`.
 
 ## Fast Path
 
@@ -41,7 +48,7 @@ curl --proto '=https' --tlsv1.2 -sSf \
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --version gommage-cli-vX.Y.Z-alpha.N --bin-dir "$HOME/.local/bin"
+  | sh -s -- --version gommage-cli-vX.Y.Z-beta.N --bin-dir "$HOME/.local/bin"
 ```
 
 5. Set up the target agent. On mature dotfiles or existing hook stacks, inspect
@@ -71,6 +78,7 @@ gommage beta check --json
 gommage verify --json
 gommage doctor --json
 gommage smoke --json
+sh scripts/launch-demo.sh
 gommage report bundle --redact --output gommage-report.json
 # Optional, when the repository includes policy fixtures.
 gommage beta check --json --policy-test path/to/policy-fixtures.yaml
@@ -78,10 +86,10 @@ gommage verify --json --policy-test path/to/policy-fixtures.yaml
 ```
 
 Treat `beta check --json` as the host-level beta gate. It aggregates doctor,
-smoke, agent status, optional policy fixtures, dashboard availability, and
-actionable next steps. `status: "fail"` means the host should not be used for
-trusted hook decisions yet; `warn` is acceptable only when the warning is
-understood and documented in the beta feedback.
+smoke, agent status, optional policy fixtures, state-index readiness, dashboard
+availability, and actionable next steps. `status: "fail"` means the host should
+not be used for trusted hook decisions yet; `warn` is acceptable only when the
+warning is understood and documented in the beta feedback.
 
 Treat `verify --json` status as:
 
@@ -134,6 +142,11 @@ crates.io becomes a supported install path.
   `scripts/check-agent-command-contracts.sh`.
 - Host validation evidence should use `scripts/host-smoke.sh`; CachyOS and
   other systemd hosts should pass `--daemon-manager systemd`.
+- The shortest local proof path is `sh scripts/launch-demo.sh`. It uses an
+  isolated temporary home and captures quickstart dry-run, `ask_picto`,
+  one-use picto allow, hard-stop deny, signed audit verification,
+  `state.sqlite` rebuild/verify/stats, policy fixtures, beta check, and a TUI
+  snapshot without mutating the operator's real agent config.
 - Agent automation should prefer `gommage harness diagnose --json`, `gommage harness explain --json`, `gommage harness write-context --dry-run`, `gommage quickstart --dry-run --json`, `gommage quickstart --dry-run --explain`, `gommage beta check --json`, `gommage beta check --json --policy-test <file>`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage report bundle --redact --output <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage approval list --json`, `gommage approval list --status all --json`, `gommage approval show <id> --json`, `gommage approval replay <id> --json`, `gommage approval evidence <id> --redact`, `gommage approval webhook --dry-run --json`, `gommage approval template --provider <provider> --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage sandbox advise --json`, `gommage state rebuild --json`, `gommage state verify --json`, `gommage state stats --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage policy layers --json`, `gommage policy lint --strict --json`, `gommage replay --audit <file> --policy <dir> --json`, `gommage policy diff --from <dir> --to <dir> --against <file> --json`, `gommage policy suggest --audit <file> --json`, `gommage explain <audit-id> --trace --json`, `gommage repair agent <agent> --dry-run`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. `state.sqlite` is a rebuildable read-model only; never treat it as permission authority over `audit.log`, policies, or pictos. `approval list` defaults to pending; use `--status all` for history. `approval webhook --dry-run --json` exposes shaped request bodies in `requests[].payload`; signed dry-runs also expose `requests[].body` and `requests[].signature`. `sandbox advise` is advisory only and is not OS confinement. Use `gommage tui --snapshot`, especially `gommage tui --snapshot --view onboarding` for first-minute operator guidance and `gommage tui --snapshot --view metrics` for a human-readable local health summary, bounded `gommage tui --watch --watch-ticks <n>`, or bounded `gommage tui --stream --stream-ticks <n>` only when a human-readable operator report is useful; do not parse TUI output as a stable contract. Stream/snapshot output includes daemon reachability, active pictos, local counters, webhook DLQ count, and audit anomaly count when available. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot`, `gommage logo`, or interactive `gommage tui`; they are presentation-only. Interactive `gommage tui --view approvals` may adjust TTL/use-count and approve/deny after y/n confirmation, so agents should not drive it programmatically.
 - Existing host setups: quickstart preserves unrelated host hooks by default.
   Use `--replace-hooks` only when the operator intentionally wants Gommage to
@@ -221,7 +234,7 @@ Policies live in `~/.gommage/policy.d/`; capability mappers live in `~/.gommage/
 
 ## Publishing And Releases
 
-Current alpha distribution:
+Current beta distribution:
 
 - GitHub Releases provide one platform archive that contains the prebuilt
   `gommage`, `gommage-daemon`, and `gommage-mcp` binaries. The installer copies
@@ -248,6 +261,10 @@ Read only the docs needed for the task:
 - `README.md`: status, install, quickstart, roadmap.
 - `docs/existing-setups.md`: migration, coexistence with existing hooks,
   dual-agent flows, MCP scope, and rollback.
+- `docs/beta-contract.md`: beta promise, stable beta surfaces, explicit
+  non-promises, recommended trial path, and release transition rule.
+- `examples/launch-demo/README.md`: local demo evidence files and recording
+  path.
 - `docs/diagnostics.md`: `gommage doctor` and machine-readable health checks.
 - `docs/agent-compatibility.md`: Claude and Codex coverage boundaries.
 - `docs/policy-cookbook.md`: policy patterns and regression fixture examples.

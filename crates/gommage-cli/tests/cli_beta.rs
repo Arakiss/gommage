@@ -1,9 +1,26 @@
 mod support;
 
-use std::fs;
+use std::{fs, io::Write, process::Stdio};
 
 use support::{gommage, workspace_path};
 use tempfile::tempdir;
+
+fn run_mcp(home: &std::path::Path, payload: &[u8]) -> serde_json::Value {
+    let mut child = gommage(home)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(payload).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
 
 #[test]
 fn beta_check_json_preinit_points_to_quickstart() {
@@ -180,6 +197,65 @@ fn beta_check_accepts_public_fixture_library() {
                 .unwrap()
                 .contains("7 passed, 0 failed")
     }));
+}
+
+#[test]
+fn beta_check_reports_current_state_index_after_rebuild() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let claude_settings = temp.path().join("claude-settings.json");
+    let fixture = workspace_path("examples/policy-fixtures.yaml");
+
+    assert!(
+        gommage(&home)
+            .env("GOMMAGE_CLAUDE_SETTINGS", &claude_settings)
+            .args(["quickstart", "--agent", "claude", "--no-self-test"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    run_mcp(
+        &home,
+        br#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main"}}"#,
+    );
+    assert!(
+        gommage(&home)
+            .args(["state", "rebuild"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &claude_settings)
+        .args([
+            "beta",
+            "check",
+            "--json",
+            "--policy-test",
+            fixture.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let state_check = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["name"].as_str() == Some("state index"))
+        .unwrap();
+    assert_eq!(state_check["status"].as_str(), Some("pass"));
+    assert_eq!(state_check["details"]["current"].as_bool(), Some(true));
+    assert_eq!(
+        state_check["command"].as_str(),
+        Some("gommage state verify --json")
+    );
 }
 
 #[test]

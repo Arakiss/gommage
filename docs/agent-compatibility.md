@@ -1,7 +1,7 @@
 # Agent compatibility matrix
 
 What Gommage sees, what it does not, and what can bypass it per agent. This
-page is written against the Gommage alpha line and upstream agent behavior known
+page is written against the Gommage beta line and upstream agent behavior known
 on **2026-05-07**. If an agent changes its hook surface, this page moves
 accordingly; the packaged capability mapper stdlib in
 `crates/gommage-stdlib/capabilities/` is agent-agnostic and usually does not
@@ -111,7 +111,7 @@ There are two separate facts to keep straight:
    Older Codex releases, including the `0.118.0` line that originally exposed
    [openai/codex#16732](https://github.com/openai/codex/issues/16732), were
    effectively Bash-only for this use case.
-2. **Gommage alpha default wiring.** `gommage quickstart --agent codex`
+2. **Gommage beta default wiring.** `gommage quickstart --agent codex`
    currently installs a `Bash` matcher and the bundled stdlib maps Bash
    commands. Gommage has not yet shipped default Codex `apply_patch` or Codex
    MCP mappers.
@@ -127,7 +127,7 @@ There are two separate facts to keep straight:
 ### Bypasses Gommage under Codex
 
 - Any Codex tool call that is not matched by the installed Gommage hook group.
-  In the current alpha quickstart, that means non-Bash Codex hook events.
+  In the current beta quickstart, that means non-Bash Codex hook events.
 - Built-in file reads or other internal Codex tools for which no upstream hook
   payload is emitted or no Gommage mapper exists.
 - Codex MCP calls unless they are routed through `gommage-mcp --gateway` or the

@@ -17,7 +17,17 @@
 
 **A deterministic policy and audit layer for AI coding agent tool calls.**
 
-> **Development status: alpha.** Gommage is public, installable, and being tested end-to-end, but it is under intensive development and the operator experience is still changing quickly. Expect breaking CLI/config changes, rough installation edges, and policy/mapping gaps until the project reaches a beta line. Use it first on non-critical repositories, keep your agent's native sandbox/permission layer enabled, and review generated policies before trusting them.
+> **Development status: beta.** Gommage is public, installable, and tested
+> end-to-end, but it is still pre-1.0 software. Expect some CLI/config changes
+> and policy/mapping gaps while the operator workflow hardens. Use it first on
+> non-critical repositories, keep your agent's native sandbox/permission layer
+> enabled, and review generated policies before trusting them.
+>
+> The first beta is defined by evidence, not by optimism. Read
+> [`docs/beta-contract.md`](docs/beta-contract.md) for the exact beta promise
+> and [`docs/beta-readiness.md`](docs/beta-readiness.md) for the launch gate.
+> To see the intended workflow without touching your real agent config, run
+> `sh scripts/launch-demo.sh` from a checkout.
 
 > **AI agent bootstrap:** before diagnosing, installing, or changing Gommage,
 > install or read [`skills/gommage`](skills/gommage). That skill is the
@@ -75,7 +85,7 @@ Gommage takes a narrow stance:
 
 ## Status
 
-**Current public release channel: alpha (`gommage-cli-v*`).** Usable with
+**Current public release channel: beta (`gommage-cli-v*-beta.*`).** Usable with
 **Claude Code** (Bash, filesystem, search, web, and Claude-style MCP tool names
 through the bundled mappers) and **OpenAI Codex CLI** (the current Gommage
 quickstart installs a Bash-scoped Codex hook). Codex upstream widened its hook
@@ -86,7 +96,7 @@ focused on launch-readiness smoke tests, policy regression fixtures, crates.io
 publishing gates, policy import fidelity, Codex hook-surface catch-up, mapper
 coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
 
-The alpha distribution has two install surfaces:
+The prerelease distribution has two install surfaces:
 
 - **Runtime binaries**: the verified GitHub Release archive contains
   `gommage`, `gommage-daemon`, and `gommage-mcp`, and the installer copies all
@@ -174,21 +184,33 @@ and next diagnostic commands for future Claude/Codex sessions.
 
 Gommage follows **Semantic Versioning**, with pre-1.0 rules applied strictly:
 
-- Breaking changes to `gommage-core` public API, audit log schema, daemon IPC, CLI flags, policy input schema, or bundled stdlib decision behavior require a **minor** bump while the project is alpha.
+- Breaking changes to `gommage-core` public API, audit log schema, daemon IPC, CLI flags, policy input schema, or bundled stdlib decision behavior require a **minor** bump while the project is pre-1.0.
 - Compatible fixes and internal hardening use **patch** bumps.
 - Release notes are generated through **release-please** from Conventional Commits; do not tag releases manually.
 - Repo-level changes are tracked in [`CHANGELOG.md`](CHANGELOG.md); crate-level changes live in `crates/*/CHANGELOG.md`.
 
-The project stays on `*-alpha.*` prerelease versions until the beta-readiness
-gate has linked evidence for install, host wiring, harness context, diagnostics,
-release assets, docs, and rollback. The presence of `gommage beta check` means
-"run the beta gate"; it does not mean the current release line is beta.
+Beta releases use `gommage-cli-vX.Y.Z-beta.N` tags and remain GitHub
+prereleases until the project reaches a production-ready line. The presence of
+`gommage beta check` means "run the beta gate"; it does not mean the host is
+healthy until the command returns `pass` or an understood, documented `warn`.
 
 The beta bar is not "more features". It is stable install, stable hook wiring,
-stable docs, crates.io publishing, healthy changelogs, and a green determinism
-matrix with no known red workflows. The concrete launch gate is tracked in
-[`docs/beta-readiness.md`](docs/beta-readiness.md); real host test passes
-should follow [`docs/beta-test-loop.md`](docs/beta-test-loop.md).
+stable docs, explicit crates.io status, healthy changelogs, and a green
+determinism matrix with no known red workflows. The concrete launch gate is tracked in
+[`docs/beta-readiness.md`](docs/beta-readiness.md); the claim boundary is
+defined in [`docs/beta-contract.md`](docs/beta-contract.md); real host test
+passes should follow [`docs/beta-test-loop.md`](docs/beta-test-loop.md).
+
+For the shortest local proof path, run:
+
+```sh
+sh scripts/launch-demo.sh
+```
+
+That demo uses an isolated temporary home and captures quickstart dry-run,
+`ask_picto`, one-use picto allow, hard-stop deny, signed audit verification,
+`state.sqlite` rebuild/verify/stats, policy fixtures, beta check, and a TUI
+snapshot.
 
 ## Install
 
@@ -200,7 +222,7 @@ hooks to `gommage-mcp`, and explicit MCP proxying still uses
 `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
 
 ```sh
-# macOS / Linux — alpha one-liner
+# macOS / Linux — beta one-liner
 # Requires cosign for Sigstore release verification.
 # The installer resolves the latest gommage-cli binary release.
 # Interactive terminals may be prompted for agent-skill installation.
@@ -218,10 +240,10 @@ curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
   | sh -s -- --skill-only --skill-agent codex --skill-agent claude
 
-# Pin a specific alpha release or install elsewhere.
+# Pin a specific beta release or install elsewhere.
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --version gommage-cli-vX.Y.Z-alpha.N --bin-dir "$HOME/.local/bin"
+  | sh -s -- --version gommage-cli-vX.Y.Z-beta.N --bin-dir "$HOME/.local/bin"
 
 # Private repo installs may pass a GitHub token for release downloads.
 curl --proto '=https' --tlsv1.2 -sSf \
@@ -235,14 +257,14 @@ cargo install --path crates/gommage-mcp --force
 ```
 
 `cargo install gommage-cli` is **not supported yet**: the crates are not on
-crates.io while the project is alpha. See
+crates.io while the project is pre-1.0 and the publish gate remains closed. See
 [`docs/publishing.md`](docs/publishing.md) for the current publish gate.
 
 ## Agent skill
 
 This repository ships an Agent Skills-compatible skill at
 [`skills/gommage`](skills/gommage). This is part of the product surface: it
-teaches agents the correct Gommage install path, alpha caveats, daemon setup,
+teaches agents the correct Gommage install path, beta caveats, daemon setup,
 `doctor` checks, policy operations, publishing caveats, and release
 verification flow.
 
@@ -276,7 +298,9 @@ The canonical machine-readable command contract lives in
 Host validation evidence lives in [`docs/host-smoke.md`](docs/host-smoke.md)
 and `scripts/host-smoke.sh`. Release asset evidence is scriptable through
 `gommage release verify`, `scripts/check-release-assets.sh`, and
-`scripts/verify-release.sh`.
+`scripts/verify-release.sh`. The local launch demo is documented in
+[`examples/launch-demo`](examples/launch-demo/) and runs with
+`sh scripts/launch-demo.sh`.
 
 Install or update only the skill before operating the project:
 
@@ -382,7 +406,7 @@ Stable automation contracts:
 | `harness diagnose --json` | Inspect host hooks, imported permission posture, coverage boundaries, and next commands without installing anything. |
 | `harness explain` | Print the local setup context in Markdown for Claude/Codex sessions. |
 | `harness write-context --dry-run` | Inspect the generated `AGENT_CONTEXT.md` and `integration-report.json` writes before refreshing local context files. |
-| `beta check --json` | One host-level beta gate for agents and testers: doctor, smoke, agent status, optional policy fixtures, dashboard availability, and next steps. |
+| `beta check --json` | One host-level beta gate for agents and testers: doctor, smoke, agent status, optional policy fixtures, state-index readiness, dashboard availability, and next steps. |
 | `verify --json` | Default readiness gate for installers, CI, and agents. |
 | `report bundle --redact` | Support artifact for install or host-integration failures without exposing secrets. |
 | `doctor --json` | Lower-level runtime and install diagnostics. |
@@ -467,6 +491,9 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 
 # Beta-readiness gate for host test loops and release candidates.
 gommage beta check --json --policy-test examples/policy-fixtures.yaml
+
+# Reproducible local launch demo in an isolated temporary home.
+sh scripts/launch-demo.sh
 
 # Human operator dashboard. Snapshot/watch modes are read-only and issue-friendly.
 # Interactive approvals use t/T for TTL, u/U for uses, then A/D + y/n confirmation.
@@ -714,14 +741,15 @@ required before public beta or launch announcements. See
 execution order.
 
 ```sh
-sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-alpha.N> --json
-gommage release verify --tag <gommage-cli-vX.Y.Z-alpha.N> --json
-sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-alpha.N> --json
+sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-beta.N> --json
+gommage release verify --tag <gommage-cli-vX.Y.Z-beta.N> --json
+sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-beta.N> --json
+sh scripts/launch-demo.sh
 GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent claude
 GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent codex
 ```
 
-**Current alpha line** — signed release-installer line
+**Current beta line** — signed release-installer line
 - Daemon + CLI + PreToolUse hook adapter
 - Supported agents: **Claude Code** (Bash, filesystem, search, web, and
   Claude-style MCP tool names), **OpenAI Codex CLI** (Gommage's default

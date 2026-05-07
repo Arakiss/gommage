@@ -11,6 +11,7 @@ use crate::{
     gestral::{UiTone, color_enabled, paint},
     policy_cmd::build_policy_test_report,
     smoke::{SmokeStatus, build_smoke_report},
+    state::build_state_readiness,
     util::path_display,
 };
 
@@ -190,6 +191,7 @@ fn build_beta_report(
     }
 
     push_policy_fixture_checks(layout, policy_tests, &mut checks);
+    push_state_check(layout, &mut checks);
 
     checks.push(BetaCheck {
         name: "operator dashboard".to_string(),
@@ -274,6 +276,25 @@ fn push_policy_fixture_checks(
     }
 }
 
+fn push_state_check(layout: &HomeLayout, checks: &mut Vec<BetaCheck>) {
+    match build_state_readiness(layout, true) {
+        Ok(readiness) => checks.push(BetaCheck {
+            name: "state index".to_string(),
+            status: beta_status_from_state(readiness.status.as_str()),
+            message: readiness.reason.clone(),
+            command: "gommage state verify --json".to_string(),
+            details: serde_json::to_value(&readiness).ok(),
+        }),
+        Err(error) => checks.push(BetaCheck {
+            name: "state index".to_string(),
+            status: BetaStatus::Fail,
+            message: error.to_string(),
+            command: "gommage state verify --json".to_string(),
+            details: None,
+        }),
+    }
+}
+
 fn normalize_agents(mut agents: Vec<AgentKind>) -> Vec<AgentKind> {
     if agents.is_empty() {
         agents.push(AgentKind::Claude);
@@ -303,6 +324,14 @@ fn beta_status_from_agent(status: AgentStatus) -> BetaStatus {
         AgentStatus::Ok => BetaStatus::Pass,
         AgentStatus::Warn => BetaStatus::Warn,
         AgentStatus::Fail => BetaStatus::Fail,
+    }
+}
+
+fn beta_status_from_state(status: &str) -> BetaStatus {
+    match status {
+        "ok" => BetaStatus::Pass,
+        "warn" => BetaStatus::Warn,
+        _ => BetaStatus::Fail,
     }
 }
 
@@ -349,6 +378,12 @@ fn beta_next_actions(checks: &[BetaCheck], status: BetaStatus) -> Vec<String> {
     }
     if checks.iter().any(|check| check.status == BetaStatus::Warn) {
         actions.push("gommage doctor --json".to_string());
+    }
+    if checks
+        .iter()
+        .any(|check| check.name == "state index" && check.status != BetaStatus::Pass)
+    {
+        actions.push("gommage state rebuild --json".to_string());
     }
     if checks.iter().any(|check| check.status == BetaStatus::Skip) {
         actions.push(

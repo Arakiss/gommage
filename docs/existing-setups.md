@@ -113,7 +113,7 @@ local mapper under `~/.gommage/capabilities.d/`, then add a policy rule and a
 
 Codex upstream changed after Gommage's initial Codex integration was written.
 Codex `rust-v0.124.0` can emit hooks for `apply_patch`, MCP tools, and
-long-running Bash sessions. Gommage's current alpha quickstart still installs a
+long-running Bash sessions. Gommage's current beta quickstart still installs a
 Bash-scoped Codex matcher and the bundled stdlib maps Bash commands for Codex.
 
 Keep Codex sandboxing enabled:

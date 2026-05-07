@@ -2,6 +2,13 @@
 
 `gommage verify` is the default readiness gate for scripts, installers, skills, and CI smoke tests. It aggregates `doctor`, built-in semantic `smoke`, and optional repository policy fixtures into one report.
 
+`gommage beta check` is the host-level beta gate for release candidates,
+external testers, and agents. It aggregates `doctor`, semantic `smoke`, selected
+agent integration status, optional policy fixtures, `state.sqlite` readiness,
+dashboard command availability, and actionable next commands. Use
+`gommage beta check --json --policy-test examples/policy-fixtures.yaml` for
+repository evidence.
+
 `gommage tui` is the operator dashboard for humans. It renders the same
 high-level readiness model as `verify`, plus host-agent status, pending
 approvals, policy inventory, audit state, capability mapper state, recovery
@@ -499,7 +506,7 @@ starts an initial stdio MCP gateway. It reads line-delimited JSON-RPC, gates
 returns an MCP tool result with `isError: true` for denied or picto-required
 calls without forwarding them upstream.
 
-The gateway is intentionally narrow in this alpha line: it is for stdio MCP
+The gateway is intentionally narrow in this beta line: it is for stdio MCP
 servers and preserves non-`tools/call` requests by forwarding them to the
 upstream process. Use the existing `mcp.*` stdlib capabilities to gate by
 read-like, write-like, or generic MCP tool names.

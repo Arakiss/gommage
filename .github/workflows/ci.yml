@@ -171,6 +171,55 @@ jobs:
       - name: Verify public policy fixture library
         run: GOMMAGE_BIN=./target/debug/gommage sh scripts/check-public-policy-fixtures.sh
 
+  operator-smoke:
+    name: operator smoke (${{ matrix.os }} / ${{ matrix.agent }})
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            agent: claude
+            daemon_manager: systemd
+          - os: ubuntu-latest
+            agent: codex
+            daemon_manager: systemd
+          - os: macos-latest
+            agent: claude
+            daemon_manager: launchd
+          - os: macos-latest
+            agent: codex
+            daemon_manager: launchd
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build debug binaries
+        run: cargo build --workspace
+      - name: Host smoke
+        run: |
+          GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh \
+            --temp-home \
+            --agent "${{ matrix.agent }}" \
+            --daemon-manager "${{ matrix.daemon_manager }}" \
+            --capture-dir "host-smoke-${{ matrix.os }}-${{ matrix.agent }}"
+      - name: Launch demo
+        if: matrix.agent == 'claude'
+        run: |
+          GOMMAGE_BIN=target/debug/gommage sh scripts/launch-demo.sh \
+            --capture-dir "launch-demo-${{ matrix.os }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: operator-smoke-${{ matrix.os }}-${{ matrix.agent }}
+          if-no-files-found: ignore
+          path: |
+            host-smoke-${{ matrix.os }}-${{ matrix.agent }}
+            launch-demo-${{ matrix.os }}
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

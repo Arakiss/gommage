@@ -2,7 +2,7 @@
 
 Gommage has two distribution channels with different maturity levels.
 
-## Alpha install path
+## Prerelease install path
 
 The supported alpha install path is the GitHub Release binary installer:
 
@@ -33,7 +33,7 @@ Useful installer options:
 
 ```sh
 sh scripts/install.sh --help
-sh scripts/install.sh --version gommage-cli-vX.Y.Z-alpha.N
+sh scripts/install.sh --version gommage-cli-vX.Y.Z-beta.N
 sh scripts/install.sh --bin-dir "$HOME/.local/bin"
 sh scripts/install.sh --with-skill --skill-agent codex --skill-agent claude
 sh scripts/install.sh --skill-only --skill-agent codex --skill-agent claude
@@ -54,7 +54,7 @@ to `main`. This keeps old binary tags installable while the alpha skill evolves.
 
 ## crates.io status
 
-As of April 24, 2026, the `gommage-*` crates are not published on crates.io.
+As of May 7, 2026, the `gommage-*` crates are not published on crates.io.
 crates.io publishing itself does not require paid billing, but it does require
 a crates.io account, an API token, and an explicit maintainer decision to claim
 the package names. The manifests intentionally keep `publish = false` until the
@@ -167,7 +167,7 @@ sh scripts/check-doc-release-refs.sh
 
 README, docs, installer comments, workflows, and agent skills should not pin
 concrete `gommage-cli-v<version>` tags. Use the installer's `latest` resolution
-or placeholder tags such as `gommage-cli-vX.Y.Z-alpha.N` in examples. Changelogs
+or placeholder tags such as `gommage-cli-vX.Y.Z-beta.N` in examples. Changelogs
 remain the release-history surface for concrete tags.
 
 Release artifact verification is also a manual/network gate:

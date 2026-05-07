@@ -2,7 +2,7 @@
 
 Gommage works with Codex today, but the split of responsibilities is different
 from the Claude Code integration. Codex's built-in model is stronger at the OS
-boundary because it ships native sandbox modes. Gommage's current alpha
+boundary because it ships native sandbox modes. Gommage's current beta
 integration with Codex is narrower than modern Codex itself: the default
 Gommage quickstart still wires a Bash-scoped hook, while Codex 0.124+ can emit
 additional hook events for `apply_patch`, MCP tools, and long-running Bash

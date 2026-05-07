@@ -1,6 +1,6 @@
 # Product Roadmap
 
-Gommage is an alpha policy decision and audit harness for AI coding agents. The
+Gommage is a beta policy decision and audit harness for AI coding agents. The
 roadmap is deliberately ordered around trust: first make installation and
 recovery boring, then make policy authoring excellent, then expand approvals,
 host coverage, and ecosystem distribution.
