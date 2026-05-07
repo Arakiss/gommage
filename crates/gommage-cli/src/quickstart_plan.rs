@@ -27,6 +27,7 @@ pub(crate) struct QuickstartDryRunReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     daemon: Option<DaemonDryRunPlan>,
     self_test: SelfTestPlan,
+    explanation: QuickstartExplanation,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +93,26 @@ struct SelfTestPlan {
     enabled: bool,
     commands: Vec<&'static str>,
     checks: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct QuickstartExplanation {
+    installation_mode: &'static str,
+    summary: Vec<String>,
+    agent_guidance: Vec<AgentQuickstartGuidance>,
+    next_commands: Vec<String>,
+    context_files: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentQuickstartGuidance {
+    agent: AgentKind,
+    posture: &'static str,
+    preserves_existing_hooks: bool,
+    imports_native_permissions: bool,
+    default_coverage: Vec<&'static str>,
+    boundaries: Vec<&'static str>,
+    operator_notes: Vec<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -215,6 +236,8 @@ pub(crate) fn build_quickstart_dry_run_report(
         None
     };
 
+    let explanation = build_quickstart_explanation(&layout.root, &agents, replace_hooks);
+
     Ok(QuickstartDryRunReport {
         status: "plan",
         dry_run: true,
@@ -227,7 +250,31 @@ pub(crate) fn build_quickstart_dry_run_report(
         agent_integrations,
         daemon,
         self_test: build_self_test_plan(self_test),
+        explanation,
     })
+}
+
+pub(crate) fn print_quickstart_explanation(report: &QuickstartDryRunReport) {
+    println!("explain mode: {}", report.explanation.installation_mode);
+    for line in &report.explanation.summary {
+        println!("explain: {line}");
+    }
+    for agent in &report.explanation.agent_guidance {
+        println!(
+            "explain {}: posture={}",
+            agent.agent.as_str(),
+            agent.posture
+        );
+        for note in &agent.operator_notes {
+            println!("explain {}: {note}", agent.agent.as_str());
+        }
+        for boundary in &agent.boundaries {
+            println!("explain {} boundary: {boundary}", agent.agent.as_str());
+        }
+    }
+    for command in &report.explanation.next_commands {
+        println!("next: {command}");
+    }
 }
 
 fn planned_dir(kind: &'static str, path: &Path, reason: &str) -> PlannedOperation {
@@ -412,6 +459,92 @@ fn build_self_test_plan(enabled: bool) -> SelfTestPlan {
             "git push --force origin main remains denied",
             "agent status commands remain allowed for selected agents",
         ],
+    }
+}
+
+fn build_quickstart_explanation(
+    home: &Path,
+    agents: &[AgentKind],
+    replace_hooks: bool,
+) -> QuickstartExplanation {
+    QuickstartExplanation {
+        installation_mode: if replace_hooks {
+            "replace-hooks"
+        } else {
+            "coexistence"
+        },
+        summary: vec![
+            "quickstart is additive by default: it preserves unrelated host hooks and appends Gommage wiring.".to_string(),
+            "changed host files are backed up before replacement.".to_string(),
+            "native sandboxing and approval policy remain authoritative below the hook layer.".to_string(),
+            "Gommage audits only tool calls it receives through installed hooks or an explicit MCP gateway.".to_string(),
+        ],
+        agent_guidance: agents
+            .iter()
+            .map(|agent| agent_quickstart_guidance(*agent, !replace_hooks))
+            .collect(),
+        next_commands: {
+            let mut commands = vec![
+                "gommage verify --json".to_string(),
+                "gommage policy layers --json".to_string(),
+                "gommage harness diagnose --json".to_string(),
+            ];
+            for agent in agents {
+                commands.push(format!("gommage agent status {} --json", agent.as_str()));
+            }
+            commands.push("gommage uninstall --all --dry-run".to_string());
+            commands
+        },
+        context_files: vec![
+            path_display(&home.join("AGENT_CONTEXT.md")),
+            path_display(&home.join("integration-report.json")),
+        ],
+    }
+}
+
+fn agent_quickstart_guidance(
+    agent: AgentKind,
+    preserves_existing_hooks: bool,
+) -> AgentQuickstartGuidance {
+    match agent {
+        AgentKind::Claude => AgentQuickstartGuidance {
+            agent,
+            posture: "preserve existing hooks, import supported native permissions, then verify",
+            preserves_existing_hooks,
+            imports_native_permissions: true,
+            default_coverage: vec![
+                "Bash",
+                "filesystem tools",
+                "search tools",
+                "web tools",
+                "Claude-style MCP tool names",
+            ],
+            boundaries: vec![
+                "if another hook blocks first, Gommage cannot audit that decision",
+                "Claude Code does not provide OS sandboxing; add one separately when needed",
+            ],
+            operator_notes: vec![
+                "permissions.deny imports load early into 05-claude-import.yaml".to_string(),
+                "permissions.allow imports, including broad Bash, load late into 90-claude-allow-import.yaml".to_string(),
+                "use --replace-hooks only after reviewing the migration plan".to_string(),
+            ],
+        },
+        AgentKind::Codex => AgentQuickstartGuidance {
+            agent,
+            posture: "enable Codex hooks, install Gommage Bash matcher, keep Codex sandboxing",
+            preserves_existing_hooks,
+            imports_native_permissions: false,
+            default_coverage: vec!["Bash"],
+            boundaries: vec![
+                "Gommage's default Codex integration is Bash-scoped today",
+                "Codex 0.124+ can emit apply_patch and MCP hook events, but Gommage defaults do not map them yet",
+                "Codex sandbox remains the file/MCP boundary outside mapped hooks",
+            ],
+            operator_notes: vec![
+                "do not widen Codex matchers without real payload captures, local mappers, and policy fixtures".to_string(),
+                "use gommage-mcp --gateway only for stdio MCP servers intentionally wrapped by the operator".to_string(),
+            ],
+        },
     }
 }
 

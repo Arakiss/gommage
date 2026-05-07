@@ -38,6 +38,14 @@ assets whenever the TUI's primary sections or vocabulary change.
 hook is actually wired, that generated Claude native-permission imports are
 present when applicable, and that Codex hooks are enabled.
 
+`gommage harness diagnose` is the agent-readable harness explanation surface.
+Use `gommage harness diagnose --json` before installing on mature dotfiles, and
+use `gommage harness explain` when a Claude/Codex session needs Markdown context
+about preserved hooks, coverage boundaries, native permission imports, and next
+commands. After a real quickstart, Gommage writes the same local context to
+`$GOMMAGE_HOME/AGENT_CONTEXT.md` and
+`$GOMMAGE_HOME/integration-report.json`.
+
 `gommage smoke` is the semantic health check. It runs built-in tool-call fixtures against the active capability mappers and policy set without writing audit entries or consuming pictos. Use `gommage smoke --json` after installing policies or changing policy packs.
 
 `gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
@@ -110,6 +118,9 @@ Agent integration status is separate because it reads host config, not the
 Gommage home health model:
 
 ```sh
+gommage harness diagnose --json
+gommage harness explain --agent claude
+gommage harness write-context --dry-run
 gommage agent status claude --json
 gommage agent status codex --json
 ```

@@ -37,6 +37,30 @@
       ]
     },
     {
+      "id": "quickstart_dry_run_explain",
+      "purpose": "Print setup posture and boundaries without writing files.",
+      "stdin_mode": "none",
+      "argv": ["quickstart", "--agent", "claude", "--dry-run", "--explain"]
+    },
+    {
+      "id": "harness_diagnose_json",
+      "purpose": "Inspect host hooks, local coverage boundaries, native imports, and next commands without installing anything.",
+      "stdin_mode": "none",
+      "argv": ["harness", "diagnose", "--json"]
+    },
+    {
+      "id": "harness_explain_json",
+      "purpose": "Emit the local harness setup context in agent-readable JSON.",
+      "stdin_mode": "none",
+      "argv": ["harness", "explain", "--json"]
+    },
+    {
+      "id": "harness_write_context_dry_run",
+      "purpose": "Inspect generated AGENT_CONTEXT.md and integration-report.json writes without mutating GOMMAGE_HOME.",
+      "stdin_mode": "none",
+      "argv": ["harness", "write-context", "--dry-run"]
+    },
+    {
       "id": "quickstart_claude",
       "purpose": "Install Claude Code hooks and native permission imports.",
       "stdin_mode": "none",

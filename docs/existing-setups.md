@@ -21,13 +21,41 @@ configuration:
 Run dry-runs first on mature homes:
 
 ```sh
+gommage harness diagnose --json
 gommage quickstart --agent claude --daemon --dry-run --json
+gommage quickstart --agent claude --daemon --dry-run --explain
 gommage quickstart --agent codex --daemon --dry-run --json
 gommage agent status claude --json
 gommage agent status codex --json
 gommage verify --json
 gommage uninstall --all --dry-run
 ```
+
+## Agent-Readable Setup Reports
+
+Gommage does not rely on Claude Code or Codex inferring the install posture from
+the README. Use the harness report commands when another agent needs a concise
+local truth source:
+
+```sh
+gommage harness diagnose --json
+gommage harness explain --agent claude
+gommage harness explain --agent codex
+gommage harness write-context --dry-run
+```
+
+`harness diagnose --json` does not install anything. It reports the selected
+`GOMMAGE_HOME`, host config paths, whether non-Gommage hooks already exist,
+whether a Gommage hook is installed, native Claude permission import counts,
+coverage boundaries, and next commands.
+
+After a real `gommage quickstart`, Gommage refreshes:
+
+- `$GOMMAGE_HOME/AGENT_CONTEXT.md`
+- `$GOMMAGE_HOME/integration-report.json`
+
+Future agents should read those files or call `gommage harness explain` before
+claiming what the local harness covers.
 
 ## Existing Claude Hooks
 

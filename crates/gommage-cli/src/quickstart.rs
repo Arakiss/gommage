@@ -8,9 +8,10 @@ use std::{collections::HashSet, path::PathBuf, process::ExitCode};
 use crate::{
     agent::{AgentKind, install_agent},
     daemon::{ServiceManager, daemon_install, resolve_service_manager},
+    harness::write_harness_context,
     input::bash_call,
     policy_cmd::install_stdlib,
-    quickstart_plan::build_quickstart_dry_run_report,
+    quickstart_plan::{build_quickstart_dry_run_report, print_quickstart_explanation},
     util::env_path_or_home,
     verify::cmd_verify,
 };
@@ -26,6 +27,7 @@ pub(crate) struct QuickstartOptions {
     pub(crate) self_test: bool,
     pub(crate) dry_run: bool,
     pub(crate) json: bool,
+    pub(crate) explain: bool,
 }
 
 pub(crate) fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> Result<ExitCode> {
@@ -40,6 +42,7 @@ pub(crate) fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> 
         self_test,
         dry_run,
         json,
+        explain,
     } = options;
 
     if json {
@@ -60,6 +63,20 @@ pub(crate) fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> 
 
     if dry_run {
         println!("dry-run: no files will be written");
+        if explain {
+            let report = build_quickstart_dry_run_report(
+                &layout,
+                agents.clone(),
+                replace_hooks,
+                import_native_permissions,
+                install_daemon,
+                daemon_manager,
+                daemon_force,
+                daemon_no_start,
+                self_test,
+            )?;
+            print_quickstart_explanation(&report);
+        }
     }
     if !dry_run {
         layout.ensure().context("initializing home")?;
@@ -108,6 +125,12 @@ pub(crate) fn cmd_quickstart(layout: HomeLayout, options: QuickstartOptions) -> 
             import_native_permissions,
             dry_run,
         )?;
+    }
+
+    if dry_run {
+        println!("plan harness-context: write AGENT_CONTEXT.md and integration-report.json");
+    } else {
+        write_harness_context(&layout, agents.clone())?;
     }
 
     if install_daemon {
