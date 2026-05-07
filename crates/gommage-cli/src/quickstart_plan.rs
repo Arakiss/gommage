@@ -64,7 +64,22 @@ struct HookPlan {
     matcher: String,
     command: &'static str,
     action: &'static str,
+    strategy: &'static str,
     preserve_existing_hooks: bool,
+    existing_hook_groups: Vec<ExistingHookGroupPlan>,
+    existing_hook_group_count: usize,
+    preserved_hook_group_count: usize,
+    removed_gommage_hook_group_count: usize,
+    removed_unrelated_hook_group_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct ExistingHookGroupPlan {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matcher: Option<String>,
+    hook_count: usize,
+    contains_gommage: bool,
+    action: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -259,6 +274,17 @@ pub(crate) fn print_quickstart_explanation(report: &QuickstartDryRunReport) {
     for line in &report.explanation.summary {
         println!("explain: {line}");
     }
+    for plan in &report.agent_integrations {
+        println!(
+            "explain {} hooks: strategy={}, existing={}, preserved={}, removed_gommage={}, removed_unrelated={}",
+            plan.agent.as_str(),
+            plan.hook.strategy,
+            plan.hook.existing_hook_group_count,
+            plan.hook.preserved_hook_group_count,
+            plan.hook.removed_gommage_hook_group_count,
+            plan.hook.removed_unrelated_hook_group_count,
+        );
+    }
     for agent in &report.explanation.agent_guidance {
         println!(
             "explain {}: posture={}",
@@ -322,6 +348,13 @@ fn build_claude_plan(
     let settings_path = env_path_or_home("GOMMAGE_CLAUDE_SETTINGS", &[".claude", "settings.json"]);
     let settings = read_json_object(&settings_path)?;
     let matcher = claude_gommage_matcher(&settings);
+    let hook = hook_plan(
+        matcher,
+        "gommage-mcp",
+        &settings,
+        "/hooks/PreToolUse",
+        replace_hooks,
+    )?;
     let deny_rules = native_permission_rules(&settings, "/permissions/deny");
     let allow_rules = native_permission_rules(&settings, "/permissions/allow");
     let deny = permission_import_plan(
@@ -345,12 +378,7 @@ fn build_claude_plan(
     Ok(AgentPlan {
         agent: AgentKind::Claude,
         config_paths: vec![path_display(&settings_path)],
-        hook: HookPlan {
-            matcher,
-            command: "gommage-mcp",
-            action: "would_install",
-            preserve_existing_hooks: !replace_hooks,
-        },
+        hook,
         native_permissions: NativePermissionPlan {
             import_enabled: import_native_permissions,
             deny,
@@ -362,21 +390,113 @@ fn build_claude_plan(
 fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
     let hooks_path = env_path_or_home("GOMMAGE_CODEX_HOOKS", &[".codex", "hooks.json"]);
     let config_path = env_path_or_home("GOMMAGE_CODEX_CONFIG", &[".codex", "config.toml"]);
+    let hooks = read_json_object(&hooks_path)?;
     Ok(AgentPlan {
         agent: AgentKind::Codex,
         config_paths: vec![path_display(&hooks_path), path_display(&config_path)],
-        hook: HookPlan {
-            matcher: "Bash".to_string(),
-            command: "gommage-mcp",
-            action: "would_install",
-            preserve_existing_hooks: !replace_hooks,
-        },
+        hook: hook_plan(
+            "Bash".to_string(),
+            "gommage-mcp",
+            &hooks,
+            "/PreToolUse",
+            replace_hooks,
+        )?,
         native_permissions: NativePermissionPlan {
             import_enabled: false,
             deny: empty_permission_import_plan("/permissions/deny"),
             allow: empty_permission_import_plan("/permissions/allow"),
         },
     })
+}
+
+fn hook_plan(
+    matcher: String,
+    command: &'static str,
+    hooks_root: &serde_json::Value,
+    pointer: &str,
+    replace_hooks: bool,
+) -> Result<HookPlan> {
+    let existing_hook_groups = existing_hook_group_plans(hooks_root, pointer, replace_hooks)?;
+    let preserved_hook_group_count = existing_hook_groups
+        .iter()
+        .filter(|group| group.action == "would_preserve")
+        .count();
+    let removed_gommage_hook_group_count = existing_hook_groups
+        .iter()
+        .filter(|group| group.contains_gommage)
+        .count();
+    let removed_unrelated_hook_group_count = existing_hook_groups
+        .iter()
+        .filter(|group| group.action == "would_remove_replace_hooks" && !group.contains_gommage)
+        .count();
+
+    Ok(HookPlan {
+        matcher,
+        command,
+        action: "would_install",
+        strategy: if replace_hooks {
+            "replace_all_existing"
+        } else {
+            "append_preserving_unrelated"
+        },
+        preserve_existing_hooks: !replace_hooks,
+        existing_hook_group_count: existing_hook_groups.len(),
+        preserved_hook_group_count,
+        removed_gommage_hook_group_count,
+        removed_unrelated_hook_group_count,
+        existing_hook_groups,
+    })
+}
+
+fn existing_hook_group_plans(
+    hooks_root: &serde_json::Value,
+    pointer: &str,
+    replace_hooks: bool,
+) -> Result<Vec<ExistingHookGroupPlan>> {
+    let Some(groups) = hooks_root.pointer(pointer) else {
+        return Ok(Vec::new());
+    };
+    let Some(groups) = groups.as_array() else {
+        anyhow::bail!("{pointer} exists but is not an array");
+    };
+
+    Ok(groups
+        .iter()
+        .map(|group| {
+            let contains_gommage = json_hook_entry_contains_command(group, "gommage");
+            ExistingHookGroupPlan {
+                matcher: group
+                    .get("matcher")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                hook_count: group
+                    .get("hooks")
+                    .and_then(|v| v.as_array())
+                    .map_or(0, Vec::len),
+                contains_gommage,
+                action: if replace_hooks {
+                    "would_remove_replace_hooks"
+                } else if contains_gommage {
+                    "would_remove_stale_gommage"
+                } else {
+                    "would_preserve"
+                },
+            }
+        })
+        .collect())
+}
+
+fn json_hook_entry_contains_command(entry: &serde_json::Value, needle: &str) -> bool {
+    entry
+        .get("hooks")
+        .and_then(|v| v.as_array())
+        .is_some_and(|hooks| {
+            hooks.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|command| command.to_ascii_lowercase().contains(needle))
+            })
+        })
 }
 
 fn permission_import_plan(

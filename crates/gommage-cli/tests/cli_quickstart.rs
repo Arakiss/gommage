@@ -4,6 +4,17 @@ use std::fs;
 use support::{doctor_check, gommage};
 use tempfile::tempdir;
 
+fn hook_group_contains_command(entry: &serde_json::Value, expected: &str) -> bool {
+    entry
+        .get("hooks")
+        .and_then(|v| v.as_array())
+        .is_some_and(|hooks| {
+            hooks
+                .iter()
+                .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some(expected))
+        })
+}
+
 #[test]
 fn quickstart_installs_claude_hook_and_imports_native_denies() {
     let temp = tempdir().unwrap();
@@ -132,6 +143,86 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
             .pointer("/details/importable_rules")
             .and_then(|value| value.as_u64()),
         Some(9)
+    );
+}
+
+#[test]
+fn quickstart_preserves_unrelated_claude_hooks_by_default() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "~/.claude/hooks/protect-files.sh" }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "~/.claude/hooks/guard-commands.sh" }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "GOMMAGE_BYPASS=1 gommage mcp" }
+        ]
+      }
+    ]
+  }
+}"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["quickstart", "--agent", "claude", "--no-self-test"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("preserving existing PreToolUse hook group(s)"));
+
+    let settings_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    let pre_tool_use = settings_json
+        .pointer("/hooks/PreToolUse")
+        .and_then(|v| v.as_array())
+        .unwrap();
+
+    assert_eq!(pre_tool_use.len(), 3);
+    assert!(pre_tool_use.iter().any(|entry| {
+        entry.get("matcher").and_then(|v| v.as_str()) == Some("Edit|Write")
+            && hook_group_contains_command(entry, "~/.claude/hooks/protect-files.sh")
+    }));
+    assert!(pre_tool_use.iter().any(|entry| {
+        entry.get("matcher").and_then(|v| v.as_str()) == Some("Bash")
+            && hook_group_contains_command(entry, "~/.claude/hooks/guard-commands.sh")
+    }));
+    assert!(pre_tool_use.iter().any(|entry| {
+        entry
+            .get("hooks")
+            .and_then(|v| v.as_array())
+            .unwrap()
+            .iter()
+            .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp"))
+    }));
+    assert!(
+        !pre_tool_use
+            .iter()
+            .any(|entry| hook_group_contains_command(entry, "GOMMAGE_BYPASS=1 gommage mcp"))
     );
 }
 
@@ -354,6 +445,22 @@ fn quickstart_dry_run_json_reports_plan_without_writes() {
   "permissions": {
     "allow": ["Bash(git status *)"],
     "deny": ["Read(./secrets/**)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "~/.claude/hooks/guard-commands.sh" }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "GOMMAGE_BYPASS=1 gommage mcp" }
+        ]
+      }
+    ]
   }
 }
 "#;
@@ -415,6 +522,48 @@ fn quickstart_dry_run_json_reports_plan_without_writes() {
             .and_then(|value| value.as_str())
             .unwrap()
             .contains("Bash")
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/strategy")
+            .and_then(|value| value.as_str()),
+        Some("append_preserving_unrelated")
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/existing_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/preserved_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/removed_gommage_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/removed_unrelated_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/existing_hook_groups/0/action")
+            .and_then(|value| value.as_str()),
+        Some("would_preserve")
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/existing_hook_groups/1/action")
+            .and_then(|value| value.as_str()),
+        Some("would_remove_stale_gommage")
     );
     assert_eq!(
         report
@@ -494,6 +643,92 @@ fn quickstart_dry_run_json_reports_plan_without_writes() {
 }
 
 #[test]
+fn quickstart_dry_run_json_reports_codex_hook_coexistence() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let original_hooks = r#"{
+  "PreToolUse": [
+    {
+      "matcher": "apply_patch",
+      "hooks": [
+        { "type": "command", "command": "~/.codex/hooks/patch-audit.sh" }
+      ]
+    },
+    {
+      "matcher": "*",
+      "hooks": [
+        { "type": "command", "command": "GOMMAGE_BYPASS=1 gommage mcp" }
+      ]
+    }
+  ]
+}
+"#;
+    fs::write(&hooks, original_hooks).unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["quickstart", "--agent", "codex", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/agent")
+            .and_then(|value| value.as_str()),
+        Some("codex")
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/strategy")
+            .and_then(|value| value.as_str()),
+        Some("append_preserving_unrelated")
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/existing_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/preserved_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/removed_gommage_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/existing_hook_groups/0/action")
+            .and_then(|value| value.as_str()),
+        Some("would_preserve")
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/existing_hook_groups/1/action")
+            .and_then(|value| value.as_str()),
+        Some("would_remove_stale_gommage")
+    );
+    assert!(!home.exists());
+    assert_eq!(fs::read_to_string(&hooks).unwrap(), original_hooks);
+    assert!(!config.exists());
+}
+
+#[test]
 fn quickstart_dry_run_explain_prints_harness_guidance() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
@@ -514,6 +749,7 @@ fn quickstart_dry_run_explain_prints_harness_guidance() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("explain mode: coexistence"));
+    assert!(stdout.contains("explain claude hooks: strategy=append_preserving_unrelated"));
     assert!(stdout.contains("explain claude: posture="));
     assert!(stdout.contains("next: gommage harness diagnose --json"));
     assert!(stdout.contains("plan harness-context"));

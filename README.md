@@ -168,6 +168,13 @@ gommage verify --json
 gommage uninstall --all --dry-run
 ```
 
+In the JSON plan, inspect `agent_integrations[].hook.strategy` and
+`agent_integrations[].hook.existing_hook_groups`. The default strategy is
+`append_preserving_unrelated`: unrelated hook groups are marked
+`would_preserve`, stale Gommage-owned hook groups are marked
+`would_remove_stale_gommage`, and `--replace-hooks` is the only mode that
+removes unrelated hook groups.
+
 If the dry-run shows a CLI or tool family that Gommage does not classify, do
 not assume it is covered. Capture the mapper output with `gommage map --json`
 or `gommage map --json --hook`, then add a capability mapper and policy fixture
@@ -401,7 +408,7 @@ Stable automation contracts:
 
 | Surface | Use it for |
 |---|---|
-| `quickstart --dry-run --json` | Inspect planned setup mutations, backups, hooks, imports, daemon service files, and self-test checks before touching a real home. |
+| `quickstart --dry-run --json` | Inspect planned setup mutations, backups, hook coexistence actions, imports, daemon service files, and self-test checks before touching a real home. |
 | `quickstart --dry-run --explain` | Print the same setup posture in human/agent-readable language without writing files. |
 | `harness diagnose --json` | Inspect host hooks, imported permission posture, coverage boundaries, and next commands without installing anything. |
 | `harness explain` | Print the local setup context in Markdown for Claude/Codex sessions. |
