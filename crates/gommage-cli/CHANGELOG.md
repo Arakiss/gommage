@@ -1,5 +1,17 @@
 # Changelog — gommage-cli
 
+## [0.33.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.32.0-alpha.1...gommage-cli-v0.33.0-alpha.1) (2026-05-07)
+
+
+### Features
+
+* add rebuildable sqlite state index ([ce5c7a0](https://github.com/Arakiss/gommage/commit/ce5c7a023b7dfbbe3bfb212924775411c2426ea3))
+
+
+### Bug fixes
+
+* keep state counters clippy-clean ([b3ba7c6](https://github.com/Arakiss/gommage/commit/b3ba7c6a3bea82f0252674e56ef372f763191265))
+
 ## [0.32.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.31.0-alpha.1...gommage-cli-v0.32.0-alpha.1) (2026-05-07)
 
 
