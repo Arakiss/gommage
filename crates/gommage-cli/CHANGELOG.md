@@ -1,5 +1,17 @@
 # Changelog — gommage-cli
 
+## [0.32.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.31.0-alpha.1...gommage-cli-v0.32.0-alpha.1) (2026-05-07)
+
+
+### Features
+
+* add agent-readable harness diagnostics ([10acba8](https://github.com/Arakiss/gommage/commit/10acba88d298f314f460747c69ad0b9c80963c9f))
+
+
+### Documentation
+
+* clarify existing harness integration ([dd0501c](https://github.com/Arakiss/gommage/commit/dd0501c6e3e8657c25988097d173586933726023))
+
 ## [0.31.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.30.0-alpha.1...gommage-cli-v0.31.0-alpha.1) (2026-04-24)
 
 
