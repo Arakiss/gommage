@@ -5,7 +5,7 @@
 #   curl --proto '=https' --tlsv1.2 -sSf \
 #       https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
 #
-#   sh scripts/install.sh --version gommage-cli-vX.Y.Z-alpha.N --bin-dir "$HOME/.local/bin"
+#   sh scripts/install.sh --version gommage-cli-vX.Y.Z-beta.N --bin-dir "$HOME/.local/bin"
 #
 #   sh scripts/install.sh --with-skill --skill-agent codex --skill-agent claude
 #

@@ -53,7 +53,7 @@ if failures.any?
   failures.each { |failure| warn "  - #{failure}" }
   warn
   warn "Use the installer default latest resolution for live docs, or placeholder"
-  warn "tags such as gommage-cli-vX.Y.Z-alpha.N when explaining pinned installs."
+  warn "tags such as gommage-cli-vX.Y.Z-beta.N when explaining pinned installs."
   exit 1
 end
 
