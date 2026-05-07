@@ -223,8 +223,14 @@ Policies live in `~/.gommage/policy.d/`; capability mappers live in `~/.gommage/
 
 Current alpha distribution:
 
-- GitHub Releases provide prebuilt `gommage`, `gommage-daemon`, and `gommage-mcp` archives.
+- GitHub Releases provide one platform archive that contains the prebuilt
+  `gommage`, `gommage-daemon`, and `gommage-mcp` binaries. The installer copies
+  all three into the selected bin directory.
 - The installer verifies Sigstore bundle identity and SHA-256 before extracting.
+- Installing the `gommage-mcp` binary does not auto-register a universal MCP
+  gateway. Agent hooks invoke it after `quickstart`; gateway mode remains
+  explicit per stdio MCP server with `gommage-mcp --gateway --server-name
+  <name> -- <stdio-mcp-server>`.
 - Use `gommage release verify --json` for operator release evidence; from a checkout, `sh scripts/verify-release.sh --json` provides the same scriptable check. Use `--require-sbom --require-provenance` for beta/package-manager gates.
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.

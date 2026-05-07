@@ -18,6 +18,11 @@ checksum, and only then extracts `gommage`, `gommage-daemon`, and
 can additionally check the CycloneDX SBOM and GitHub artifact attestation with
 `gommage release verify` or `scripts/verify-release.sh`.
 
+This is binary installation only. It does not register a universal MCP gateway
+with Claude Code, Codex, or any other host. Agent hooks call `gommage-mcp` after
+`quickstart`, and gateway mode is opt-in per stdio MCP server through
+`gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
+
 Treat `gommage-cli-v*` as the product release tag stream. The public GitHub
 Release title should read `Gommage vX.Y.Z...` because users install the product,
 not a workspace component. Internal crate versions can differ for semver
