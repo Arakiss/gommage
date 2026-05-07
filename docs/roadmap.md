@@ -58,6 +58,7 @@ Primary code surfaces:
 - `scripts/check-agent-command-contracts.sh`
 - `skills/gommage/SKILL.md`
 - `docs/diagnostics.md`
+- `docs/existing-setups.md`
 
 Exit criteria:
 
@@ -173,6 +174,12 @@ Features:
     or incomplete.
   - Initial stdio gateway exists in `gommage-mcp --gateway`; remaining work is
     broader transport hardening and host integration docs.
+- Codex hook-surface catch-up
+  - Codex 0.124+ can emit hooks for `apply_patch`, MCP tools, and long-running
+    Bash sessions, but Gommage's default Codex quickstart still installs a
+    Bash-scoped matcher.
+  - Ship widened Codex matcher support only with real payload captures,
+    capability mappers, policy fixtures, and host-smoke evidence.
 - Project-local harness mode
   - `gommage project init` creates reviewed fixtures and project policy that can
     be layered with user policy.
@@ -189,6 +196,7 @@ Features:
 Primary code surfaces:
 
 - `crates/gommage-mcp/src/main.rs`
+- `crates/gommage-cli/src/agent.rs`
 - `crates/gommage-core/src/runtime.rs`
 - `crates/gommage-core/src/mapper.rs`
 - `docs/agent-compatibility.md`
@@ -198,6 +206,8 @@ Exit criteria:
 
 - MCP gateway has fixtures proving read/write/call forwarding and denial
   behavior.
+- Codex non-Bash hook support is either wired with fixtures or explicitly
+  documented as unsupported by default.
 - Project policy layering is deterministic and documented.
 - Sandbox bridge output is clearly advisory and never described as equivalent
   to policy enforcement.

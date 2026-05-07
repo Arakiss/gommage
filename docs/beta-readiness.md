@@ -59,7 +59,7 @@ issue:
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
 | Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host, including companion versions, selected-agent beta check, repair dry-runs, bounded TUI captures, report bundle, and rollback dry-run. |
 | CI | `ci`, `release`, `audit`, and `scorecard` are green on the release commit. |
-| Docs | README, diagnostics, agent compatibility, publishing, and release-signing docs match the current CLI. |
+| Docs | README, existing-setups, diagnostics, agent compatibility, publishing, and release-signing docs match the current CLI. |
 | Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
 
 ## Blocking issues
@@ -81,7 +81,11 @@ Treat these as beta blockers:
 
 These can remain open for beta if they are clearly documented:
 
-- Codex hook coverage is Bash-scoped until upstream broadens `PreToolUse`.
+- Gommage's default Codex integration is Bash-scoped even though upstream Codex
+  0.124+ can emit hooks for `apply_patch`, MCP tools, and long-running Bash
+  sessions. Wider Codex coverage can remain non-blocking only if the docs,
+  agent status wording, and roadmap say this is a Gommage integration gap, not
+  an upstream limitation.
 - Cursor remains evaluation-only because its hook timing differs from Claude
   Code and Codex.
 - crates.io may remain unpublished while GitHub Releases are the supported

@@ -5,7 +5,11 @@ description: Install, configure, verify, troubleshoot, or operate the Gommage po
 
 # Gommage
 
-Gommage is an alpha policy-as-code harness for AI coding agent tool calls. It is not an OS sandbox; keep the agent's native sandbox or permission layer enabled unless the user explicitly chooses otherwise.
+Gommage is an alpha policy-as-code harness for AI coding agent tool calls. It is
+not an OS sandbox; keep the agent's native sandbox or permission layer enabled
+unless the user explicitly chooses otherwise. For existing harnesses, treat
+Gommage as a coexistence layer first: inspect dry-runs and status reports before
+asking it to replace any host hooks.
 
 ## Fast Path
 
@@ -40,12 +44,14 @@ curl --proto '=https' --tlsv1.2 -sSf \
   | sh -s -- --version gommage-cli-vX.Y.Z-alpha.N --bin-dir "$HOME/.local/bin"
 ```
 
-5. Set up the target agent:
+5. Set up the target agent. On mature dotfiles or existing hook stacks, inspect
+the dry-run before applying quickstart:
 
 ```sh
 # `--self-test` is the default; keep it explicit in scripts for readability.
 gommage quickstart --agent claude --daemon --dry-run --json
 gommage quickstart --agent claude --daemon --self-test
+gommage quickstart --agent codex --daemon --dry-run --json
 gommage quickstart --agent codex --daemon --self-test
 ```
 
@@ -110,7 +116,11 @@ cargo install --path crates/gommage-daemon --force
 cargo install --path crates/gommage-mcp --force
 ```
 
-Do not recommend `cargo install gommage-cli` yet. As of April 24, 2026, the `gommage-*` crates are not published on crates.io and the manifests intentionally keep `publish = false`. The bundled stdlib is packaged in `gommage-stdlib`, but the full publish gate still needs to pass before crates.io becomes a supported install path.
+Do not recommend `cargo install gommage-cli` yet. As of May 7, 2026, the
+`gommage-*` crates are not published on crates.io and the manifests
+intentionally keep `publish = false`. The bundled stdlib is packaged in
+`gommage-stdlib`, but the full publish gate still needs to pass before
+crates.io becomes a supported install path.
 
 ## Agent Notes
 
@@ -123,8 +133,32 @@ Do not recommend `cargo install gommage-cli` yet. As of April 24, 2026, the `gom
 - Host validation evidence should use `scripts/host-smoke.sh`; CachyOS and
   other systemd hosts should pass `--daemon-manager systemd`.
 - Agent automation should prefer `gommage quickstart --dry-run --json`, `gommage beta check --json`, `gommage beta check --json --policy-test <file>`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage report bundle --redact --output <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage approval list --json`, `gommage approval list --status all --json`, `gommage approval show <id> --json`, `gommage approval replay <id> --json`, `gommage approval evidence <id> --redact`, `gommage approval webhook --dry-run --json`, `gommage approval template --provider <provider> --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage sandbox advise --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage policy layers --json`, `gommage policy lint --strict --json`, `gommage replay --audit <file> --policy <dir> --json`, `gommage policy diff --from <dir> --to <dir> --against <file> --json`, `gommage policy suggest --audit <file> --json`, `gommage explain <audit-id> --trace --json`, `gommage repair agent <agent> --dry-run`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. `approval list` defaults to pending; use `--status all` for history. `approval webhook --dry-run --json` exposes shaped request bodies in `requests[].payload`; signed dry-runs also expose `requests[].body` and `requests[].signature`. `sandbox advise` is advisory only and is not OS confinement. Use `gommage tui --snapshot`, especially `gommage tui --snapshot --view onboarding` for first-minute operator guidance and `gommage tui --snapshot --view metrics` for a human-readable local health summary, bounded `gommage tui --watch --watch-ticks <n>`, or bounded `gommage tui --stream --stream-ticks <n>` only when a human-readable operator report is useful; do not parse TUI output as a stable contract. Stream/snapshot output includes daemon reachability, active pictos, local counters, webhook DLQ count, and audit anomaly count when available. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot`, `gommage logo`, or interactive `gommage tui`; they are presentation-only. Interactive `gommage tui --view approvals` may adjust TTL/use-count and approve/deny after y/n confirmation, so agents should not drive it programmatically.
-- Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook, imports supported `permissions.deny` entries into `05-claude-import.yaml`, and imports supported `permissions.allow` entries into `90-claude-allow-import.yaml`. Late allow imports preserve the user's native Claude posture while earlier hard-stops, denies, ask rules, and native deny imports still win.
-- Codex CLI: `quickstart --agent codex` enables hooks and installs a Bash-scoped hook. Codex file tools and MCP calls are outside Gommage's current hook coverage, so keep Codex sandboxing enabled.
+- Existing host setups: quickstart preserves unrelated host hooks by default.
+  Use `--replace-hooks` only when the operator intentionally wants Gommage to
+  own the whole `PreToolUse` surface. Existing hooks can coexist, but the first
+  layer to block determines what the agent sees; if another hook blocks before
+  Gommage, Gommage cannot audit that decision.
+- Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook,
+  imports supported `permissions.deny` entries into `05-claude-import.yaml`,
+  and imports supported `permissions.allow` entries into
+  `90-claude-allow-import.yaml`. Supported broad allow entries such as `Bash`
+  are imported as late allow rules, so earlier hard-stops, denies, ask rules,
+  and native deny imports still win. Use `--no-import-native-permissions` when
+  the operator wants to author the initial Gommage policy manually.
+- Codex CLI: `quickstart --agent codex` enables hooks and installs a
+  Bash-scoped Gommage hook. Codex upstream 0.124+ can emit hooks for
+  `apply_patch`, MCP tools, and long-running Bash sessions, but Gommage's
+  default Codex matcher and bundled stdlib have not widened to that surface yet.
+  Keep Codex sandboxing enabled. Treat non-Bash Codex hook coverage as custom
+  local work until Gommage ships matcher, mapper, fixture, and host-smoke
+  support for it.
+- Dual-agent flows: if Claude launches Codex via `tmux`, shell, or script,
+  Gommage sees the outer Claude Bash call only. Inner Codex calls are governed
+  only when the invoked Codex session uses a `CODEX_HOME` with Gommage's Codex
+  hook installed and the tool call falls inside Gommage's mapped hook surface.
+  Prefer a shared `GOMMAGE_HOME` or deliberate org/project policy layer, then
+  run both `gommage agent status claude --json` and
+  `gommage agent status codex --json` before the handoff.
 - MCP gateway: use `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>` only for stdio MCP servers you intentionally proxy. Allowed `tools/call` requests are forwarded; denied or picto-required calls return MCP tool errors and are not sent upstream.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
 - Quickstart self-test: the readiness gate runs by default. `--self-test` remains accepted for scripts; `--no-self-test` is the manual escape hatch.
@@ -195,6 +229,8 @@ Before claiming crates.io support, check `docs/publishing.md` and require the pa
 Read only the docs needed for the task:
 
 - `README.md`: status, install, quickstart, roadmap.
+- `docs/existing-setups.md`: migration, coexistence with existing hooks,
+  dual-agent flows, MCP scope, and rollback.
 - `docs/diagnostics.md`: `gommage doctor` and machine-readable health checks.
 - `docs/agent-compatibility.md`: Claude and Codex coverage boundaries.
 - `docs/policy-cookbook.md`: policy patterns and regression fixture examples.

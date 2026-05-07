@@ -5,11 +5,14 @@ Codex CLI's `PreToolUse` hook schema is near-identical to Claude Code's: same
 config location. The existing `gommage-mcp` binary is schema-compatible with
 both — Codex just points its hook at it.
 
-> **Current scope caveat** (as of April 2026, Codex docs):
-> Codex `PreToolUse` fires **only for Bash** tool calls. File reads, writes,
-> edits and MCP tool calls do not invoke the hook. For broader coverage today,
-> you need to layer Codex's sandbox modes (`--sandbox read-only` /
-> `workspace-write`) underneath Gommage.
+> **Current Gommage alpha scope caveat**:
+> Codex upstream widened hooks in `rust-v0.124.0` so they can observe
+> `apply_patch`, MCP tools, and long-running Bash sessions. Gommage's current
+> `quickstart --agent codex` still installs a Bash-scoped matcher and the
+> bundled stdlib maps Bash commands only for Codex. Keep Codex's sandbox modes
+> (`--sandbox read-only` / `workspace-write`) underneath Gommage, and treat
+> non-Bash Codex hook coverage as custom policy/mapping work until Gommage ships
+> it by default.
 
 ## 1. Install
 
@@ -56,21 +59,22 @@ gommage expedition start "refactor-auth"
 codex exec --sandbox workspace-write "refactor the auth middleware"
 ```
 
-Every Bash command Codex wants to execute is gated through Gommage's
-policy. Pictos, audit log, `gommage explain <id>` all behave identically to
-the Claude Code flow.
+Every Bash command Codex wants to execute is gated through Gommage's policy
+under the default integration. Pictos, audit log, and `gommage explain <id>`
+all behave identically to the Claude Code flow for audited decisions.
 
-## 4. What Gommage does NOT gate under Codex today
+## 4. What Gommage does NOT gate under Codex by default today
 
-Because Codex only fires `PreToolUse` for Bash, these are NOT intercepted
-by Gommage in a Codex session (until Codex widens the hook surface —
-tracked upstream: openai/codex#16732):
+Because Gommage's default Codex matcher is Bash-scoped, these are NOT
+intercepted by Gommage in a Codex session unless you intentionally add and test
+local hook/mapping coverage:
 
-- File reads via Codex's internal file tools
-- File writes/edits via Codex's internal file tools
-- MCP tool calls Codex makes to other MCP servers
+- `apply_patch` hook events emitted by modern Codex
+- MCP tool hook events emitted by modern Codex
+- built-in file reads or other internal tools that do not have a Gommage mapper
+- anything blocked or approved before the Gommage hook path receives it
 
-Use Codex's native `--sandbox` mode as a second layer for those. A typical
+Use Codex's native `--sandbox` mode as the authority for those. A typical
 conservative combo:
 
 ```sh
@@ -79,8 +83,17 @@ codex exec --sandbox workspace-write "apply the refactor we discussed"
 ```
 
 Sandbox mode enforces OS-level confinement (Seatbelt on macOS, `bwrap +
-seccomp` on Linux); Gommage enforces your declarative policy on top. The
-two layers are complementary.
+seccomp` on Linux); Gommage enforces your declarative policy for the hook
+surface it sees. The two layers are complementary.
+
+If you experiment with non-Bash Codex hooks, capture the real payload first:
+
+```sh
+cat codex-pretooluse-payload.json | gommage map --json --hook
+```
+
+Then add a local capability mapper under `~/.gommage/capabilities.d/`, a policy
+rule, and a `gommage policy test` fixture before relying on the behavior.
 
 ## 5. Break-glass / picto flow (identical to Claude Code)
 
