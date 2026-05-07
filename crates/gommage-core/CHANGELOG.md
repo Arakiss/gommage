@@ -3,6 +3,13 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.9.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.8.0-alpha.1...gommage-core-v0.9.0-alpha.1) (2026-05-07)
+
+
+### Features
+
+* add rebuildable sqlite state index ([ce5c7a0](https://github.com/Arakiss/gommage/commit/ce5c7a023b7dfbbe3bfb212924775411c2426ea3))
+
 ## [0.8.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.7.0-alpha.1...gommage-core-v0.8.0-alpha.1) (2026-04-24)
 
 
