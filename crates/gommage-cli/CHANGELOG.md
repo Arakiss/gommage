@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.34.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.33.0-alpha.1...gommage-cli-v0.34.0-alpha.1) (2026-05-07)
+
+
+### Features
+
+* define beta launch readiness ([3a9cc9e](https://github.com/Arakiss/gommage/commit/3a9cc9ec050fbc7d06edf70e72d7f7673988ea01))
+
 ## [0.33.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.32.0-alpha.1...gommage-cli-v0.33.0-alpha.1) (2026-05-07)
 
 
