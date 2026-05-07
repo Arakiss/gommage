@@ -211,7 +211,7 @@ jobs:
         run: |
           GOMMAGE_BIN=target/debug/gommage sh scripts/launch-demo.sh \
             --capture-dir "launch-demo-${{ matrix.os }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: operator-smoke-${{ matrix.os }}-${{ matrix.agent }}
