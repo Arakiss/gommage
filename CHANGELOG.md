@@ -51,6 +51,12 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `docs/agent-platform-research.md` records the recurring Codex / Claude Code
   compatibility research cadence, current host-agent findings, and gates for
   widening hook coverage safely.
+- `gommage update` checks the running CLI against the latest installable
+  `gommage-cli-v*` release, and `gommage upgrade` delegates binary or
+  skill-only upgrades to the verified installer path.
+- `docs/updating.md` explains the update-versus-upgrade contract, pinned
+  release installs, `--check`, `--force`, and when to refresh Codex/Claude Code
+  skills without changing binaries.
 - `gommage report bundle --redact --output <file>` writes a diagnostic support
   bundle with CLI/host metadata, redacted environment hints, doctor/verify
   reports, agent status, daemon service hints, and policy/capability inventory.
