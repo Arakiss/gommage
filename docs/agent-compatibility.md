@@ -2,7 +2,7 @@
 
 What Gommage sees, what it does not, and what can bypass it per agent. This
 page is written against the Gommage beta line and upstream agent behavior known
-on **2026-05-07**. If an agent changes its hook surface, this page moves
+on **2026-05-12**. If an agent changes its hook surface, this page moves
 accordingly; the packaged capability mapper stdlib in
 `crates/gommage-stdlib/capabilities/` is agent-agnostic and usually does not
 need code changes. The repository-root `capabilities/` directory is a
@@ -177,7 +177,7 @@ gommage-mcp --gateway --server-name filesystem -- <stdio-mcp-server> .
 
 See [`examples/codex-setup.md`](../examples/codex-setup.md).
 `gommage quickstart --agent codex` writes `~/.codex/hooks.json` and enables
-`features.codex_hooks = true`, but it does not convert Codex's OS sandbox or
+`features.hooks = true`, but it does not convert Codex's OS sandbox or
 approval policy into Gommage YAML. Those native controls remain authoritative
 for surfaces outside Gommage's installed matcher and mapper coverage.
 
@@ -193,10 +193,14 @@ Verify the host wiring after quickstart with:
 gommage agent status codex --json
 ```
 
-This checks `hooks.json`, `config.toml`, `features.codex_hooks`, the installed
+This checks `hooks.json`, `config.toml`, `features.hooks`, the installed
 `PreToolUse` hook group, and warns when `sandbox_mode = "danger-full-access"`
 because Gommage's current default Codex integration is still Bash-scoped and
 Codex's sandbox remains the file/MCP safety boundary.
+
+Older Codex configs may still contain the legacy `features.codex_hooks` flag.
+Gommage reports that as a migration warning and rewrites the canonical
+`features.hooks` setting when `gommage agent install codex` runs.
 
 ## Dual-Agent And Nested-Agent Flows
 

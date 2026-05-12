@@ -26,9 +26,12 @@ gommage doctor --json
 ```
 
 `quickstart` creates `~/.gommage`, installs the bundled policy/capability
-stdlib, writes `~/.codex/hooks.json`, and enables `features.codex_hooks = true`
-in `~/.codex/config.toml` with backups. `--daemon` also installs and starts the
+stdlib, writes `~/.codex/hooks.json`, and enables `features.hooks = true` in
+`~/.codex/config.toml` with backups. `--daemon` also installs and starts the
 user-level service.
+
+Older Codex configs may still contain `features.codex_hooks`; Gommage treats
+that key as legacy and writes the canonical `features.hooks` setting.
 
 `doctor --json` should report top-level `status` as `ok` or `warn`. A warning is
 expected before the first audited decision. Treat `fail` as a setup error before

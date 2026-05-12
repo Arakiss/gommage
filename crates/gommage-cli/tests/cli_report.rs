@@ -18,7 +18,7 @@ fn report_bundle_writes_redacted_support_json() {
     fs::write(&codex_hooks, r#"{"PreToolUse":[]}"#).unwrap();
     fs::write(
         &codex_config,
-        "sandbox_mode = \"workspace-write\"\n[features]\ncodex_hooks = true\n",
+        "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\n",
     )
     .unwrap();
 

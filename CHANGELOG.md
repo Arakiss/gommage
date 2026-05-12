@@ -43,6 +43,14 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Quickstart dry-run plans now report hook coexistence strategy and per-group
   preserve/remove actions, making mature Claude/Codex homes reviewable before
   install.
+- Gommage now writes the canonical Codex `features.hooks` flag while treating
+  legacy `features.codex_hooks` configs as migration-compatible status
+  warnings.
+- Codex uninstall now leaves hook feature flags enabled when non-Gommage hooks
+  remain configured.
+- `docs/agent-platform-research.md` records the recurring Codex / Claude Code
+  compatibility research cadence, current host-agent findings, and gates for
+  widening hook coverage safely.
 - `gommage report bundle --redact --output <file>` writes a diagnostic support
   bundle with CLI/host metadata, redacted environment hints, doctor/verify
   reports, agent status, daemon service hints, and policy/capability inventory.
