@@ -1,5 +1,17 @@
 # Changelog — gommage-cli
 
+## [0.36.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.35.0-beta.1...gommage-cli-v0.36.0-beta.1) (2026-05-12)
+
+
+### Features
+
+* add Gommage update and upgrade commands ([5ae7f8c](https://github.com/Arakiss/gommage/commit/5ae7f8c3bde385d811a3ace0a952e5ee75bb8636))
+
+
+### Bug fixes
+
+* use canonical Codex hook feature flag ([3add3f6](https://github.com/Arakiss/gommage/commit/3add3f6fb6927bc53f29283832cfad9204622bc2))
+
 ## [0.35.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.34.0-beta.1...gommage-cli-v0.35.0-beta.1) (2026-05-07)
 
 
