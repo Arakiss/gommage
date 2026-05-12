@@ -35,6 +35,7 @@ mod repair;
 mod replay;
 mod report;
 mod sandbox;
+mod self_update;
 mod smoke;
 mod state;
 mod tui;
@@ -65,6 +66,7 @@ use repair::{RepairCmd, cmd_repair};
 use replay::{ReplayOptions, cmd_replay};
 use report::{ReportCmd, cmd_report};
 use sandbox::{SandboxCmd, cmd_sandbox};
+use self_update::{UpdateOptions, UpgradeOptions, cmd_update, cmd_upgrade};
 use smoke::cmd_smoke;
 use state::{StateCmd, cmd_state};
 use tui::{TuiOptions, cmd_tui};
@@ -139,6 +141,12 @@ enum Cmd {
     /// Run beta-readiness checks for this host.
     #[command(subcommand)]
     Beta(BetaCmd),
+
+    /// Check whether a newer Gommage release is available.
+    Update(UpdateOptions),
+
+    /// Install or reinstall Gommage through the verified release installer.
+    Upgrade(UpgradeOptions),
 
     /// Remove Gommage integrations and installed state.
     Uninstall {
@@ -445,6 +453,8 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         }
         Cmd::Agent(sub) => return cmd_agent(sub, layout),
         Cmd::Beta(sub) => return cmd_beta(sub, layout),
+        Cmd::Update(options) => return cmd_update(options),
+        Cmd::Upgrade(options) => return cmd_upgrade(options),
         Cmd::Uninstall {
             agent,
             daemon,

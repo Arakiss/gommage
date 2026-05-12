@@ -320,7 +320,7 @@ fn resolve_tag(repo: &str, raw: &str) -> Result<String> {
     Ok(tag.to_string())
 }
 
-fn resolve_asset(raw: &str) -> Result<String> {
+pub(crate) fn resolve_asset(raw: &str) -> Result<String> {
     let asset = if raw == "auto" {
         detect_asset().ok_or_else(|| {
             anyhow!(

@@ -267,6 +267,35 @@ cargo install --path crates/gommage-mcp --force
 crates.io while the project is pre-1.0 and the publish gate remains closed. See
 [`docs/publishing.md`](docs/publishing.md) for the current publish gate.
 
+## Update And Upgrade
+
+Gommage uses `update` and `upgrade` as separate operator actions:
+
+- `gommage update` checks for a newer installable release and does not mutate
+  files.
+- `gommage upgrade` runs the verified installer and changes the local
+  installation.
+
+```sh
+# Check whether a newer platform release exists.
+gommage update
+gommage update --json
+
+# Install the latest release, using the same Sigstore/SHA-256 verified path as
+# the one-line installer.
+gommage upgrade
+
+# Preview the installer command without downloading or writing files.
+gommage upgrade --dry-run
+
+# Refresh only Codex/Claude Code skills when docs or agent guidance changed.
+gommage upgrade --skill-only --skill-agent codex --skill-agent claude --no-prompt
+```
+
+See [`docs/updating.md`](docs/updating.md) for the full update vs upgrade
+contract, including `--check`, `--force`, pinned versions, skill-only updates,
+and when each command should be used.
+
 ## Agent skill
 
 This repository ships an Agent Skills-compatible skill at

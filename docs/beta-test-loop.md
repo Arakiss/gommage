@@ -16,6 +16,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/Arakiss/g
 gommage --version
 gommage-mcp --version
 gommage-daemon --version
+gommage update
 gommage release verify --json
 # From a checkout used to collect release evidence.
 sh scripts/verify-release.sh --json
@@ -24,6 +25,8 @@ sh scripts/verify-release.sh --json
 Evidence to save:
 
 - installer output showing Sigstore and checksum verification
+- update output showing whether the installed binary matches the latest
+  installable release
 - release verification JSON showing checksum, Sigstore, SBOM, and provenance status
 - versions for all three binaries
 - any OS-specific cosign hint if verification cannot run

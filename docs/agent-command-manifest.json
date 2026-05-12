@@ -85,6 +85,27 @@
       "argv": ["beta", "check", "--json"]
     },
     {
+      "id": "upgrade_dry_run",
+      "purpose": "Inspect the verified installer command that would upgrade Gommage binaries.",
+      "stdin_mode": "none",
+      "argv": ["upgrade", "--dry-run", "--no-prompt"]
+    },
+    {
+      "id": "upgrade_skill_only_dry_run",
+      "purpose": "Inspect a skill-only refresh for Codex and Claude Code without mutating files.",
+      "stdin_mode": "none",
+      "argv": [
+        "upgrade",
+        "--dry-run",
+        "--skill-only",
+        "--skill-agent",
+        "codex",
+        "--skill-agent",
+        "claude",
+        "--no-prompt"
+      ]
+    },
+    {
       "id": "beta_check_policy_fixture_json",
       "purpose": "Run the beta-readiness gate with repository-owned policy fixtures.",
       "stdin_mode": "none",

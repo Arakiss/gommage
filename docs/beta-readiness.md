@@ -38,6 +38,7 @@ issue:
 | Gate | Evidence |
 |---|---|
 | Installer | Fresh temp-home install from the latest `gommage-cli-v*` release. |
+| Update path | `gommage update --json` reports the current and latest installable release, and `gommage upgrade --dry-run` prints the verified installer command without mutating files. |
 | Release assets | Required CLI release assets: 4 archives, 4 checksums, 4 Sigstore bundles, plus CycloneDX SBOM for current release-line builds. |
 | Release verification | `gommage release verify --json` or `scripts/verify-release.sh --json` passes for the current platform; package-manager/beta gates use `--require-sbom --require-provenance`. |
 | Binary introspection | `gommage`, `gommage-daemon`, and `gommage-mcp` all support `--version`. |
