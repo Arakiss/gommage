@@ -1,6 +1,7 @@
 use crate::{
     agent_status::cmd_agent_status,
     agent_uninstall::{AgentUninstallTarget, cmd_agent_uninstall},
+    codex_config::enable_codex_hooks_feature,
     util::{env_path_or_home, read_json_object, read_toml_document, write_json, write_text},
 };
 use anyhow::{Context, Result};
@@ -189,10 +190,10 @@ fn install_codex(
         .get("sandbox_mode")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    config["features"]["codex_hooks"] = toml_edit::value(true);
+    enable_codex_hooks_feature(&mut config);
     write_text(config_path, &config.to_string(), dry_run)?;
     println!(
-        "ok codex: features.codex_hooks enabled at {}",
+        "ok codex: features.hooks enabled at {}",
         config_path.display()
     );
     if sandbox_mode.as_deref() == Some("danger-full-access") {

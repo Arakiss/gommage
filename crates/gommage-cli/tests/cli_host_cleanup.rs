@@ -146,7 +146,7 @@ fn agent_uninstall_dry_run_uses_plan_language_without_mutating() {
     .unwrap();
     fs::write(
         &config,
-        "sandbox_mode = \"workspace-write\"\n[features]\ncodex_hooks = true\n",
+        "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\ncodex_hooks = true\n",
     )
     .unwrap();
 
@@ -166,7 +166,7 @@ fn agent_uninstall_dry_run_uses_plan_language_without_mutating() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("plan claude: remove"));
     assert!(stdout.contains("plan codex: remove"));
-    assert!(stdout.contains("plan codex: disable features.codex_hooks"));
+    assert!(stdout.contains("plan codex: disable features.hooks, features.codex_hooks"));
     assert!(!stdout.contains("ok claude: removed"));
     assert!(!stdout.contains("ok codex: removed"));
     assert!(!stdout.contains("ok codex: disabled"));
@@ -176,6 +176,11 @@ fn agent_uninstall_dry_run_uses_plan_language_without_mutating() {
             .contains("gommage-mcp")
     );
     assert!(fs::read_to_string(&hooks).unwrap().contains("gommage-mcp"));
+    assert!(
+        fs::read_to_string(&config)
+            .unwrap()
+            .contains("hooks = true")
+    );
     assert!(
         fs::read_to_string(&config)
             .unwrap()
@@ -193,7 +198,7 @@ fn agent_uninstall_codex_leaves_feature_flag_without_gommage_hook() {
     fs::write(&hooks, r#"{"PreToolUse":[]}"#).unwrap();
     fs::write(
         &config,
-        "sandbox_mode = \"workspace-write\"\n[features]\ncodex_hooks = true\n",
+        "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\n",
     )
     .unwrap();
 
@@ -211,12 +216,63 @@ fn agent_uninstall_codex_leaves_feature_flag_without_gommage_hook() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("no Gommage hook found"));
-    assert!(stdout.contains("leaving features.codex_hooks unchanged"));
+    assert!(stdout.contains("leaving Codex hook feature flags unchanged"));
     assert!(
         fs::read_to_string(&config)
             .unwrap()
-            .contains("codex_hooks = true")
+            .contains("hooks = true")
     );
+}
+
+#[test]
+fn agent_uninstall_codex_keeps_feature_flag_when_other_hooks_remain() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(hooks.parent().unwrap()).unwrap();
+    fs::write(
+        &hooks,
+        r#"{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"gommage-mcp"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"/tmp/protect-files.sh"}]}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\n",
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["agent", "uninstall", "codex"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("removed 1 Gommage hook group"));
+    assert!(stdout.contains("other Codex hooks remain"));
+    assert!(
+        fs::read_to_string(&config)
+            .unwrap()
+            .contains("hooks = true")
+    );
+    let hooks_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&hooks).unwrap()).unwrap();
+    let pre_tool_use = hooks_json
+        .pointer("/PreToolUse")
+        .and_then(|value| value.as_array())
+        .unwrap();
+    assert_eq!(pre_tool_use.len(), 1);
+    assert!(hook_group_contains_command(
+        &pre_tool_use[0],
+        "/tmp/protect-files.sh"
+    ));
 }
 
 #[test]
@@ -559,7 +615,7 @@ fn agent_install_codex_writes_hook_and_enables_feature_flag() {
     fs::create_dir_all(config.parent().unwrap()).unwrap();
     fs::write(
         &config,
-        "sandbox_mode = \"workspace-write\"\n[features]\nfoo = true\n",
+        "sandbox_mode = \"workspace-write\"\nfeatures = { foo = true }\n",
     )
     .unwrap();
 
@@ -591,7 +647,8 @@ fn agent_install_codex_writes_hook_and_enables_feature_flag() {
                 .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp")))
     );
     let config = fs::read_to_string(config).unwrap();
-    assert!(config.contains("codex_hooks = true"));
+    assert!(config.contains("hooks = true"));
+    assert!(!config.contains("codex_hooks = true"));
     assert!(config.contains("foo = true"));
 
     let status = gommage(&home)
@@ -624,6 +681,55 @@ fn agent_install_codex_writes_hook_and_enables_feature_flag() {
             .get("status")
             .and_then(|value| value.as_str()),
         Some("ok")
+    );
+}
+
+#[test]
+fn agent_status_warns_for_legacy_codex_hook_feature_flag() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(
+        &hooks,
+        r#"{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"gommage-mcp"}]}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\ncodex_hooks = true\n",
+    )
+    .unwrap();
+
+    let status = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["agent", "status", "codex", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    let check = doctor_check(&report, "codex_hooks");
+    assert_eq!(
+        check.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert!(
+        check
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap()
+            .contains("legacy features.codex_hooks")
     );
 }
 
@@ -693,11 +799,7 @@ fn agent_install_codex_preserves_unrelated_hooks_by_default() {
             .iter()
             .any(|entry| hook_group_contains_command(entry, "GOMMAGE_BYPASS=1 gommage mcp"))
     );
-    assert!(
-        fs::read_to_string(config)
-            .unwrap()
-            .contains("codex_hooks = true")
-    );
+    assert!(fs::read_to_string(config).unwrap().contains("hooks = true"));
 }
 
 #[test]

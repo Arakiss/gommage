@@ -16,6 +16,7 @@ mod approval_workflow;
 mod audit_cmd;
 mod audit_replay;
 mod beta;
+mod codex_config;
 mod daemon;
 mod doctor;
 mod gestral;

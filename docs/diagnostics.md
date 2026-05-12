@@ -161,12 +161,14 @@ gommage agent status codex --json
 The JSON report includes `agent`, top-level `status`, `summary`, and `checks`.
 Claude checks cover the settings file, `PreToolUse` hook group, generated deny
 imports, and generated allow imports. Codex checks cover `hooks.json`,
-`config.toml`, the `PreToolUse` hook group, `features.codex_hooks`, and the
+`config.toml`, the `PreToolUse` hook group, canonical `features.hooks`, and the
 configured sandbox mode. A missing hook or disabled hook feature is `fail`; a
-dangerous Codex sandbox is `warn` because Gommage's current default Codex
-integration is Bash-scoped even though modern Codex releases expose additional
-hook events upstream. Legacy Gommage hook commands and global or missing
-matchers are `warn`; inspect the repair plan before mutating:
+legacy-only `features.codex_hooks` setting is `warn` and should be migrated by
+rerunning `gommage agent install codex`. A dangerous Codex sandbox is `warn`
+because Gommage's current default Codex integration is Bash-scoped even though
+modern Codex releases expose additional hook events upstream. Legacy Gommage
+hook commands and global or missing matchers are `warn`; inspect the repair
+plan before mutating:
 
 ```sh
 gommage repair agent claude --dry-run

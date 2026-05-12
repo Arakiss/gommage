@@ -8,6 +8,7 @@ use crate::{
         AgentKind, native_permission_rules, translate_claude_native_rules,
         translate_claude_permission_allow, translate_claude_permission_deny,
     },
+    codex_config::codex_hooks_feature_state,
     util::{env_path_or_home, path_details, path_display, read_json_object, read_toml_document},
 };
 
@@ -265,24 +266,39 @@ fn build_codex_status_report() -> AgentStatusReport {
             return report;
         }
     };
-    let codex_hooks_enabled = config
-        .get("features")
-        .and_then(|features| features.get("codex_hooks"))
-        .and_then(|value| value.as_bool())
-        == Some(true);
-    if codex_hooks_enabled {
+    let hooks_feature = codex_hooks_feature_state(&config);
+    if hooks_feature.canonical_enabled() {
         report.push(
             "codex_hooks",
             AgentStatus::Ok,
-            "features.codex_hooks is enabled",
-            Some(path_details(&config_path)),
+            "features.hooks is enabled",
+            Some(serde_json::json!({
+                "path": path_display(&config_path),
+                "feature": "features.hooks",
+                "legacy_codex_hooks": hooks_feature.legacy_codex_hooks,
+            })),
+        );
+    } else if hooks_feature.legacy_only_enabled() {
+        report.push(
+            "codex_hooks",
+            AgentStatus::Warn,
+            "legacy features.codex_hooks is enabled; rerun install to write canonical features.hooks",
+            Some(serde_json::json!({
+                "path": path_display(&config_path),
+                "feature": "features.hooks",
+                "legacy_feature": "features.codex_hooks",
+            })),
         );
     } else {
         report.push(
             "codex_hooks",
             AgentStatus::Fail,
-            "features.codex_hooks is not enabled",
-            Some(path_details(&config_path)),
+            "features.hooks is not enabled",
+            Some(serde_json::json!({
+                "path": path_display(&config_path),
+                "feature": "features.hooks",
+                "legacy_codex_hooks": hooks_feature.legacy_codex_hooks,
+            })),
         );
     }
 

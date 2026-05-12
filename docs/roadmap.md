@@ -21,6 +21,9 @@ installer line.
 - New policy behavior needs fixtures before it is trusted.
 - Gommage composes with native agent permissions and OS sandboxes; it does not
   pretend a hook is a sandbox.
+- Host-agent compatibility is researched on a cadence. See
+  [`agent-platform-research.md`](agent-platform-research.md); upstream hook or
+  config drift is treated as product work, not incidental documentation churn.
 
 ## Milestone 0: Beta Safety And DX
 
