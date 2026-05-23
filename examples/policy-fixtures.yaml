@@ -65,3 +65,13 @@ cases:
       decision: ask_picto
       required_scope: mcp.write
       matched_rule: ask-mcp-write
+
+  - name: deny_unparsed_codex_apply_patch
+    description: Codex apply_patch payloads that cannot be parsed into file paths fail closed.
+    tool: apply_patch
+    input:
+      __gommage_patch_unparsed: true
+    expect:
+      decision: gommage
+      hard_stop: false
+      matched_rule: deny-unsafe-apply-patch-payload

@@ -19,6 +19,15 @@
       - "fs.write:**/../**"
   reason: "path contains '..'; canonicalise in the agent, do not rely on string prefixes"
 
+- name: deny-unsafe-apply-patch-payload
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.patch.unparsed"
+      - "fs.patch.overflow"
+      - "fs.patch.absolute"
+  reason: "Codex apply_patch payload was unparsed, too large, or used absolute paths; split or normalize before trusting it"
+
 - name: no-writes-to-build-artifacts
   decision: gommage
   match:

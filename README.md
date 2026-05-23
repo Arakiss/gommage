@@ -88,13 +88,14 @@ Gommage takes a narrow stance:
 **Current public release channel: beta (`gommage-cli-v*-beta.*`).** Usable with
 **Claude Code** (Bash, filesystem, search, web, and Claude-style MCP tool names
 through the bundled mappers) and **OpenAI Codex CLI** (the current Gommage
-quickstart installs a Bash-scoped Codex hook). Codex upstream widened its hook
-surface in `rust-v0.124.0` to include `apply_patch`, MCP tools, and long-running
-Bash sessions; Gommage's default Codex wiring and stdlib have not caught up to
-that wider surface yet. This is not production-ready; the next iterations are
-focused on launch-readiness smoke tests, policy regression fixtures, crates.io
-publishing gates, policy import fidelity, Codex hook-surface catch-up, mapper
-coverage, and clearer harness-stack integrations. See [ROADMAP](#roadmap).
+quickstart installs a Codex `PreToolUse` matcher for Bash, `apply_patch`, and
+Codex MCP tool names). Codex upstream still has hook-boundary details that
+matter: not every shell path is intercepted yet, and WebSearch / other
+non-shell, non-MCP tools remain outside Gommage's default Codex surface. This
+is not production-ready; the next iterations are focused on launch-readiness
+smoke tests, policy regression fixtures, crates.io publishing gates, policy
+import fidelity, deeper host-smoke evidence, mapper coverage, and clearer
+harness-stack integrations. See [ROADMAP](#roadmap).
 
 The prerelease distribution has two install surfaces:
 
@@ -547,9 +548,9 @@ gommage expedition start "refactor-auth-middleware"
 # CI or image builds can generate service files without starting them.
 gommage quickstart --agent claude --daemon-no-start --self-test
 
-# Add Codex too. Gommage's default Codex integration is currently Bash-scoped,
-# even though newer Codex releases expose more hook events upstream.
-# Keep Codex sandbox enabled for file and MCP boundaries.
+# Add Codex too. Gommage's default Codex integration maps Bash,
+# apply_patch file paths, and Codex MCP tool names when Codex emits hooks.
+# Keep Codex sandbox enabled for surfaces outside mapped hook events.
 gommage agent install codex
 
 # Diagnose the local installation
@@ -788,9 +789,10 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
 **Current beta line** — signed release-installer line
 - Daemon + CLI + PreToolUse hook adapter
 - Supported agents: **Claude Code** (Bash, filesystem, search, web, and
-  Claude-style MCP tool names), **OpenAI Codex CLI** (Gommage's default
-  quickstart is Bash-scoped; Codex upstream 0.124+ exposes additional hook
-  events that still need Gommage mapper/wiring catch-up)
+  Claude-style MCP tool names), **OpenAI Codex CLI** (Bash, `apply_patch`
+  file paths, and Codex MCP tool names through the default hook matcher;
+  incomplete shell interception and non-shell/non-MCP tools remain native Codex
+  boundaries)
 - YAML policy + capability mappers for Bash, filesystem tools, Grep, WebFetch,
   WebSearch, Claude-style and gateway MCP tool names, git, cloud CLIs, package
   managers, Vercel, Bun, and Docker
@@ -829,9 +831,9 @@ GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent co
 - Policy suggestions for the policy-authoring loop
 - crates.io publishing for Rust-native `cargo install gommage-cli`
 - Rego policies via `regorus`
-- Broader Codex coverage for Codex 0.124+ hook events (`apply_patch`, MCP tools,
-  and long-running Bash sessions) once Gommage ships default mapper and
-  quickstart support for that wider upstream surface
+- Broader Codex coverage for incomplete shell interception and any future
+  hook-exposed tool families once Gommage has payload captures, mapper
+  fixtures, and host-smoke evidence
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
 - Broader MCP gateway hardening for agents without a PreToolUse concept
 - Community policy packs in `gommage-policies/`

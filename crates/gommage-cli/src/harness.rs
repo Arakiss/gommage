@@ -255,9 +255,9 @@ fn build_agent_harness_report(agent: AgentKind, layout: &HomeLayout) -> Result<H
                 },
                 coverage: codex_coverage(),
                 guidance: vec![
-                    "quickstart enables Codex hooks and installs Gommage's Bash-scoped matcher by default.".to_string(),
-                    format!("Codex sandbox remains authoritative for file/MCP boundaries; current sandbox_mode is {sandbox_mode}."),
-                    "Do not assume Codex apply_patch or MCP hook events are covered until local mappers and fixtures prove it.".to_string(),
+                    "quickstart enables Codex hooks and installs Gommage's Bash/apply_patch/MCP matcher by default.".to_string(),
+                    format!("Codex sandbox remains authoritative outside mapped hook events; current sandbox_mode is {sandbox_mode}."),
+                    "Codex hooks still do not intercept every shell path or non-shell, non-MCP tool call.".to_string(),
                 ],
                 status_report: status_report_json,
             })
@@ -332,22 +332,22 @@ fn codex_coverage() -> Vec<CoverageSurface> {
         CoverageSurface {
             surface: "bash",
             default_coverage: "mapped",
-            boundary: "Gommage quickstart installs a Bash matcher for Codex",
+            boundary: "Gommage quickstart installs a Bash matcher for Codex hook events",
         },
         CoverageSurface {
             surface: "apply_patch",
-            default_coverage: "not default-wired",
-            boundary: "Codex 0.124+ can emit hook events, but Gommage needs local mapper coverage today",
+            default_coverage: "mapped",
+            boundary: "Codex apply_patch hook payloads are mapped to parsed filesystem write paths and fail closed when unparsed",
         },
         CoverageSurface {
             surface: "mcp",
-            default_coverage: "gateway or custom mapper only",
-            boundary: "use gommage-mcp --gateway for intentionally wrapped stdio MCP servers",
+            default_coverage: "mapped when Codex emits mcp__server__tool names",
+            boundary: "use gommage-mcp --gateway for intentionally wrapped stdio MCP servers when native hooks are not enough",
         },
         CoverageSurface {
             surface: "filesystem",
             default_coverage: "sandbox boundary",
-            boundary: "Codex sandbox remains authoritative for file access outside mapped hooks",
+            boundary: "Codex sandbox remains authoritative for file access outside mapped hook events",
         },
     ]
 }

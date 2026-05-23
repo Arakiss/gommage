@@ -310,7 +310,7 @@ fn build_codex_status_report() -> AgentStatusReport {
         Some("danger-full-access") => report.push(
             "sandbox",
             AgentStatus::Warn,
-            "Codex sandbox_mode is danger-full-access; Gommage's default Codex integration is Bash-scoped, so sandboxing remains the file/MCP boundary",
+            "Codex sandbox_mode is danger-full-access; Gommage governs matched hook events only, so sandboxing remains the boundary for other Codex tool paths",
             Some(serde_json::json!({
                 "path": path_display(&config_path),
                 "sandbox_mode": sandbox_mode,

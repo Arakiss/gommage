@@ -695,6 +695,22 @@ fn quickstart_dry_run_json_reports_codex_hook_coexistence() {
     );
     assert_eq!(
         report
+            .pointer("/agent_integrations/0/hook/matcher")
+            .and_then(|value| value.as_str()),
+        Some("^Bash$|^apply_patch$|^mcp__.*$")
+    );
+    let coverage = report
+        .pointer("/explanation/agent_guidance/0/default_coverage")
+        .and_then(|value| value.as_array())
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(coverage.contains(&"Bash"));
+    assert!(coverage.contains(&"apply_patch"));
+    assert!(coverage.contains(&"MCP tool names"));
+    assert_eq!(
+        report
             .pointer("/agent_integrations/0/hook/existing_hook_group_count")
             .and_then(|value| value.as_u64()),
         Some(2)

@@ -37,6 +37,13 @@ cases:
     expect:
       decision: allow
       matched_rule: allow-feature-push
+  - name: deny_unparsed_apply_patch
+    tool: apply_patch
+    input:
+      __gommage_patch_unparsed: true
+    expect:
+      decision: gommage
+      matched_rule: deny-unsafe-apply-patch-payload
 "#,
     )
     .unwrap();

@@ -298,6 +298,84 @@ fn map_json_reports_capabilities_without_policy_files() {
 }
 
 #[test]
+fn map_hook_json_reports_codex_apply_patch_and_mcp_capabilities() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let mut child = gommage(&home)
+        .args(["map", "--json", "--hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","cwd":"/tmp/proj","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch\n*** Update File: src/lib.rs\n*** Add File: docs/new.md\n*** End Patch\n"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let capabilities = report
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"fs.write:/tmp/proj/src/lib.rs"));
+    assert!(capabilities.contains(&"fs.write:/tmp/proj/docs/new.md"));
+
+    let mut child = gommage(&home)
+        .args(["map", "--json", "--hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            br#"{"hook_event_name":"PreToolUse","cwd":"/tmp/proj","tool_name":"mcp__github__create_issue","tool_input":{"title":"smoke"}}"#,
+        )
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let capabilities = report
+        .get("capabilities")
+        .and_then(|value| value.as_array())
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"mcp.write:mcp__github__create_issue"));
+    assert!(capabilities.contains(&"mcp.call:mcp__github__create_issue"));
+}
+
+#[test]
 fn decide_suggests_hook_flag_for_pre_tool_use_payload() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

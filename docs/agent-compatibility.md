@@ -112,26 +112,28 @@ There are two separate facts to keep straight:
    [openai/codex#16732](https://github.com/openai/codex/issues/16732), were
    effectively Bash-only for this use case.
 2. **Gommage beta default wiring.** `gommage quickstart --agent codex`
-   currently installs a `Bash` matcher and the bundled stdlib maps Bash
-   commands. Gommage has not yet shipped default Codex `apply_patch` or Codex
-   MCP mappers.
+   installs a matcher for `Bash`, `apply_patch`, and `mcp__.*` tool names. The
+   bundled stdlib maps Bash commands, parsed `apply_patch` file paths, and
+   Codex MCP tool names. `apply_patch` payloads fail closed when the patch file
+   list cannot be parsed safely.
 
 | Tool | Upstream Codex 0.124+ hook surface | Gommage quickstart default | Capability produced today |
 |---|---|---|---|
 | `Bash` | yes | yes | same as Claude Code's Bash mapping |
 | long-running Bash session | yes | partially, through Bash hook payloads Gommage receives | same as Bash when emitted as `Bash` |
-| `apply_patch` | yes | no default matcher/mapper yet | none unless the operator adds local mapper + hook coverage |
-| Codex MCP tools | yes | no default matcher/mapper yet | none unless routed through `gommage-mcp --gateway` or custom mapper + hook coverage |
+| `apply_patch` | yes | yes | `fs.write:<parsed path>` for up to 16 parsed patch paths; unsafe/unparsed payloads emit fail-closed patch capabilities |
+| Codex MCP tools | yes | yes when emitted as `mcp__server__tool` | same `mcp.read`, `mcp.write`, and `mcp.call` mapping used for Claude-style MCP names |
 | built-in read-only file inspection | not claimed by Gommage | no | none |
 
 ### Bypasses Gommage under Codex
 
 - Any Codex tool call that is not matched by the installed Gommage hook group.
-  In the current beta quickstart, that means non-Bash Codex hook events.
+  In the current beta quickstart, the intended matcher covers Bash,
+  `apply_patch`, and Codex MCP names.
 - Built-in file reads or other internal Codex tools for which no upstream hook
   payload is emitted or no Gommage mapper exists.
-- Codex MCP calls unless they are routed through `gommage-mcp --gateway` or the
-  operator intentionally wires and tests Codex MCP hook coverage.
+- WebSearch and other non-shell, non-MCP tool calls outside Codex hook
+  coverage.
 - Any action the approval policy auto-approves or blocks before the Gommage hook
   path receives a call.
 
@@ -181,11 +183,10 @@ See [`examples/codex-setup.md`](../examples/codex-setup.md).
 approval policy into Gommage YAML. Those native controls remain authoritative
 for surfaces outside Gommage's installed matcher and mapper coverage.
 
-Because upstream Codex now supports more hook events than Gommage's default
-Codex integration wires, do not widen the matcher by hand and assume security
-coverage. If you experiment with `apply_patch` or MCP hook matching, add local
-capability mappers, capture real payloads with `gommage map --json --hook`, and
-commit policy fixtures before trusting the result.
+For custom Codex tools or newly hook-exposed payload shapes, do not widen the
+matcher by hand and assume security coverage. Capture real payloads with
+`gommage map --json --hook`, add local capability mappers, and commit policy
+fixtures before trusting the result.
 
 Verify the host wiring after quickstart with:
 
@@ -195,8 +196,7 @@ gommage agent status codex --json
 
 This checks `hooks.json`, `config.toml`, `features.hooks`, the installed
 `PreToolUse` hook group, and warns when `sandbox_mode = "danger-full-access"`
-because Gommage's current default Codex integration is still Bash-scoped and
-Codex's sandbox remains the file/MCP safety boundary.
+because Codex's sandbox remains the authority outside mapped hook events.
 
 Older Codex configs may still contain the legacy `features.codex_hooks` flag.
 Gommage reports that as a migration warning and rewrites the canonical

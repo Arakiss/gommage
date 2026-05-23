@@ -85,11 +85,10 @@ Treat these as beta blockers:
 
 These can remain open for beta if they are clearly documented:
 
-- Gommage's default Codex integration is Bash-scoped even though upstream Codex
-  0.124+ can emit hooks for `apply_patch`, MCP tools, and long-running Bash
-  sessions. Wider Codex coverage can remain non-blocking only if the docs,
-  agent status wording, and roadmap say this is a Gommage integration gap, not
-  an upstream limitation.
+- Codex hook coverage remains narrower than Codex execution. The default
+  Gommage Codex matcher covers Bash, `apply_patch`, and MCP tool names, but
+  incomplete shell interception and non-shell/non-MCP tools remain native Codex
+  boundaries and must stay documented.
 - Cursor remains evaluation-only because its hook timing differs from Claude
   Code and Codex.
 - crates.io may remain unpublished while GitHub Releases are the supported

@@ -45,6 +45,8 @@ struct HookInput {
     tool_input: serde_json::Value,
 }
 
+const MAX_APPLY_PATCH_PATHS: usize = 16;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match parse_args()? {
@@ -503,6 +505,7 @@ fn enrich_tool_input(tool: &str, mut input: Value, cwd: Option<&str>) -> Value {
     };
 
     match tool {
+        "apply_patch" => enrich_apply_patch_input(map, cwd),
         "Grep" => {
             let base = map
                 .get("path")
@@ -528,6 +531,56 @@ fn enrich_tool_input(tool: &str, mut input: Value, cwd: Option<&str>) -> Value {
     }
 
     input
+}
+
+fn enrich_apply_patch_input(map: &mut serde_json::Map<String, Value>, cwd: &str) {
+    map.retain(|key, _| !key.starts_with("__gommage_patch_"));
+
+    let Some(command) = map.get("command").and_then(Value::as_str) else {
+        map.insert("__gommage_patch_unparsed".to_string(), Value::Bool(true));
+        return;
+    };
+
+    let paths = apply_patch_paths(command);
+    if paths.is_empty() {
+        map.insert("__gommage_patch_unparsed".to_string(), Value::Bool(true));
+        return;
+    }
+    if paths.len() > MAX_APPLY_PATCH_PATHS {
+        map.insert("__gommage_patch_overflow".to_string(), Value::Bool(true));
+        return;
+    }
+
+    for (index, path) in paths.iter().enumerate() {
+        if path.starts_with('/') {
+            map.insert("__gommage_patch_absolute".to_string(), Value::Bool(true));
+        }
+        map.insert(
+            format!("__gommage_patch_path_{index}"),
+            Value::String(resolve_hook_path(cwd, path)),
+        );
+    }
+}
+
+fn apply_patch_paths(command: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in command.lines() {
+        for prefix in [
+            "*** Add File: ",
+            "*** Update File: ",
+            "*** Delete File: ",
+            "*** Move to: ",
+        ] {
+            let Some(path) = line.strip_prefix(prefix) else {
+                continue;
+            };
+            let path = path.trim();
+            if !path.is_empty() && !paths.iter().any(|existing| existing == path) {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    paths
 }
 
 fn resolve_hook_path(base: &str, path: &str) -> String {
@@ -789,5 +842,24 @@ mod tests {
             Some("/tmp/proj"),
         );
         assert_eq!(input["__gommage_path"], "/already");
+    }
+
+    #[test]
+    fn enriches_apply_patch_with_resolved_patch_paths() {
+        let input = enrich_tool_input(
+            "apply_patch",
+            json!({
+                "command": "*** Begin Patch\n*** Update File: src/lib.rs\n*** Delete File: old.rs\n*** End Patch\n"
+            }),
+            Some("/tmp/proj"),
+        );
+        assert_eq!(input["__gommage_patch_path_0"], "/tmp/proj/src/lib.rs");
+        assert_eq!(input["__gommage_patch_path_1"], "/tmp/proj/old.rs");
+    }
+
+    #[test]
+    fn enriches_apply_patch_unparsed_when_command_is_missing() {
+        let input = enrich_tool_input("apply_patch", json!({}), Some("/tmp/proj"));
+        assert_eq!(input["__gommage_patch_unparsed"], true);
     }
 }

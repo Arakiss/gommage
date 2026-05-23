@@ -95,6 +95,8 @@ fn harness_explain_prints_agent_context_markdown() {
     assert!(stdout.contains("# Gommage Local Integration Context"));
     assert!(stdout.contains("Codex sandbox remains authoritative"));
     assert!(stdout.contains("apply_patch"));
+    assert!(stdout.contains("mapped"));
+    assert!(!stdout.contains("not default-wired"));
 }
 
 #[test]

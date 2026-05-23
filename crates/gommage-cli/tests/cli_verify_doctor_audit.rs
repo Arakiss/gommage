@@ -164,7 +164,7 @@ fn verify_json_accepts_public_fixture_library() {
         report
             .pointer("/policy_tests/0/report/summary/passed")
             .and_then(|value| value.as_u64()),
-        Some(7)
+        Some(8)
     );
 }
 
