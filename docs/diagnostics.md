@@ -165,10 +165,9 @@ imports, and generated allow imports. Codex checks cover `hooks.json`,
 configured sandbox mode. A missing hook or disabled hook feature is `fail`; a
 legacy-only `features.codex_hooks` setting is `warn` and should be migrated by
 rerunning `gommage agent install codex`. A dangerous Codex sandbox is `warn`
-because Gommage's current default Codex integration is Bash-scoped even though
-modern Codex releases expose additional hook events upstream. Legacy Gommage
-hook commands and global or missing matchers are `warn`; inspect the repair
-plan before mutating:
+because Gommage governs matched hook events only; Codex's sandbox remains the
+boundary for other tool paths. Legacy Gommage hook commands and global or
+missing matchers are `warn`; inspect the repair plan before mutating:
 
 ```sh
 gommage repair agent claude --dry-run

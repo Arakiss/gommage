@@ -195,7 +195,7 @@ fn beta_check_accepts_public_fixture_library() {
             && check["message"]
                 .as_str()
                 .unwrap()
-                .contains("7 passed, 0 failed")
+                .contains("8 passed, 0 failed")
     }));
 }
 

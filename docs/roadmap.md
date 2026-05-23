@@ -178,11 +178,12 @@ Features:
   - Initial stdio gateway exists in `gommage-mcp --gateway`; remaining work is
     broader transport hardening and host integration docs.
 - Codex hook-surface catch-up
-  - Codex 0.124+ can emit hooks for `apply_patch`, MCP tools, and long-running
-    Bash sessions, but Gommage's default Codex quickstart still installs a
-    Bash-scoped matcher.
-  - Ship widened Codex matcher support only with real payload captures,
-    capability mappers, policy fixtures, and host-smoke evidence.
+  - Current default Codex quickstart maps Bash, parsed `apply_patch` file
+    paths, and `mcp__server__tool` names when Codex emits those hook events.
+  - Remaining work is host-smoke evidence for the widened default path,
+    incomplete shell interception tracking, and future hook-exposed tool
+    families with real payload captures, capability mappers, and policy
+    fixtures.
 - Project-local harness mode
   - `gommage project init` creates reviewed fixtures and project policy that can
     be layered with user policy.

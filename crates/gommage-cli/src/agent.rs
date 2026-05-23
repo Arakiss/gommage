@@ -10,6 +10,8 @@ use gommage_core::runtime::HomeLayout;
 use serde::Serialize;
 use std::{path::Path, process::ExitCode};
 
+pub(crate) const CODEX_GOMMAGE_MATCHER: &str = "^Bash$|^apply_patch$|^mcp__.*$";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
@@ -170,7 +172,7 @@ fn install_codex(
 ) -> Result<()> {
     let mut hooks = read_json_object(hooks_path)?;
     let group = serde_json::json!({
-        "matcher": "Bash",
+        "matcher": CODEX_GOMMAGE_MATCHER,
         "hooks": [
             {
                 "type": "command",
@@ -198,7 +200,7 @@ fn install_codex(
     );
     if sandbox_mode.as_deref() == Some("danger-full-access") {
         println!(
-            "warn codex: sandbox_mode is danger-full-access; Gommage's default Codex integration governs Bash only, so keep Codex sandboxing enabled for file/MCP boundaries"
+            "warn codex: sandbox_mode is danger-full-access; Gommage's default Codex integration governs supported hook events only, so keep Codex sandboxing enabled for other tool boundaries"
         );
     }
     println!(

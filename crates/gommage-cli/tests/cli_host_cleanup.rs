@@ -794,6 +794,10 @@ fn agent_install_codex_preserves_unrelated_hooks_by_default() {
             .iter()
             .any(|entry| hook_group_contains_command(entry, "gommage-mcp"))
     );
+    assert!(pre_tool_use.iter().any(|entry| {
+        entry.get("matcher").and_then(|v| v.as_str()) == Some("^Bash$|^apply_patch$|^mcp__.*$")
+            && hook_group_contains_command(entry, "gommage-mcp")
+    }));
     assert!(
         !pre_tool_use
             .iter()

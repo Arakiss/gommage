@@ -71,8 +71,8 @@ sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-beta.1> --json --require-
 
 - Do not call it a sandbox.
 - Do not claim universal MCP coverage.
-- Do not say Codex `apply_patch` is covered by default until matcher, mapper,
-  fixture, and host-smoke support land.
+- Do not imply Codex hooks cover every shell path, WebSearch, built-in
+  non-shell/non-MCP tools, or MCP servers that never emit a matched hook event.
 - Do not imply existing hooks are removed automatically.
 - Do not imply `state.sqlite` is a permission source.
 - Do not claim crates.io install support until the publish gate passes.

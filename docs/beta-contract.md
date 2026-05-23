@@ -50,9 +50,9 @@ Beta does not claim:
 - universal interception of every agent action;
 - replacement of Claude Code, Codex, or OS-native security controls;
 - automatic coverage for every MCP server on the machine;
-- default Codex coverage for `apply_patch` or Codex MCP hook events until
-  Gommage ships matcher, mapper, fixture, and host-smoke support for that
-  wider surface;
+- default Codex coverage for non-shell/non-MCP tools or shell paths that Codex
+  hooks do not emit; the current default Codex surface is Bash, `apply_patch`,
+  and Codex MCP tool names when those hook events reach Gommage;
 - production security certification;
 - crates.io installation unless the publish gate has passed.
 

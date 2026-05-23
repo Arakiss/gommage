@@ -108,15 +108,18 @@ Primary sources checked:
 
 Priority order:
 
-1. **Fix Codex hook feature config.** Write `features.hooks = true`, keep
-   status/uninstall compatibility for legacy `features.codex_hooks`, and update
-   docs.
+1. **Keep Codex hook feature config current.** Write `features.hooks = true`,
+   keep status/uninstall compatibility for legacy `features.codex_hooks`, and
+   update docs when Codex changes the hook contract.
 2. **Build a real hook payload capture matrix.** Capture Codex and Claude Code
-   payloads for every event before widening Gommage claims.
-3. **Codex `apply_patch` support.** Add matcher coverage, mapper rules, policy
-   fixtures, and host smoke evidence before making it default.
-4. **Codex MCP hook support.** Either map Codex MCP hook payloads directly or
-   keep recommending `gommage-mcp --gateway` until direct coverage has fixtures.
+   payloads for every event before widening Gommage claims beyond the current
+   Bash / `apply_patch` / MCP Codex default.
+3. **Codex `apply_patch` support.** Default matcher, mapper rules, and policy
+   fixtures exist; remaining work is host smoke evidence against real Codex
+   sessions and deeper payload-shape captures.
+4. **Codex MCP hook support.** Default `mcp__server__tool` mapping exists;
+   keep `gommage-mcp --gateway` documented for deliberately wrapped stdio MCP
+   servers and for hosts whose native hooks are insufficient.
 5. **Codex `PermissionRequest` integration.** Explore using Gommage policy and
    active pictos to deny or allow eligible approval requests. Do not auto-allow
    broad approvals until the policy semantics are explicit.

@@ -29,6 +29,101 @@
   emit:
     - "fs.write:${input.notebook_path}"
 
+- name: codex-apply-patch-path-0
+  tool: apply_patch
+  match_input: { __gommage_patch_path_0: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_0}"]
+
+- name: codex-apply-patch-path-1
+  tool: apply_patch
+  match_input: { __gommage_patch_path_1: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_1}"]
+
+- name: codex-apply-patch-path-2
+  tool: apply_patch
+  match_input: { __gommage_patch_path_2: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_2}"]
+
+- name: codex-apply-patch-path-3
+  tool: apply_patch
+  match_input: { __gommage_patch_path_3: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_3}"]
+
+- name: codex-apply-patch-path-4
+  tool: apply_patch
+  match_input: { __gommage_patch_path_4: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_4}"]
+
+- name: codex-apply-patch-path-5
+  tool: apply_patch
+  match_input: { __gommage_patch_path_5: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_5}"]
+
+- name: codex-apply-patch-path-6
+  tool: apply_patch
+  match_input: { __gommage_patch_path_6: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_6}"]
+
+- name: codex-apply-patch-path-7
+  tool: apply_patch
+  match_input: { __gommage_patch_path_7: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_7}"]
+
+- name: codex-apply-patch-path-8
+  tool: apply_patch
+  match_input: { __gommage_patch_path_8: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_8}"]
+
+- name: codex-apply-patch-path-9
+  tool: apply_patch
+  match_input: { __gommage_patch_path_9: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_9}"]
+
+- name: codex-apply-patch-path-10
+  tool: apply_patch
+  match_input: { __gommage_patch_path_10: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_10}"]
+
+- name: codex-apply-patch-path-11
+  tool: apply_patch
+  match_input: { __gommage_patch_path_11: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_11}"]
+
+- name: codex-apply-patch-path-12
+  tool: apply_patch
+  match_input: { __gommage_patch_path_12: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_12}"]
+
+- name: codex-apply-patch-path-13
+  tool: apply_patch
+  match_input: { __gommage_patch_path_13: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_13}"]
+
+- name: codex-apply-patch-path-14
+  tool: apply_patch
+  match_input: { __gommage_patch_path_14: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_14}"]
+
+- name: codex-apply-patch-path-15
+  tool: apply_patch
+  match_input: { __gommage_patch_path_15: ".+" }
+  emit: ["fs.write:${input.__gommage_patch_path_15}"]
+
+- name: codex-apply-patch-unparsed
+  tool: apply_patch
+  match_input: { __gommage_patch_unparsed: "true" }
+  emit: ["fs.patch.unparsed"]
+
+- name: codex-apply-patch-overflow
+  tool: apply_patch
+  match_input: { __gommage_patch_overflow: "true" }
+  emit: ["fs.patch.overflow"]
+
+- name: codex-apply-patch-absolute
+  tool: apply_patch
+  match_input: { __gommage_patch_absolute: "true" }
+  emit: ["fs.patch.absolute"]
+
 - name: fs-glob
   tool: Glob
   emit:

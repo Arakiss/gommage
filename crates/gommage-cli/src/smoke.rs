@@ -227,6 +227,17 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             },
             expectation: SmokeExpectation::AskPicto { scope: "mcp.write" },
         },
+        SmokeFixture {
+            name: "deny_unparsed_apply_patch",
+            description: "unparsed Codex apply_patch payloads fail closed",
+            call: ToolCall {
+                tool: "apply_patch".to_string(),
+                input: serde_json::json!({ "__gommage_patch_unparsed": true }),
+            },
+            expectation: SmokeExpectation::Gommage {
+                hard_stop: Some(false),
+            },
+        },
     ]
 }
 

@@ -166,13 +166,11 @@ crates.io becomes a supported install path.
   are imported as late allow rules, so earlier hard-stops, denies, ask rules,
   and native deny imports still win. Use `--no-import-native-permissions` when
   the operator wants to author the initial Gommage policy manually.
-- Codex CLI: `quickstart --agent codex` enables hooks and installs a
-  Bash-scoped Gommage hook. Codex upstream 0.124+ can emit hooks for
-  `apply_patch`, MCP tools, and long-running Bash sessions, but Gommage's
-  default Codex matcher and bundled stdlib have not widened to that surface yet.
-  Keep Codex sandboxing enabled. Treat non-Bash Codex hook coverage as custom
-  local work until Gommage ships matcher, mapper, fixture, and host-smoke
-  support for it.
+- Codex CLI: `quickstart --agent codex` enables hooks and installs a Gommage
+  matcher for Bash, `apply_patch`, and Codex MCP tool names. `apply_patch`
+  payloads are mapped to parsed filesystem write paths and fail closed when
+  they cannot be parsed safely. Keep Codex sandboxing enabled because hooks do
+  not intercept every shell path or non-shell, non-MCP tool call.
 - Dual-agent flows: if Claude launches Codex via `tmux`, shell, or script,
   Gommage sees the outer Claude Bash call only. Inner Codex calls are governed
   only when the invoked Codex session uses a `CODEX_HOME` with Gommage's Codex

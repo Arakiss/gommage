@@ -6,8 +6,9 @@ use std::path::Path;
 
 use crate::{
     agent::{
-        AgentKind, claude_gommage_matcher, native_permission_rules, translate_claude_native_rules,
-        translate_claude_permission_allow, translate_claude_permission_deny,
+        AgentKind, CODEX_GOMMAGE_MATCHER, claude_gommage_matcher, native_permission_rules,
+        translate_claude_native_rules, translate_claude_permission_allow,
+        translate_claude_permission_deny,
     },
     daemon::{DaemonDryRunPlan, ServiceManager, daemon_dry_run_plan, resolve_service_manager},
     util::{env_path_or_home, path_display, read_json_object},
@@ -395,7 +396,7 @@ fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
         agent: AgentKind::Codex,
         config_paths: vec![path_display(&hooks_path), path_display(&config_path)],
         hook: hook_plan(
-            "Bash".to_string(),
+            CODEX_GOMMAGE_MATCHER.to_string(),
             "gommage-mcp",
             &hooks,
             "/PreToolUse",
@@ -651,18 +652,18 @@ fn agent_quickstart_guidance(
         },
         AgentKind::Codex => AgentQuickstartGuidance {
             agent,
-            posture: "enable Codex hooks, install Gommage Bash matcher, keep Codex sandboxing",
+            posture: "enable Codex hooks, install Gommage Codex matcher, keep Codex sandboxing",
             preserves_existing_hooks,
             imports_native_permissions: false,
-            default_coverage: vec!["Bash"],
+            default_coverage: vec!["Bash", "apply_patch", "MCP tool names"],
             boundaries: vec![
-                "Gommage's default Codex integration is Bash-scoped today",
-                "Codex 0.124+ can emit apply_patch and MCP hook events, but Gommage defaults do not map them yet",
-                "Codex sandbox remains the file/MCP boundary outside mapped hooks",
+                "Codex hooks do not intercept every shell or non-shell tool path",
+                "apply_patch payloads fail closed when the patch file list cannot be parsed safely",
+                "Codex sandbox remains the file boundary outside mapped hooks",
             ],
             operator_notes: vec![
-                "do not widen Codex matchers without real payload captures, local mappers, and policy fixtures".to_string(),
-                "use gommage-mcp --gateway only for stdio MCP servers intentionally wrapped by the operator".to_string(),
+                "keep Codex native sandboxing and hook trust enabled; Gommage is a policy decision layer, not OS confinement".to_string(),
+                "use gommage-mcp --gateway when an operator intentionally wants a stdio MCP proxy in addition to native Codex hooks".to_string(),
             ],
         },
     }
