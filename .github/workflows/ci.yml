@@ -155,6 +155,8 @@ jobs:
         run: sh scripts/sync-workspace-internal-deps.sh --check
       - name: Verify living docs avoid pinned release drift
         run: sh scripts/check-doc-release-refs.sh
+      - name: Verify local-only agent files are not tracked
+        run: sh scripts/check-local-agent-files.sh
       - name: Verify installer release resolution
         run: sh scripts/check-installer-release-resolution.sh
       - name: Verify stdlib root mirrors
