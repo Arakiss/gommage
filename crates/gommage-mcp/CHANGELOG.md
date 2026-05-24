@@ -1,5 +1,12 @@
 # Changelog — gommage-mcp
 
+## [0.7.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.6.1-alpha.1...gommage-mcp-v0.7.0-alpha.1) (2026-05-24)
+
+
+### Features
+
+* expand Codex hook coverage ([720b1ba](https://github.com/Arakiss/gommage/commit/720b1ba0250fa654d6febdca56ff00653517e80b))
+
 ## [0.6.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.6.0-alpha.1...gommage-mcp-v0.6.1-alpha.1) (2026-05-07)
 
 ## [0.6.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.5.1-alpha.1...gommage-mcp-v0.6.0-alpha.1) (2026-04-24)

@@ -1,5 +1,7 @@
 # Changelog — gommage-daemon
 
+## [0.5.4-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.5.3-alpha.1...gommage-daemon-v0.5.4-alpha.1) (2026-05-24)
+
 ## [0.5.3-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.5.2-alpha.1...gommage-daemon-v0.5.3-alpha.1) (2026-05-07)
 
 ## [0.5.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.5.1-alpha.1...gommage-daemon-v0.5.2-alpha.1) (2026-04-24)
