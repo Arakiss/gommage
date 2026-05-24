@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.38.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.37.0-beta.1...gommage-cli-v0.38.0-beta.1) (2026-05-24)
+
+
+### Features
+
+* verify full release asset matrix ([cb2ae74](https://github.com/Arakiss/gommage/commit/cb2ae74ebd3bd6ae3ce27c299fde4549b2b88f5d))
+
 ## [0.37.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.36.0-beta.1...gommage-cli-v0.37.0-beta.1) (2026-05-24)
 
 
