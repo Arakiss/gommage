@@ -52,7 +52,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check                       # requires `cargo install cargo-deny`
 cargo semver-checks check-release -p gommage-core   # requires `cargo install cargo-semver-checks`
+GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write
 ```
+
+The Promptfoo suite is intentionally small and app-backed: it runs the local CLI
+against isolated temp homes to check agent-facing contracts that are easy to
+regress in docs or harness output.
 
 ## Style
 
