@@ -17,9 +17,10 @@ gommage --version
 gommage-mcp --version
 gommage-daemon --version
 gommage update
-gommage release verify --json
+gommage release verify --json --require-sbom --require-provenance
+gommage release verify --all-assets --json --require-sbom --require-provenance
 # From a checkout used to collect release evidence.
-sh scripts/verify-release.sh --json
+sh scripts/verify-release.sh --json --require-sbom --require-provenance
 ```
 
 Evidence to save:
@@ -27,7 +28,8 @@ Evidence to save:
 - installer output showing Sigstore and checksum verification
 - update output showing whether the installed binary matches the latest
   installable release
-- release verification JSON showing checksum, Sigstore, SBOM, and provenance status
+- release verification JSON showing checksum, Sigstore, SBOM, and provenance
+  status for the current platform and the full supported platform matrix
 - versions for all three binaries
 - any OS-specific cosign hint if verification cannot run
 

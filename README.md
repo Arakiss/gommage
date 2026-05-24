@@ -782,7 +782,8 @@ required before public beta or launch announcements. See
 execution order.
 
 ```sh
-sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-beta.N> --json
+sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-beta.N> --json --require-sbom
+gommage release verify --tag <gommage-cli-vX.Y.Z-beta.N> --all-assets --json --require-sbom --require-provenance
 gommage release verify --tag <gommage-cli-vX.Y.Z-beta.N> --json
 sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-beta.N> --json
 sh scripts/launch-demo.sh

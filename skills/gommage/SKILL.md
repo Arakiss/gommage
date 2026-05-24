@@ -245,7 +245,7 @@ Current beta distribution:
   gateway. Agent hooks invoke it after `quickstart`; gateway mode remains
   explicit per stdio MCP server with `gommage-mcp --gateway --server-name
   <name> -- <stdio-mcp-server>`.
-- Use `gommage release verify --json` for operator release evidence; from a checkout, `sh scripts/verify-release.sh --json` provides the same scriptable check. Use `--require-sbom --require-provenance` for beta/package-manager gates.
+- Use `gommage release verify --all-assets --json --require-sbom --require-provenance` for full beta/RC release evidence. For current-platform checks, use `gommage release verify --json --require-sbom --require-provenance`; from a checkout, `sh scripts/verify-release.sh --json --require-sbom --require-provenance` provides the shell fallback.
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.
 - crates.io is not the supported install path yet.

@@ -39,8 +39,8 @@ issue:
 |---|---|
 | Installer | Fresh temp-home install from the latest `gommage-cli-v*` release. |
 | Update path | `gommage update --json` reports the current and latest installable release, and `gommage upgrade --dry-run` prints the verified installer command without mutating files. |
-| Release assets | Required CLI release assets: 4 archives, 4 checksums, 4 Sigstore bundles, plus CycloneDX SBOM for current release-line builds. |
-| Release verification | `gommage release verify --json` or `scripts/verify-release.sh --json` passes for the current platform; package-manager/beta gates use `--require-sbom --require-provenance`. |
+| Release assets | `scripts/check-release-assets.sh --json --require-sbom` reports 4 archives, 4 checksums, 4 Sigstore bundles, and a CycloneDX SBOM for current release-line builds. |
+| Release verification | `gommage release verify --all-assets --json --require-sbom --require-provenance` passes for the current release line; `scripts/verify-release.sh --json --require-sbom --require-provenance` remains the current-platform shell fallback. |
 | Binary introspection | `gommage`, `gommage-daemon`, and `gommage-mcp` all support `--version`. |
 | Home setup | `gommage init` and `gommage policy init --stdlib` succeed in a clean home. |
 | Beta gate | `gommage beta check --json --policy-test examples/policy-fixtures.yaml` exits with `pass` or documented `warn` and includes actionable `next` entries. |
@@ -105,9 +105,11 @@ evidence. The default mode runs against a temporary `HOME`, applies quickstart
 without starting the daemon, captures `verify`, selected-agent `beta check`,
 `agent status`, repair dry-runs, bounded TUI snapshots/watch/stream, semantic
 smoke, the redacted report bundle, and an uninstall dry-run rollback plan.
-Use `scripts/check-release-assets.sh --json`, `gommage release verify --json`,
-and `scripts/verify-release.sh --json` to collect the release artifact
-inventory and platform verification evidence for the same tracking issue.
+Use `scripts/check-release-assets.sh --json --require-sbom`,
+`gommage release verify --all-assets --json --require-sbom --require-provenance`,
+and `scripts/verify-release.sh --json --require-sbom --require-provenance` to
+collect the release artifact inventory, full release-matrix verification, and
+current-platform shell fallback evidence for the same tracking issue.
 When agent-facing behavior changes, also run the Promptfoo eval suite in
 `evals/promptfooconfig.yaml`; it exercises the CLI path through an isolated home
 instead of calling raw prompts or mocks.

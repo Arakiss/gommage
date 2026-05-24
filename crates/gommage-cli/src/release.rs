@@ -8,6 +8,13 @@ use std::{
 
 use crate::util::path_display;
 
+const PLATFORM_ASSETS: &[&str] = &[
+    "gommage-aarch64-darwin.tar.gz",
+    "gommage-aarch64-linux.tar.gz",
+    "gommage-x86_64-darwin.tar.gz",
+    "gommage-x86_64-linux.tar.gz",
+];
+
 #[derive(Subcommand)]
 pub(crate) enum ReleaseCmd {
     /// Verify an installable GitHub Release archive.
@@ -25,6 +32,9 @@ pub(crate) struct ReleaseVerifyOptions {
     /// Archive asset to verify. Defaults to the current OS/arch.
     #[arg(long, default_value = "auto")]
     asset: String,
+    /// Verify every supported platform archive in the release.
+    #[arg(long)]
+    all_assets: bool,
     /// Download assets into this directory instead of a temporary directory.
     #[arg(long)]
     dir: Option<PathBuf>,
@@ -57,63 +67,70 @@ fn cmd_release_verify(options: ReleaseVerifyOptions) -> Result<ExitCode> {
     };
 
     let tag = resolve_tag(&options.repo, &options.tag)?;
-    let asset = resolve_asset(&options.asset)?;
-    let download = DownloadDir::create(options.dir.as_ref())?;
     let asset_names = release_asset_names(&options.repo, &tag)?;
     let sbom_asset = format!("gommage-{tag}.cdx.json");
     let sbom_present = asset_names.iter().any(|name| name == &sbom_asset);
-
-    download_release_assets(&options.repo, &tag, &download.path, &asset)?;
-    if sbom_present {
-        download_release_asset(&options.repo, &tag, &download.path, &sbom_asset)?;
-    }
-
-    let checksum_status = if verify_checksum(checksum_tool, &download.path, &asset) {
-        CheckStatus::Pass
-    } else {
-        CheckStatus::Fail
-    };
     let identity = format!(
         "https://github.com/{}/.github/workflows/release.yml@refs/tags/{}",
         options.repo, tag
     );
-    let sigstore_status = if verify_sigstore(&download.path, &asset, &identity) {
-        CheckStatus::Pass
-    } else {
-        CheckStatus::Fail
-    };
-    let sbom_status = if sbom_present {
-        CheckStatus::Pass
-    } else {
-        CheckStatus::Missing
-    };
-    let provenance_status =
-        if verify_attestation(&options.repo, &tag, &download.path, &asset, &identity) {
-            CheckStatus::Pass
-        } else {
-            CheckStatus::Missing
-        };
 
-    let status = overall_status(
-        checksum_status,
-        sigstore_status,
-        sbom_status,
-        provenance_status,
-        options.require_sbom,
-        options.require_provenance,
-    );
+    if options.all_assets {
+        if options.asset != "auto" {
+            bail!("--asset cannot be combined with --all-assets");
+        }
+        let assets = PLATFORM_ASSETS
+            .iter()
+            .map(|asset| {
+                verify_release_asset(VerifyAssetInput {
+                    repo: &options.repo,
+                    tag: &tag,
+                    asset,
+                    asset_names: &asset_names,
+                    sbom_asset: &sbom_asset,
+                    sbom_present,
+                    identity: &identity,
+                    checksum_tool,
+                    dir: options.dir.as_ref(),
+                    require_sbom: options.require_sbom,
+                    require_provenance: options.require_provenance,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let report = ReleaseVerifyMatrixReport::new(options.repo, tag, identity, assets);
+        if options.json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            print_release_verify_matrix_report(&report);
+        }
+        return Ok(if report.status == ReleaseVerifyStatus::Fail {
+            ExitCode::from(1)
+        } else {
+            ExitCode::SUCCESS
+        });
+    }
+
+    let asset = resolve_asset(&options.asset)?;
+    let asset_report = verify_release_asset(VerifyAssetInput {
+        repo: &options.repo,
+        tag: &tag,
+        asset: &asset,
+        asset_names: &asset_names,
+        sbom_asset: &sbom_asset,
+        sbom_present,
+        identity: &identity,
+        checksum_tool,
+        dir: options.dir.as_ref(),
+        require_sbom: options.require_sbom,
+        require_provenance: options.require_provenance,
+    })?;
     let report = ReleaseVerifyReport {
-        status,
+        status: asset_report.status,
         repo: options.repo,
         tag,
-        asset,
-        download_dir: path_display(&download.path),
-        checks: ReleaseVerifyChecks {
-            sha256: checksum_status,
-            sigstore_bundle: sigstore_status,
-            cyclonedx_sbom: sbom_status,
-            github_artifact_attestation: provenance_status,
-        },
+        asset: asset_report.asset,
+        download_dir: asset_report.download_dir,
+        checks: asset_report.checks,
         expected_identity: identity,
     };
 
@@ -177,12 +194,72 @@ struct ReleaseVerifyReport {
     expected_identity: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct ReleaseVerifyChecks {
     sha256: CheckStatus,
     sigstore_bundle: CheckStatus,
     cyclonedx_sbom: CheckStatus,
     github_artifact_attestation: CheckStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ReleaseVerifyAssetReport {
+    status: ReleaseVerifyStatus,
+    asset: String,
+    download_dir: String,
+    checks: ReleaseVerifyChecks,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseVerifyMatrixReport {
+    status: ReleaseVerifyStatus,
+    repo: String,
+    tag: String,
+    summary: ReleaseVerifySummary,
+    assets: Vec<ReleaseVerifyAssetReport>,
+    expected_identity: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ReleaseVerifySummary {
+    assets: usize,
+    passed: usize,
+    warned: usize,
+    failed: usize,
+}
+
+impl ReleaseVerifyMatrixReport {
+    fn new(
+        repo: String,
+        tag: String,
+        expected_identity: String,
+        assets: Vec<ReleaseVerifyAssetReport>,
+    ) -> Self {
+        let summary = ReleaseVerifySummary {
+            assets: assets.len(),
+            passed: assets
+                .iter()
+                .filter(|asset| asset.status == ReleaseVerifyStatus::Pass)
+                .count(),
+            warned: assets
+                .iter()
+                .filter(|asset| asset.status == ReleaseVerifyStatus::Warn)
+                .count(),
+            failed: assets
+                .iter()
+                .filter(|asset| asset.status == ReleaseVerifyStatus::Fail)
+                .count(),
+        };
+        let status = matrix_status(&summary);
+        Self {
+            status,
+            repo,
+            tag,
+            summary,
+            assets,
+            expected_identity,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -229,6 +306,101 @@ impl Drop for DownloadDir {
     }
 }
 
+struct VerifyAssetInput<'a> {
+    repo: &'a str,
+    tag: &'a str,
+    asset: &'a str,
+    asset_names: &'a [String],
+    sbom_asset: &'a str,
+    sbom_present: bool,
+    identity: &'a str,
+    checksum_tool: ChecksumTool,
+    dir: Option<&'a PathBuf>,
+    require_sbom: bool,
+    require_provenance: bool,
+}
+
+fn verify_release_asset(input: VerifyAssetInput<'_>) -> Result<ReleaseVerifyAssetReport> {
+    let download = DownloadDir::create(input.dir)?;
+    let archive_present = has_release_asset(input.asset_names, input.asset);
+    let checksum_present = has_release_asset(input.asset_names, &format!("{}.sha256", input.asset));
+    let sigstore_present =
+        has_release_asset(input.asset_names, &format!("{}.sigstore.json", input.asset));
+    let downloadable = archive_present && checksum_present && sigstore_present;
+
+    let (checksum_status, sigstore_status, provenance_status) = if downloadable {
+        download_release_assets(input.repo, input.tag, &download.path, input.asset)?;
+        if input.sbom_present {
+            download_release_asset(input.repo, input.tag, &download.path, input.sbom_asset)?;
+        }
+        let checksum_status = if verify_checksum(input.checksum_tool, &download.path, input.asset) {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Fail
+        };
+        let sigstore_status = if verify_sigstore(&download.path, input.asset, input.identity) {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Fail
+        };
+        let provenance_status = if verify_attestation(
+            input.repo,
+            input.tag,
+            &download.path,
+            input.asset,
+            input.identity,
+        ) {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Missing
+        };
+        (checksum_status, sigstore_status, provenance_status)
+    } else {
+        (
+            if checksum_present {
+                CheckStatus::Fail
+            } else {
+                CheckStatus::Missing
+            },
+            if sigstore_present {
+                CheckStatus::Fail
+            } else {
+                CheckStatus::Missing
+            },
+            CheckStatus::Missing,
+        )
+    };
+    let sbom_status = if input.sbom_present {
+        CheckStatus::Pass
+    } else {
+        CheckStatus::Missing
+    };
+    let status = overall_status(
+        checksum_status,
+        sigstore_status,
+        sbom_status,
+        provenance_status,
+        input.require_sbom,
+        input.require_provenance,
+    );
+
+    Ok(ReleaseVerifyAssetReport {
+        status,
+        asset: input.asset.to_string(),
+        download_dir: path_display(&download.path),
+        checks: ReleaseVerifyChecks {
+            sha256: checksum_status,
+            sigstore_bundle: sigstore_status,
+            cyclonedx_sbom: sbom_status,
+            github_artifact_attestation: provenance_status,
+        },
+    })
+}
+
+fn has_release_asset(asset_names: &[String], expected: &str) -> bool {
+    asset_names.iter().any(|name| name == expected)
+}
+
 fn overall_status(
     checksum: CheckStatus,
     sigstore: CheckStatus,
@@ -244,6 +416,16 @@ fn overall_status(
     if missing_required_evidence {
         ReleaseVerifyStatus::Fail
     } else if sbom != CheckStatus::Pass || provenance != CheckStatus::Pass {
+        ReleaseVerifyStatus::Warn
+    } else {
+        ReleaseVerifyStatus::Pass
+    }
+}
+
+fn matrix_status(summary: &ReleaseVerifySummary) -> ReleaseVerifyStatus {
+    if summary.failed > 0 {
+        ReleaseVerifyStatus::Fail
+    } else if summary.warned > 0 {
         ReleaseVerifyStatus::Warn
     } else {
         ReleaseVerifyStatus::Pass
@@ -268,6 +450,31 @@ fn print_release_verify_report(report: &ReleaseVerifyReport) {
     );
     println!("expected identity: {}", report.expected_identity);
     println!("download dir: {}", report.download_dir);
+}
+
+fn print_release_verify_matrix_report(report: &ReleaseVerifyMatrixReport) {
+    println!("Gommage release verify");
+    println!("status: {}", report.status.as_str());
+    println!("repo: {}", report.repo);
+    println!("tag: {}", report.tag);
+    println!(
+        "summary: {} asset(s), {} pass, {} warn, {} fail",
+        report.summary.assets, report.summary.passed, report.summary.warned, report.summary.failed
+    );
+    println!("expected identity: {}", report.expected_identity);
+    for asset in &report.assets {
+        println!();
+        println!("asset: {}", asset.asset);
+        println!("status: {}", asset.status.as_str());
+        println!("sha256: {}", asset.checks.sha256.as_str());
+        println!("sigstore bundle: {}", asset.checks.sigstore_bundle.as_str());
+        println!("CycloneDX SBOM: {}", asset.checks.cyclonedx_sbom.as_str());
+        println!(
+            "GitHub artifact attestation: {}",
+            asset.checks.github_artifact_attestation.as_str()
+        );
+        println!("download dir: {}", asset.download_dir);
+    }
 }
 
 fn require_tool(name: &str) -> Result<()> {
@@ -497,5 +704,62 @@ fn command_error(command: &Command, output: &std::process::Output) -> anyhow::Er
         anyhow!("command failed: {:?}", command)
     } else {
         anyhow!("command failed: {:?}: {detail}", command)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overall_status_treats_missing_optional_evidence_as_warning() {
+        assert_eq!(
+            overall_status(
+                CheckStatus::Pass,
+                CheckStatus::Pass,
+                CheckStatus::Missing,
+                CheckStatus::Missing,
+                false,
+                false,
+            ),
+            ReleaseVerifyStatus::Warn
+        );
+    }
+
+    #[test]
+    fn overall_status_fails_when_strict_evidence_is_required() {
+        assert_eq!(
+            overall_status(
+                CheckStatus::Pass,
+                CheckStatus::Pass,
+                CheckStatus::Missing,
+                CheckStatus::Missing,
+                true,
+                true,
+            ),
+            ReleaseVerifyStatus::Fail
+        );
+    }
+
+    #[test]
+    fn matrix_status_rolls_up_worst_asset_status() {
+        assert_eq!(
+            matrix_status(&ReleaseVerifySummary {
+                assets: 4,
+                passed: 3,
+                warned: 1,
+                failed: 0,
+            }),
+            ReleaseVerifyStatus::Warn
+        );
+        assert_eq!(
+            matrix_status(&ReleaseVerifySummary {
+                assets: 4,
+                passed: 2,
+                warned: 1,
+                failed: 1,
+            }),
+            ReleaseVerifyStatus::Fail
+        );
     }
 }

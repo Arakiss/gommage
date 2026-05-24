@@ -175,6 +175,7 @@ Release artifact verification is also a manual/network gate:
 ```sh
 sh scripts/check-release-assets.sh --json
 gommage release verify --json
+gommage release verify --all-assets --json
 sh scripts/verify-release.sh --json
 ```
 
@@ -182,6 +183,8 @@ Use stricter package-manager gates once the current release line has SBOM and
 GitHub artifact attestations:
 
 ```sh
+sh scripts/check-release-assets.sh --json --require-sbom
+gommage release verify --all-assets --require-sbom --require-provenance
 gommage release verify --require-sbom --require-provenance
 sh scripts/verify-release.sh --require-sbom --require-provenance
 ```
