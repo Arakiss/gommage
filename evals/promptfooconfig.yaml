@@ -98,3 +98,18 @@ tests:
           return report.stdout.includes('Codex sandbox remains authoritative')
             && report.stdout.includes('apply_patch')
             && !report.stdout.includes('not default-wired');
+
+  - description: Release verification help exposes strict full-matrix evidence gate
+    vars:
+      scenario: Release verification strict evidence
+      argvJson: '["release","verify","--help"]'
+    assert:
+      - type: javascript
+        value: |
+          const report = JSON.parse(output);
+          if (report.exitCode !== 0) {
+            return false;
+          }
+          return report.stdout.includes('--all-assets')
+            && report.stdout.includes('--require-sbom')
+            && report.stdout.includes('--require-provenance');
