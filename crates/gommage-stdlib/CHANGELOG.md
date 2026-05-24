@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.3.0-alpha.1...gommage-stdlib-v0.4.0-alpha.1) (2026-05-24)
+
+
+### Features
+
+* expand Codex hook coverage ([720b1ba](https://github.com/Arakiss/gommage/commit/720b1ba0250fa654d6febdca56ff00653517e80b))
+
 ## [0.3.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.2.2-alpha.1...gommage-stdlib-v0.3.0-alpha.1) (2026-04-22)
 
 
