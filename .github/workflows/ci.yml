@@ -175,6 +175,30 @@ jobs:
       - name: Verify public policy fixture library
         run: GOMMAGE_BIN=./target/debug/gommage sh scripts/check-public-policy-fixtures.sh
 
+  agent-evals:
+    name: agent-facing evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+      - name: Build CLI for eval target
+        run: cargo build -p gommage-cli
+      - name: Run Promptfoo CLI contract evals
+        run: |
+          GOMMAGE_BIN=./target/debug/gommage \
+            bunx promptfoo@latest eval \
+              -c evals/promptfooconfig.yaml \
+              --no-progress-bar \
+              --no-table \
+              --no-cache \
+              --no-write
+
   operator-smoke:
     name: operator smoke (${{ matrix.os }} / ${{ matrix.agent }})
     runs-on: ${{ matrix.os }}

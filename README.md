@@ -533,6 +533,8 @@ gommage beta check --json --policy-test examples/policy-fixtures.yaml
 GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval \
   -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write
 
+# CI also runs the same suite in the `agent-facing evals` job.
+
 # Reproducible local launch demo in an isolated temporary home.
 sh scripts/launch-demo.sh
 
