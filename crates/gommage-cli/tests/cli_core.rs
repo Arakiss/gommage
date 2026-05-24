@@ -176,6 +176,7 @@ fn release_verify_help_describes_strict_evidence_gates() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("--all-assets"));
     assert!(stdout.contains("--require-sbom"));
     assert!(stdout.contains("--require-provenance"));
     assert!(stdout.contains("--asset"));
