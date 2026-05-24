@@ -63,7 +63,7 @@ issue:
 | Sandbox advice | `gommage sandbox advise --json` reports `advisory_only: true` and never claims OS confinement enforcement. |
 | Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
 | Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host, including companion versions, selected-agent beta check, repair dry-runs, bounded TUI captures, report bundle, and rollback dry-run. |
-| CI | `ci`, `release`, `audit`, and `scorecard` are green on the release commit. |
+| CI | `ci`, `audit`, and `scorecard` are green on the release commit. `release` is green for publication commits, or intentionally skipped when `GOMMAGE_RELEASE_HOLD=true` is active during repository maintenance. |
 | Docs | README, beta contract, existing-setups, diagnostics, agent compatibility, publishing, release-signing docs, examples, and the `skills/gommage` agent skill match the current CLI. |
 | Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
 
@@ -73,6 +73,8 @@ Treat these as beta blockers:
 
 - A verified installer release is missing any archive, checksum, Sigstore
   bundle, SBOM, or required provenance evidence for a supported platform.
+- `GOMMAGE_RELEASE_HOLD=true` is still active when the goal is to publish a new
+  release instead of maintaining repository state.
 - `gommage verify --json` cannot distinguish warning from failure.
 - A documented quickstart command fails on a clean macOS or Linux account.
 - A companion binary cannot be introspected with `--version`.
