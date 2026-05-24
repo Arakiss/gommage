@@ -13,7 +13,7 @@ _default:
     @just --list --unsorted
 
 # Run the same checks CI runs on every PR (skips the 10× determinism sweep).
-check: fmt clippy test policy-lint deny
+check: fmt clippy test policy-lint private-files deny
     @echo "--- local check: ok ---"
 
 # Run Promptfoo evals for agent-facing CLI behavior.
@@ -64,6 +64,10 @@ policy-lint:
 # cargo-deny: advisories, bans, licenses, sources.
 deny:
     cargo deny check advisories bans licenses sources
+
+# Ensure local-only agent instruction and run-state files are not tracked.
+private-files:
+    sh scripts/check-local-agent-files.sh
 
 # cargo-semver-checks for gommage-core; defaults baseline to origin/main.
 semver BASE="origin/main":
