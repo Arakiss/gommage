@@ -52,7 +52,8 @@ sh scripts/launch-demo.sh
 After the beta tag exists:
 
 ```sh
-sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-beta.1> --json
+sh scripts/check-release-assets.sh --tag <gommage-cli-vX.Y.Z-beta.1> --json --require-sbom
+gommage release verify --tag <gommage-cli-vX.Y.Z-beta.1> --all-assets --json --require-sbom --require-provenance
 gommage release verify --tag <gommage-cli-vX.Y.Z-beta.1> --json --require-sbom --require-provenance
 sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-beta.1> --json --require-sbom --require-provenance
 ```

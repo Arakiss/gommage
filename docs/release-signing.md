@@ -63,14 +63,16 @@ Operator verification from a checkout:
 ```sh
 gommage release verify --tag gommage-cli-vX.Y.Z-beta.N
 gommage release verify --tag gommage-cli-vX.Y.Z-beta.N --json
+gommage release verify --tag gommage-cli-vX.Y.Z-beta.N --all-assets --json --require-sbom --require-provenance
 sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-beta.N
 sh scripts/verify-release.sh --tag gommage-cli-vX.Y.Z-beta.N --json
 ```
 
 Both verification surfaces download the platform archive, checksum, and
 Sigstore bundle; verify the release-tag workflow identity; and check GitHub
-artifact attestations when present. Use `--require-sbom` and
-`--require-provenance` for beta or package-manager release gates.
+artifact attestations when present. Use `gommage release verify --all-assets`
+with `--require-sbom --require-provenance` for beta, RC, or package-manager
+release gates that must verify every supported archive.
 
 GitHub artifact attestations are produced with `actions/attest` from the same
 tag-scoped release workflow that builds the archives. Verify them manually with:
