@@ -1,5 +1,35 @@
 # Changelog — gommage-mcp
 
+## [0.8.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.7.0-alpha.1...gommage-mcp-v0.8.0-alpha.1) (2026-05-24)
+
+
+### Features
+
+* add out-of-band approval workflow ([5612978](https://github.com/Arakiss/gommage/commit/56129785737db7dbb686c0e4f4c95cc7cbf2aa53))
+* expand Codex hook coverage ([9e162d9](https://github.com/Arakiss/gommage/commit/9e162d92689b1c947095c8b9c86ff9069732d7ea))
+* expand coverage beyond hooks ([77fc3da](https://github.com/Arakiss/gommage/commit/77fc3da5f5e90f4ed2f7d40924a3cc120d4c9d4e))
+* make approval webhooks recoverable ([69eba2e](https://github.com/Arakiss/gommage/commit/69eba2e869f329a2a4d6af6ce908dd6a4956bd25))
+* map agent web and mcp tools ([2878452](https://github.com/Arakiss/gommage/commit/287845271027bc9bf359c5f46556c08cf8c047e3))
+* sign approval webhook deliveries ([3bd919a](https://github.com/Arakiss/gommage/commit/3bd919ac0312a2e285c7fd93384977482a67c762))
+
+
+### Bug fixes
+
+* **deps:** drop version pin on internal workspace crate deps ([#4](https://github.com/Arakiss/gommage/issues/4)) ([8d489af](https://github.com/Arakiss/gommage/commit/8d489af5c24036406fc0a6ce6eb0b1abdf214d4f))
+* enforce auditable trust guarantees ([47d9731](https://github.com/Arakiss/gommage/commit/47d97312fd4fc6f81883012a907c5a65ad8e1787))
+* harden bypass audit semantics ([d9f9b37](https://github.com/Arakiss/gommage/commit/d9f9b37e6980862aeac221e95252b54ef96a89f3))
+* harden hard-stop parsing and release framing ([0e30b6e](https://github.com/Arakiss/gommage/commit/0e30b6e6d49def2f0136b19a2d187c613e1908c8))
+* polish recovery diagnostics ([48f256f](https://github.com/Arakiss/gommage/commit/48f256fd887f7aee124e81f57ee4d00a796bd5ed))
+* prevent quickstart deadlocks ([fb5a2a4](https://github.com/Arakiss/gommage/commit/fb5a2a4f45c7301df06ba274e9f88a7531b9725c))
+* satisfy strict clippy gate ([d03ff0c](https://github.com/Arakiss/gommage/commit/d03ff0ce78f4f5465a9d8d6066cb8be856141f48))
+* support companion binary introspection ([77b67cc](https://github.com/Arakiss/gommage/commit/77b67cc91d4282671593103d89fe53232865872e))
+
+
+### Documentation
+
+* add changelogs and semver/commit policy ([6463288](https://github.com/Arakiss/gommage/commit/6463288e9f22573b57ad78b1b7b0d182733714c6))
+* lock agent command contracts ([1c42980](https://github.com/Arakiss/gommage/commit/1c429807f093b70c5abba1c421e13e385c5938f5))
+
 ## [0.7.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.6.1-alpha.1...gommage-mcp-v0.7.0-alpha.1) (2026-05-24)
 
 

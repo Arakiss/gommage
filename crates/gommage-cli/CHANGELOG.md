@@ -1,5 +1,94 @@
 # Changelog — gommage-cli
 
+## [0.38.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.37.0-beta.1...gommage-cli-v0.38.0-beta.1) (2026-05-24)
+
+
+### Features
+
+* add agent quickstart setup ([54ee041](https://github.com/Arakiss/gommage/commit/54ee041b6bc7a0fbb34f55c0c6412b151a9a4ece))
+* add agent-readable harness diagnostics ([c5aa215](https://github.com/Arakiss/gommage/commit/c5aa2158841374ebc60ce8929f7a13814af9f8d7))
+* add beta readiness gate ([fd730e2](https://github.com/Arakiss/gommage/commit/fd730e26d7f6b90a312f1b140a39466b40ad6201))
+* add explain trace and strict policy lint ([a03043c](https://github.com/Arakiss/gommage/commit/a03043c71a6e08e72acd4f26154d8307ac1f162d))
+* add Gommage update and upgrade commands ([b8b83d0](https://github.com/Arakiss/gommage/commit/b8b83d0a48c263f8e4f0967508714665423396d0))
+* add host smoke evidence script ([6330843](https://github.com/Arakiss/gommage/commit/6330843d178c68618c7cd31c8e4e7101d9cea71a))
+* add legacy agent repair ([1a04c16](https://github.com/Arakiss/gommage/commit/1a04c16f350ca45a410055f8c84f7fb6abef4901))
+* add operator dashboard tui ([3c13709](https://github.com/Arakiss/gommage/commit/3c1370965b97b66f8d8768f47acff0b3dea27de1))
+* add out-of-band approval workflow ([5612978](https://github.com/Arakiss/gommage/commit/56129785737db7dbb686c0e4f4c95cc7cbf2aa53))
+* add policy diff ([9b6c8a5](https://github.com/Arakiss/gommage/commit/9b6c8a51b889ca6be28a8c5c7c6d1678263ba615))
+* add policy replay ([8dae554](https://github.com/Arakiss/gommage/commit/8dae554b6520a010b475d7208bdd48cc666e30e1))
+* add policy suggest ([8a73385](https://github.com/Arakiss/gommage/commit/8a73385eaaf163b47a4666ae9a08ef8b2ca8220e))
+* add rebuildable sqlite state index ([403cd6a](https://github.com/Arakiss/gommage/commit/403cd6a6b18efb5a8ce2d97ac99d90228441f5fa))
+* add redacted report bundles ([5a15834](https://github.com/Arakiss/gommage/commit/5a15834dfec3a7005f2f7af472f4053f9899c86e))
+* add release verification command ([96aec4b](https://github.com/Arakiss/gommage/commit/96aec4b33c56987249692613b96ab7e80cc969bc))
+* add reversible uninstall ([368a147](https://github.com/Arakiss/gommage/commit/368a1479f8b5d4bdf888e22a9bd77688f836761c))
+* add tui onboarding view ([106e142](https://github.com/Arakiss/gommage/commit/106e142f624e4fec571045be9ab65e5291f6c701))
+* **audit:** audit-verify --explain with anomaly report ([#10](https://github.com/Arakiss/gommage/issues/10)) ([1e26e68](https://github.com/Arakiss/gommage/commit/1e26e6899a59dd58e47159c942634ab10eec3a96))
+* **cli:** accept hook payloads for authoring ([791647a](https://github.com/Arakiss/gommage/commit/791647a6ec0fb4742ce50f191361bdd21ba1bdde))
+* **cli:** add aggregated verification gate ([f412491](https://github.com/Arakiss/gommage/commit/f41249196073a66d7c1578259b05b167cc0d8b26))
+* **cli:** add gestral terminal logo ([de10b2f](https://github.com/Arakiss/gommage/commit/de10b2ff54eafc52d17590862652d2c537438c6f))
+* **cli:** add policy fixture tests ([f924669](https://github.com/Arakiss/gommage/commit/f924669305aae593a264c92ce13318155cc71802))
+* **cli:** add semantic smoke checks ([9bccc94](https://github.com/Arakiss/gommage/commit/9bccc947256ad735692d015bc619c59ae4fc9935))
+* **cli:** capture policy fixture snapshots ([4832c5c](https://github.com/Arakiss/gommage/commit/4832c5ccde0ccd38bf45fce459784ac39dac5ba0))
+* **cli:** emit structured doctor diagnostics ([ef2126f](https://github.com/Arakiss/gommage/commit/ef2126f67e2e3c258faba4b1098072e180e27309))
+* **cli:** expose policy fixture schema ([e9b60a3](https://github.com/Arakiss/gommage/commit/e9b60a30b1e68e806c39b502ba3feb00ec2e4850))
+* **cli:** import narrow native allows ([8aa2bd6](https://github.com/Arakiss/gommage/commit/8aa2bd6f845be063fdeae415ac50f115b61c46f3))
+* **cli:** inspect capability mapping ([838abad](https://github.com/Arakiss/gommage/commit/838abadd9323895ed74b8b15c4c043d726b6f44f))
+* **cli:** install daemon from quickstart ([7bcf1b1](https://github.com/Arakiss/gommage/commit/7bcf1b1a8137e2163377ecdc04b6c574a32dc2a1))
+* **cli:** render audit verify reports ([27ab754](https://github.com/Arakiss/gommage/commit/27ab754938f82811190ee8eff9c2346bfb280e20))
+* **cli:** report agent integration status ([3213435](https://github.com/Arakiss/gommage/commit/3213435cc5442995940d0b893a4a4bfd95a78903))
+* **cli:** self-test quickstart setup ([33f66ee](https://github.com/Arakiss/gommage/commit/33f66ee51aa6d8182c8375988fb08438409c19a0))
+* define beta launch readiness ([bf465ce](https://github.com/Arakiss/gommage/commit/bf465ce664c23a0e1811f9324254f69cae8f8a42))
+* expand Codex hook coverage ([9e162d9](https://github.com/Arakiss/gommage/commit/9e162d92689b1c947095c8b9c86ff9069732d7ea))
+* expand coverage beyond hooks ([77fc3da](https://github.com/Arakiss/gommage/commit/77fc3da5f5e90f4ed2f7d40924a3cc120d4c9d4e))
+* expose hook coexistence dry-run plan ([ef63937](https://github.com/Arakiss/gommage/commit/ef639378f39a9a3f59a30b464d165aa46758aa9d))
+* improve operator loop visibility ([aa3b633](https://github.com/Arakiss/gommage/commit/aa3b633c4f70b439cdcd9cebde13fdb08996549d))
+* install daemon as user service ([3efd799](https://github.com/Arakiss/gommage/commit/3efd799c9b66653aaa887ac4c51de58399fd5e4e))
+* make approval webhooks recoverable ([69eba2e](https://github.com/Arakiss/gommage/commit/69eba2e869f329a2a4d6af6ce908dd6a4956bd25))
+* map agent web and mcp tools ([2878452](https://github.com/Arakiss/gommage/commit/287845271027bc9bf359c5f46556c08cf8c047e3))
+* plan quickstart dry runs ([59ca928](https://github.com/Arakiss/gommage/commit/59ca928aaad5b478ca04b8c9847d49e2376cb035))
+* polish approval operator workflow ([f6b25fa](https://github.com/Arakiss/gommage/commit/f6b25faa109b767d1f09b9289fe646132defa204))
+* polish beta operator experience ([df0bb25](https://github.com/Arakiss/gommage/commit/df0bb25aee60c541503e5ede1df5b1845cdfeba1))
+* refine operator tui feedback loop ([6f11128](https://github.com/Arakiss/gommage/commit/6f11128b8286479b73b01c665d25c10281b58e73))
+* sign approval webhook deliveries ([3bd919a](https://github.com/Arakiss/gommage/commit/3bd919ac0312a2e285c7fd93384977482a67c762))
+* **stdlib:** package bundled policy assets ([a2abc3b](https://github.com/Arakiss/gommage/commit/a2abc3b8a19ff28b1924afdd4505a78de01c845a))
+* stream live decision activity ([b48d21a](https://github.com/Arakiss/gommage/commit/b48d21a6f69f87b1095aee50d220c75bd2fa99af))
+* verify full release asset matrix ([4c44e0d](https://github.com/Arakiss/gommage/commit/4c44e0dfa2f4df7d782cb25a5efb6a38147bf3cb))
+
+
+### Bug fixes
+
+* clarify install readiness failures ([71b5099](https://github.com/Arakiss/gommage/commit/71b5099f9a8149c61edf7963a23b2f37dd3542ec))
+* **cli:** avoid agent status test shadowing ([04a0ce5](https://github.com/Arakiss/gommage/commit/04a0ce5dfe5828964c9bf7666639f6c6bdf27cee))
+* **cli:** avoid verify report type collision ([5b8a400](https://github.com/Arakiss/gommage/commit/5b8a400499a0c5b8849d0b08d72a89db17c1146c))
+* **cli:** label verify policy-test input ([5f41080](https://github.com/Arakiss/gommage/commit/5f4108048f050babab16dd5327b64e1585180241))
+* **cli:** satisfy smoke check lint ([fe309b2](https://github.com/Arakiss/gommage/commit/fe309b2e68716c3e8aaf0bf1f72166aa3328ef25))
+* **deps:** drop version pin on internal workspace crate deps ([#4](https://github.com/Arakiss/gommage/issues/4)) ([8d489af](https://github.com/Arakiss/gommage/commit/8d489af5c24036406fc0a6ce6eb0b1abdf214d4f))
+* enforce auditable trust guarantees ([47d9731](https://github.com/Arakiss/gommage/commit/47d97312fd4fc6f81883012a907c5a65ad8e1787))
+* harden bypass audit semantics ([d9f9b37](https://github.com/Arakiss/gommage/commit/d9f9b37e6980862aeac221e95252b54ef96a89f3))
+* keep state counters clippy-clean ([c7c6666](https://github.com/Arakiss/gommage/commit/c7c66663d63128cf13b2bbef9318cc1ec2c0aff7))
+* polish approval webhook diagnostics ([3259397](https://github.com/Arakiss/gommage/commit/32593972ef0f2865d418c15210ace574bbbc8387))
+* polish recovery diagnostics ([48f256f](https://github.com/Arakiss/gommage/commit/48f256fd887f7aee124e81f57ee4d00a796bd5ed))
+* preserve replaced install surfaces ([c6b1153](https://github.com/Arakiss/gommage/commit/c6b115348537af4ac68ed0ecf6b835e969dcc02f))
+* prevent quickstart deadlocks ([fb5a2a4](https://github.com/Arakiss/gommage/commit/fb5a2a4f45c7301df06ba274e9f88a7531b9725c))
+* satisfy strict clippy gate ([d03ff0c](https://github.com/Arakiss/gommage/commit/d03ff0ce78f4f5465a9d8d6066cb8be856141f48))
+* support companion binary introspection ([77b67cc](https://github.com/Arakiss/gommage/commit/77b67cc91d4282671593103d89fe53232865872e))
+* use canonical Codex hook feature flag ([a402569](https://github.com/Arakiss/gommage/commit/a402569a45a4e80e83153709f201a7a8a16f3323))
+
+
+### Refactor
+
+* **cli:** keep command modules bounded ([462910f](https://github.com/Arakiss/gommage/commit/462910f725a8b37abf4e99686622a1cf83d26629))
+* keep approval webhook options cohesive ([08bc8f9](https://github.com/Arakiss/gommage/commit/08bc8f97b4e6168950d6d4502ac6e091f2cfa48b))
+
+
+### Documentation
+
+* add changelogs and semver/commit policy ([6463288](https://github.com/Arakiss/gommage/commit/6463288e9f22573b57ad78b1b7b0d182733714c6))
+* clarify existing harness integration ([8cadd98](https://github.com/Arakiss/gommage/commit/8cadd98a2c5e4ac13ecf76e7b25d4d5932851f63))
+* clarify skill and release hygiene ([36b350a](https://github.com/Arakiss/gommage/commit/36b350a0928617c20c81e978ac206408677211e5))
+* lock agent command contracts ([1c42980](https://github.com/Arakiss/gommage/commit/1c429807f093b70c5abba1c421e13e385c5938f5))
+* promote public policy fixture contract ([d32fe1c](https://github.com/Arakiss/gommage/commit/d32fe1ca4e56d5b5cb49f4de0bc9d1115755a0ca))
+
 ## [0.37.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.36.0-beta.1...gommage-cli-v0.37.0-beta.1) (2026-05-24)
 
 

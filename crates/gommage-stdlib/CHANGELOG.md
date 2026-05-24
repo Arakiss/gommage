@@ -1,5 +1,25 @@
 # Changelog — gommage-stdlib
 
+## [0.5.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.4.0-alpha.1...gommage-stdlib-v0.5.0-alpha.1) (2026-05-24)
+
+
+### Features
+
+* expand Codex hook coverage ([9e162d9](https://github.com/Arakiss/gommage/commit/9e162d92689b1c947095c8b9c86ff9069732d7ea))
+* polish beta operator experience ([df0bb25](https://github.com/Arakiss/gommage/commit/df0bb25aee60c541503e5ede1df5b1845cdfeba1))
+* **stdlib:** package bundled policy assets ([a2abc3b](https://github.com/Arakiss/gommage/commit/a2abc3b8a19ff28b1924afdd4505a78de01c845a))
+
+
+### Bug fixes
+
+* polish recovery diagnostics ([48f256f](https://github.com/Arakiss/gommage/commit/48f256fd887f7aee124e81f57ee4d00a796bd5ed))
+* prevent quickstart deadlocks ([fb5a2a4](https://github.com/Arakiss/gommage/commit/fb5a2a4f45c7301df06ba274e9f88a7531b9725c))
+
+
+### Documentation
+
+* lock agent command contracts ([1c42980](https://github.com/Arakiss/gommage/commit/1c429807f093b70c5abba1c421e13e385c5938f5))
+
 ## [0.4.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.3.0-alpha.1...gommage-stdlib-v0.4.0-alpha.1) (2026-05-24)
 
 
