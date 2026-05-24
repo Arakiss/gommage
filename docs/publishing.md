@@ -29,6 +29,24 @@ not a workspace component. Internal crate versions can differ for semver
 hygiene, but new public GitHub Releases should only be created for the CLI tag
 that carries the signed binary archives.
 
+## Release hold switch
+
+During repository maintenance, pause release automation with the repository
+variable `GOMMAGE_RELEASE_HOLD=true`:
+
+```sh
+gh variable set GOMMAGE_RELEASE_HOLD --body true
+```
+
+When this variable is set to `true`, the release workflow skips release-please,
+tag-triggered binary builds, and release evidence uploads. Normal CI remains
+active. Resume release automation by setting the variable to `false` or deleting
+it after the maintenance window:
+
+```sh
+gh variable set GOMMAGE_RELEASE_HOLD --body false
+```
+
 Useful installer options:
 
 ```sh
