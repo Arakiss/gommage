@@ -16,6 +16,10 @@ _default:
 check: fmt clippy test policy-lint deny
     @echo "--- local check: ok ---"
 
+# Run Promptfoo evals for agent-facing CLI behavior.
+evals:
+    GOMMAGE_BIN="${GOMMAGE_BIN:-target/debug/gommage}" bunx promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write
+
 # Check formatting without modifying files.
 fmt:
     cargo fmt --all --check

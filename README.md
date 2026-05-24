@@ -529,6 +529,10 @@ gommage verify --json --policy-test examples/policy-fixtures.yaml
 # Beta-readiness gate for host test loops and release candidates.
 gommage beta check --json --policy-test examples/policy-fixtures.yaml
 
+# Optional Promptfoo evals for agent-facing CLI contracts.
+GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval \
+  -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write
+
 # Reproducible local launch demo in an isolated temporary home.
 sh scripts/launch-demo.sh
 
@@ -784,6 +788,7 @@ sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-beta.N> --json
 sh scripts/launch-demo.sh
 GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent claude
 GOMMAGE_BIN=target/debug/gommage sh scripts/host-smoke.sh --temp-home --agent codex
+GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write
 ```
 
 **Current beta line** — signed release-installer line
