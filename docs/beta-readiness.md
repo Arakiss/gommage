@@ -55,7 +55,7 @@ issue:
 | Webhook flow | `gommage approval webhook --provider generic|slack|discord --dry-run --json` renders pending provider payloads in `requests[].payload`; `--signing-secret` adds `requests[].body` plus HMAC `requests[].signature`; a fake or test endpoint proves signed success, retry-exhausted failure, and `approval dlq --json` visibility. |
 | Host wiring | `gommage agent status claude --json` and `gommage agent status codex --json` are documented for supported states. |
 | Harness context | `gommage harness diagnose --json`, `gommage harness explain --json`, and `gommage harness write-context --dry-run` describe host hooks, local coverage boundaries, native permission imports, context file paths, and next commands without requiring source-code inspection. |
-| Agent-facing evals | `GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write` passes for the current checkout when validating agent contract changes. |
+| Agent-facing evals | The `agent-facing evals` CI job and `GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write` pass for agent contract changes. |
 | Legacy repair | `gommage repair agent claude --dry-run` and `gommage repair agent codex --dry-run` show how old or broken alpha hooks would be rewritten without mutating host config. |
 | Policy fixtures | `examples/policy-fixtures.yaml` passes through `gommage policy test --json`, and any repository-specific fixture additions are documented or linked. |
 | Policy layers | `gommage policy layers --json` reports active org/project/user layer order, rule counts, and the effective policy hash. |
