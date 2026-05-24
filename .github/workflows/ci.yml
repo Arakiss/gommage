@@ -9,7 +9,9 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # `pull_request_target` uses the base ref (`refs/heads/main`), so include the
+  # event and PR number to avoid cancelling in-flight `push` CI on main.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
