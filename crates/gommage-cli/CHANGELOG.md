@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.39.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.38.0-beta.1...gommage-cli-v0.39.0-beta.1) (2026-06-04)
+
+
+### Features
+
+* **cli:** generate agent-friendly posture on install ([#72](https://github.com/Arakiss/gommage/issues/72)) ([fec8eac](https://github.com/Arakiss/gommage/commit/fec8eac846f229f9b17fdcee9a4fdb9449e4a04a))
+
 ## [0.38.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.37.0-beta.1...gommage-cli-v0.38.0-beta.1) (2026-05-24)
 
 
