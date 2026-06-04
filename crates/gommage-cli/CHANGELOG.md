@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.41.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.40.1-beta.1...gommage-cli-v0.41.0-beta.1) (2026-06-04)
+
+
+### Features
+
+* **stdlib:** gate publish, persistence, device-write, docker escape ([#79](https://github.com/Arakiss/gommage/issues/79)) ([837a6ae](https://github.com/Arakiss/gommage/commit/837a6aeeb0c552d63637b0bb08ba1a48fa0f086b))
+
 ## [0.40.1-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.40.0-beta.1...gommage-cli-v0.40.1-beta.1) (2026-06-04)
 
 ## [0.40.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.39.0-beta.1...gommage-cli-v0.40.0-beta.1) (2026-06-04)

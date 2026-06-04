@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.7.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.6.0-alpha.1...gommage-stdlib-v0.7.0-alpha.1) (2026-06-04)
+
+
+### Features
+
+* **stdlib:** gate publish, persistence, device-write, docker escape ([#79](https://github.com/Arakiss/gommage/issues/79)) ([837a6ae](https://github.com/Arakiss/gommage/commit/837a6aeeb0c552d63637b0bb08ba1a48fa0f086b))
+
 ## [0.6.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.5.0-alpha.1...gommage-stdlib-v0.6.0-alpha.1) (2026-06-04)
 
 
