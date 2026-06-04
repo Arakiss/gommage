@@ -1,0 +1,5 @@
+{
+  "name": "shell-absolute-path-git-push-main-asks-for-picto",
+  "call": { "tool": "Bash", "input": { "command": "/usr/bin/git push origin main" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.push:main" }
+}

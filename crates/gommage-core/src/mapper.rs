@@ -123,23 +123,178 @@ impl CapabilityMapper {
     ///
     /// Deterministic: same `ToolCall` + same loaded rules → identical output
     /// (order included).
+    ///
+    /// For shell tool calls (`Bash` with a string `command` field) the mapper is
+    /// **shape-aware**: it does not only match each `match_input` rule against
+    /// the whole command string, it also matches against a deterministic list of
+    /// *candidate* command strings derived from the command's shell structure —
+    /// each `&&`/`||`/`;`/`|`/newline segment with its leading `env`/`sudo`/
+    /// wrapper prefixes stripped, the body of each `$(...)`/backtick command
+    /// substitution, and the payload of each `bash -c "..."`. This closes the
+    /// gap where a policy gate keyed on a capability (e.g. `git.push:…`) could be
+    /// evaded purely by command *shape* (`true; git push`, `$(git push)`,
+    /// `bash -c 'git push'`, `/usr/bin/git push`).
+    ///
+    /// Capture groups in `emit` templates (`${ref}`, …) resolve against the
+    /// matched **candidate**; `${input.*}` and `${tool}` always resolve against
+    /// the **original** tool input. Emissions are unioned across rules and
+    /// candidates, deduplicated, and ordered stably by `(rule-index,
+    /// candidate-index)` so the result is invariant under the determinism
+    /// shuffle.
     pub fn map(&self, call: &ToolCall) -> Vec<Capability> {
+        // Candidate index 0 is always the original input. Additional candidates
+        // (shell segments / substitutions / `-c` payloads) only exist for shell
+        // tool calls and are applied only to rules that match on the shell
+        // command field. Non-shell rules and non-shell tools see candidate 0
+        // alone, preserving prior behavior exactly.
+        let candidates = shell_candidates(call);
+
         let mut out: Vec<Capability> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         for rule in &self.rules {
-            let Some(mut captures) = match_tool(&rule.tool_match, &call.tool) else {
+            let Some(tool_captures) = match_tool(&rule.tool_match, &call.tool) else {
                 continue;
             };
-            let Some(input_captures) = match_all_inputs(rule, &call.input) else {
-                continue;
-            };
-            captures.extend(input_captures);
-            for tpl in &rule.emit {
-                let rendered = render(tpl, &captures, &call.tool, &call.input);
-                out.push(Capability::new(rendered));
+
+            // A rule participates in candidate expansion only if it actually
+            // constrains the shell command field; otherwise it sees the original
+            // input alone (candidate 0).
+            let expand = !candidates.is_empty() && rule_matches_shell_field(rule);
+
+            // Iterate candidates in stable order. Candidate 0 is the original
+            // input; candidates 1.. are the shell-derived command strings.
+            let candidate_count = if expand { candidates.len() + 1 } else { 1 };
+            for cand_idx in 0..candidate_count {
+                let candidate_input: Option<Value> = if cand_idx == 0 {
+                    None
+                } else {
+                    Some(with_shell_command(&call.input, &candidates[cand_idx - 1]))
+                };
+                let match_input_value = candidate_input.as_ref().unwrap_or(&call.input);
+
+                let Some(input_captures) = match_all_inputs(rule, match_input_value) else {
+                    continue;
+                };
+                let mut captures = tool_captures.clone();
+                captures.extend(input_captures);
+                for tpl in &rule.emit {
+                    // Capture groups come from the matched candidate; ${input.*}
+                    // and ${tool} always refer to the original tool input.
+                    let rendered = render(tpl, &captures, &call.tool, &call.input);
+                    if seen.insert(rendered.clone()) {
+                        out.push(Capability::new(rendered));
+                    }
+                }
             }
         }
         out
     }
+}
+
+/// The name of the field on a shell tool call that carries the command string.
+const SHELL_COMMAND_FIELD: &str = "command";
+
+/// Build the deterministic list of *derived* candidate command strings for a
+/// shell tool call (everything except candidate 0, the whole command). Returns
+/// an empty vec for non-shell calls so the mapper short-circuits to legacy
+/// behavior.
+///
+/// Order: for each shell segment (in source order) the prefix-stripped segment
+/// text; then, recursing one level, the body of each command substitution; then
+/// each `bash -c` payload. The list is de-duplicated while preserving first-seen
+/// order so identical candidates do not multiply work or perturb ordering.
+fn shell_candidates(call: &ToolCall) -> Vec<String> {
+    if call.tool != "Bash" {
+        return Vec::new();
+    }
+    let Some(command) = call.input.get(SHELL_COMMAND_FIELD).and_then(Value::as_str) else {
+        return Vec::new();
+    };
+
+    let mut candidates: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    collect_candidates(command, &mut candidates, &mut seen, 0);
+    // The whole command (candidate 0) is handled separately by the caller; drop
+    // it here if the recursion re-derived it identically.
+    candidates.retain(|c| c != command);
+    candidates
+}
+
+/// Recursion depth cap for command-substitution nesting. One level of recursion
+/// is required by spec; we allow a small bounded depth so `$( $( … ) )` and
+/// `bash -c '$(…)'` still surface their inner verbs without unbounded work.
+const MAX_CANDIDATE_DEPTH: usize = 3;
+
+fn collect_candidates(
+    command: &str,
+    out: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+    depth: usize,
+) {
+    if depth > MAX_CANDIDATE_DEPTH {
+        return;
+    }
+
+    // 1. Each shell segment, with leading env/sudo/wrapper prefixes stripped and
+    //    the head reduced to its basename so `/usr/bin/git push` matches `git`.
+    for segment in crate::shell::shell_segments(command) {
+        if let Some(real) = crate::shell::command_words(&segment) {
+            if real.is_empty() {
+                continue;
+            }
+            let mut normalized = real.to_vec();
+            normalized[0] = crate::shell::head_basename(&normalized[0]).to_string();
+            let joined = normalized.join(" ");
+            push_candidate(joined, out, seen);
+
+            // 1b. If this segment is a `bash/sh/zsh -c "<payload>"`, recurse into
+            //     the payload one level deeper.
+            let head = crate::shell::head_basename(&real[0]);
+            if matches!(head, "bash" | "sh" | "zsh")
+                && let Some(payload) = crate::shell::shell_c_payload(&real[1..])
+            {
+                collect_candidates(payload, out, seen, depth + 1);
+            }
+        }
+    }
+
+    // 2. The body of each command substitution, recursing one level deeper.
+    for sub in crate::shell::command_substitutions(command) {
+        collect_candidates(&sub, out, seen, depth + 1);
+    }
+}
+
+fn push_candidate(
+    candidate: String,
+    out: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    if !candidate.is_empty() && seen.insert(candidate.clone()) {
+        out.push(candidate);
+    }
+}
+
+/// Does this rule constrain the shell command field? Only such rules take part
+/// in candidate expansion; rules that ignore `command` (or constrain only other
+/// fields) see the original input alone.
+fn rule_matches_shell_field(rule: &CompiledRule) -> bool {
+    rule.match_input
+        .iter()
+        .any(|(path, _)| path == SHELL_COMMAND_FIELD)
+}
+
+/// Clone the original input JSON object and replace the shell command field with
+/// a derived candidate string. Other fields are preserved so multi-field rules
+/// keep matching their non-command constraints against the real input.
+fn with_shell_command(input: &Value, candidate: &str) -> Value {
+    let mut cloned = input.clone();
+    if let Value::Object(map) = &mut cloned {
+        map.insert(
+            SHELL_COMMAND_FIELD.to_string(),
+            Value::String(candidate.to_string()),
+        );
+    }
+    cloned
 }
 
 fn compile(
@@ -437,5 +592,206 @@ mod tests {
   emit: ["x"]
 "#;
         assert!(CapabilityMapper::from_yaml_string(yaml, "bad.yaml").is_err());
+    }
+
+    // --- Shell-aware (shape) mapping (R1 / R3) ------------------------------
+
+    /// A minimal mapper mirroring the shipped bash.yaml shapes relevant to the
+    /// shell-aware tests: whole-command proc.exec for audit + a per-segment
+    /// git.push rule.
+    fn shell_mapper() -> CapabilityMapper {
+        let yaml = r#"
+- name: bash-proc-exec
+  tool: Bash
+  emit:
+    - "proc.exec:${input.command}"
+- name: bash-git-push
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push(?:\\s+[-\\w]+)*\\s+(?P<remote>[\\w.-]+)\\s+(?P<ref>\\S+)"
+  emit:
+    - "git.push:refs/heads/${ref}"
+    - "net.out:github.com"
+- name: bash-git-force-push
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push[^#]*--force\\b"
+  emit:
+    - "git.push.force:<any>"
+- name: bash-git-reset-hard
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+reset\\s+--hard\\b"
+  emit:
+    - "git.reset.hard:<any>"
+"#;
+        CapabilityMapper::from_yaml_string(yaml, "bash.yaml").unwrap()
+    }
+
+    fn bash(cmd: &str) -> ToolCall {
+        ToolCall {
+            tool: "Bash".into(),
+            input: json!({ "command": cmd }),
+        }
+    }
+
+    fn caps_of(m: &CapabilityMapper, cmd: &str) -> Vec<String> {
+        m.map(&bash(cmd))
+            .into_iter()
+            .map(|c| c.as_str().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn compound_git_push_main_emits_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "true; git push origin main");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+        // Whole-command audit fidelity preserved.
+        assert!(
+            caps.iter()
+                .any(|c| c == "proc.exec:true; git push origin main")
+        );
+    }
+
+    #[test]
+    fn cd_prefix_compound_git_push_main_emits_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "cd /r && git push origin main");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn command_substitution_git_push_main_emits_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "$(git push origin main)");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn bash_c_git_push_main_emits_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "bash -c 'git push origin main'");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_git_push_does_not_emit_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "echo 'git push origin main'");
+        assert!(
+            !caps.iter().any(|c| c.starts_with("git.push")),
+            "quoted string must not be treated as a command; caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn env_sudo_prefix_git_push_main_emits_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "env GIT_TRACE=1 sudo git push origin main");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn absolute_path_git_push_main_emits_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "/usr/bin/git push origin main");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn timeout_wrapper_git_push_main_emits_git_push() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "timeout 30 git push origin main");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn compound_git_force_push_emits_force() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "true && git push --force origin feature/x");
+        assert!(
+            caps.iter().any(|c| c == "git.push.force:<any>"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn compound_git_reset_hard_emits_reset() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "echo ok; git reset --hard HEAD~1");
+        assert!(
+            caps.iter().any(|c| c == "git.reset.hard:<any>"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn whole_command_proc_exec_uses_original_input_not_candidate() {
+        // ${input.command} must always be the ORIGINAL whole command, even
+        // though the git.push capture comes from a candidate segment.
+        let m = shell_mapper();
+        let caps = caps_of(&m, "cd /r && git push origin main");
+        assert!(
+            caps.iter()
+                .any(|c| c == "proc.exec:cd /r && git push origin main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn non_shell_tool_is_unaffected_by_candidate_expansion() {
+        // A Write call has no shell decomposition; behavior is identical to
+        // before. The git-push rule must not fire on a file_path field.
+        let m = shell_mapper();
+        let call = ToolCall {
+            tool: "Write".into(),
+            input: json!({ "file_path": "/tmp/git push origin main" }),
+        };
+        assert!(m.map(&call).is_empty());
+    }
+
+    #[test]
+    fn emissions_are_order_stable_and_deduped() {
+        let m = shell_mapper();
+        // git push appears both as whole command (candidate 0) and as the only
+        // segment (candidate 1) — must emit exactly once, in rule order.
+        let caps = caps_of(&m, "git push origin main");
+        let push_count = caps
+            .iter()
+            .filter(|c| c.as_str() == "git.push:refs/heads/main")
+            .count();
+        assert_eq!(push_count, 1, "deduped; caps: {caps:?}");
+        // proc.exec (rule 0) precedes git.push (rule 1).
+        let proc_idx = caps
+            .iter()
+            .position(|c| c.starts_with("proc.exec:"))
+            .unwrap();
+        let push_idx = caps
+            .iter()
+            .position(|c| c.starts_with("git.push:"))
+            .unwrap();
+        assert!(proc_idx < push_idx, "rule order; caps: {caps:?}");
     }
 }
