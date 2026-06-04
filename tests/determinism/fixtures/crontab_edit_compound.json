@@ -1,0 +1,6 @@
+{
+  "name": "shell-compound-crontab-edit-asks-for-picto",
+  "note": "Proves shell-awareness carries through: `cd /x && crontab -e` is gated exactly like a bare `crontab -e`, because the mapper runs capability rules per shell segment.",
+  "call": { "tool": "Bash", "input": { "command": "cd /x && crontab -e" } },
+  "expected": { "kind": "ask_picto", "required_scope": "sched.cron:edit" }
+}

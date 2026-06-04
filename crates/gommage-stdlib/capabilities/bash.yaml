@@ -66,6 +66,85 @@
     - "pkg.cargo:install"
     - "net.out:crates.io"
 
+# --- Supply-chain PUBLISH (irreversible registry mutation) -------------------
+#
+# These gate only the *publish* verb, not install/build/test. They surface a
+# `pkg.<registry>:publish` capability that the package-manager policy gates with
+# a picto. Run per shell-segment, so `cd /pkg && npm publish` is caught too.
+
+# npm publish -> pkg.npm:publish (NOT `npm install`/`npm run`/`npm test`).
+- name: bash-npm-publish
+  tool: Bash
+  match_input:
+    command: "^\\s*npm\\s+publish\\b"
+  emit:
+    - "pkg.npm:publish"
+    - "net.out:registry.npmjs.org"
+
+# cargo publish -> pkg.cargo:publish (NOT `cargo build`/`cargo test`).
+- name: bash-cargo-publish
+  tool: Bash
+  match_input:
+    command: "^\\s*cargo\\s+publish\\b"
+  emit:
+    - "pkg.cargo:publish"
+    - "net.out:crates.io"
+
+# Python publish: `twine upload`, `python -m twine upload`, `pip ... upload`.
+- name: bash-python-publish
+  tool: Bash
+  match_input:
+    command: "^\\s*(?:twine\\s+upload|python[0-9.]*\\s+-m\\s+twine\\s+upload|pip[0-9.]*\\s+.*\\bupload\\b)"
+  emit:
+    - "pkg.python:publish"
+    - "net.out:pypi.org"
+
+# --- Persistence verbs (scheduler / service registration) --------------------
+#
+# Gate the *write* variants that install a recurring job or daemon; the
+# read/inspect variants (`crontab -l`, `launchctl list`, `systemctl status`)
+# are deliberately not surfaced here.
+
+# `crontab -e` (interactive edit) or `crontab <file>` (install a crontab) ->
+# sched.cron:edit. `crontab -l` (list) and `crontab -r` are NOT matched: the
+# negative lookahead-free form below requires either `-e` or a non-flag file
+# argument, and explicitly excludes a lone `-l`/`-r`.
+- name: bash-crontab-edit-flag
+  tool: Bash
+  match_input:
+    command: "^\\s*crontab\\s+(?:-\\S+\\s+)*-e\\b"
+  emit:
+    - "sched.cron:edit"
+
+# `crontab <file>` — first non-flag argument that is not l/r/e is a crontab file
+# being installed. Excludes `crontab -l`, `crontab -r`, `crontab -e` (the flag
+# form is handled above) by requiring a non-dash first token.
+- name: bash-crontab-file
+  tool: Bash
+  match_input:
+    command: "^\\s*crontab\\s+(?P<file>[^-\\s][^\\s]*)\\s*$"
+  emit:
+    - "sched.cron:edit"
+
+# launchctl load|bootstrap|enable -> sched.launchd:write (NOT list/print/status).
+- name: bash-launchctl-write
+  tool: Bash
+  match_input:
+    command: "^\\s*launchctl\\s+(?:load|bootstrap|enable)\\b"
+  emit:
+    - "sched.launchd:write"
+
+# systemctl (system scope: default, or explicit --system) enable|start|
+# daemon-reload -> sched.systemd:write. The `--user` scope is NOT matched here
+# (a leading `--user` token makes the head-anchored regex fail), so user units
+# stay ungated. NOT status/list-units/show/cat (read-only verbs).
+- name: bash-systemctl-system-write
+  tool: Bash
+  match_input:
+    command: "^\\s*systemctl\\s+(?:--system\\s+)?(?:enable|start|daemon-reload)\\b"
+  emit:
+    - "sched.systemd:write"
+
 # --- Cloud / deploy ---------------------------------------------------------
 - name: bash-vercel-deploy
   tool: Bash
@@ -81,6 +160,37 @@
     command: "^\\s*docker\\s+push\\s+(?P<image>\\S+)"
   emit:
     - "docker.push:${image}"
+
+# --- Docker container-escape shapes -----------------------------------------
+#
+# Gate ONLY the escape-enabling flags of `docker run`; ordinary
+# `docker run <image>` and a project-dir bind mount stay ungated.
+
+# `docker run ... --privileged` grants the container near-host capabilities.
+- name: bash-docker-run-privileged
+  tool: Bash
+  match_input:
+    command: "^\\s*docker\\s+run\\b[^#]*\\s--privileged\\b"
+  emit:
+    - "docker.run.privileged"
+
+# `docker run` mounting the host root `/` or `/etc` grants host-filesystem
+# escape. Matches `-v` and `--volume`, both `-v /:...` (root) and `-v /etc...`.
+# A project-dir mount (`-v $(pwd):/app`, `-v ./data:/data`) does NOT match.
+- name: bash-docker-run-hostmount
+  tool: Bash
+  match_input:
+    command: "^\\s*docker\\s+run\\b[^#]*\\s(?:-v|--volume)[=\\s]/(?::|etc(?:/|:))"
+  emit:
+    - "docker.run.hostmount"
+
+# `docker run` mounting the Docker socket grants daemon-control escape.
+- name: bash-docker-run-hostmount-socket
+  tool: Bash
+  match_input:
+    command: "^\\s*docker\\s+run\\b[^#]*/var/run/docker\\.sock\\b"
+  emit:
+    - "docker.run.hostmount"
 
 # --- Destructive shell patterns (surfaced so policy/hardstop can see them) --
 - name: bash-rm-rf
@@ -151,3 +261,40 @@
     command: ">>?\\s*(?P<wpath>[^\\s>&|][^\\s>&|]*)"
   emit:
     - "fs.write:${wpath}"
+
+# --- Raw device writes (host destruction) -----------------------------------
+#
+# Surface `disk.device:write` when a write targets a raw block device under
+# /dev/sd*, /dev/disk*, /dev/nvme*, or /dev/rdisk*. The policy denies this. The
+# compiled hard-stop already covers `dd of=/dev/*`; these rules additionally
+# close `> /dev/sda` / `>> /dev/sda`, `tee /dev/sda`, and `dd of=/dev/sdb`
+# (with or without if=). Run per shell-segment, so `cd /x && dd of=/dev/sdb`
+# is caught too. Quoted device strings are data (the shell parser never treats
+# a quoted token as a redirect/command), so `echo "> /dev/sda"` does NOT fire.
+
+# Redirect `> /dev/sd*` / `>> /dev/disk*` etc. Anchored at `^>` so it matches
+# ONLY the quote-aware synthetic `> <target>` candidate the mapper derives for a
+# genuine output redirection (see collect_candidates). A quoted `echo "> /dev/sda"`
+# never produces a candidate that *begins* with `>`, so it is left as inert data.
+- name: bash-device-write-redirect
+  tool: Bash
+  match_input:
+    command: "^>>?\\s*(?P<dev>/dev/(?:sd|disk|nvme|rdisk)[^\\s>&|]*)"
+  emit:
+    - "disk.device:write"
+
+# `dd of=/dev/sd*` (with or without if=).
+- name: bash-device-write-dd
+  tool: Bash
+  match_input:
+    command: "^\\s*dd\\b[^#]*\\bof=(?P<dev>/dev/(?:sd|disk|nvme|rdisk)[^\\s]*)"
+  emit:
+    - "disk.device:write"
+
+# `tee /dev/sd*` — first non-flag argument is a raw device.
+- name: bash-device-write-tee
+  tool: Bash
+  match_input:
+    command: "^\\s*tee(?:\\s+-\\S+)*\\s+(?P<dev>/dev/(?:sd|disk|nvme|rdisk)[^\\s]*)"
+  emit:
+    - "disk.device:write"

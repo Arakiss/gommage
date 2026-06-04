@@ -1,0 +1,6 @@
+{
+  "name": "docker-run-privileged-requires-picto",
+  "note": "A privileged container has near-host capabilities; gated as docker.run.privileged. Ordinary `docker run <image>` is NOT gated (see docker_run_plain_guard).",
+  "call": { "tool": "Bash", "input": { "command": "docker run --privileged -it ubuntu bash" } },
+  "expected": { "kind": "ask_picto", "required_scope": "docker.run.privileged" }
+}

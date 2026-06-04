@@ -1,0 +1,6 @@
+{
+  "name": "twine-upload-requires-picto",
+  "note": "python -m twine upload is the canonical PyPI publish; gated as pkg.python:publish.",
+  "call": { "tool": "Bash", "input": { "command": "python3 -m twine upload dist/*" } },
+  "expected": { "kind": "ask_picto", "required_scope": "pkg.python:publish" }
+}

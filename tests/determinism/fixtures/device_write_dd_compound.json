@@ -1,0 +1,6 @@
+{
+  "name": "shell-compound-dd-of-device-is-denied",
+  "note": "Proves shell-awareness for device writes: `cd /x && dd of=/dev/sdb` is denied just like the bare form, via the per-segment mapper. Caught by the compiled hard-stop (of=/dev/*) on the dd segment; hard_stop not asserted for robustness.",
+  "call": { "tool": "Bash", "input": { "command": "cd /x && dd of=/dev/sdb" } },
+  "expected": { "kind": "gommage" }
+}

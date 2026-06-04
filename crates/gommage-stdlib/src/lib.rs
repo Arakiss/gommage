@@ -32,6 +32,10 @@ pub const POLICIES: &[StdlibFile] = &[
         contents: include_str!("../policies/30-package-managers.yaml"),
     },
     StdlibFile {
+        name: "35-system.yaml",
+        contents: include_str!("../policies/35-system.yaml"),
+    },
+    StdlibFile {
         name: "40-cloud.yaml",
         contents: include_str!("../policies/40-cloud.yaml"),
     },

@@ -1,0 +1,6 @@
+{
+  "name": "docker-run-host-root-mount-requires-picto",
+  "note": "Mounting the host root `/` into a container enables filesystem escape; gated as docker.run.hostmount. A project-dir mount is NOT gated.",
+  "call": { "tool": "Bash", "input": { "command": "docker run -v /:/host alpine sh" } },
+  "expected": { "kind": "ask_picto", "required_scope": "docker.run.hostmount" }
+}

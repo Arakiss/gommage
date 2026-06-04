@@ -1,0 +1,6 @@
+{
+  "name": "crontab-edit-requires-picto",
+  "note": "crontab -e installs a persistent scheduled job; crontab -l (list) is NOT gated (see crontab_list_guard).",
+  "call": { "tool": "Bash", "input": { "command": "crontab -e" } },
+  "expected": { "kind": "ask_picto", "required_scope": "sched.cron:edit" }
+}

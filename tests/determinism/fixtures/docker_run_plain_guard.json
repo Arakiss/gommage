@@ -1,0 +1,6 @@
+{
+  "name": "plain-docker-run-is-not-gated-by-escape-rules",
+  "note": "GUARD: the escape gates target only --privileged and host/socket mounts. `docker run myimg` surfaces no docker.run.* escape capability, so neither escape gate fires. With no rule allowing a bare docker run it fails closed to gommage; the point is that it does NOT become an ask_picto for docker.run.privileged or docker.run.hostmount.",
+  "call": { "tool": "Bash", "input": { "command": "docker run myimg" } },
+  "expected": { "kind": "gommage" }
+}

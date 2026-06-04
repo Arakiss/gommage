@@ -1,0 +1,5 @@
+{
+  "name": "cargo-publish-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "cargo publish -p gommage-core" } },
+  "expected": { "kind": "ask_picto", "required_scope": "pkg.cargo:publish" }
+}

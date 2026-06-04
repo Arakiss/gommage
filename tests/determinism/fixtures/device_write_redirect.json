@@ -1,0 +1,6 @@
+{
+  "name": "redirect-to-raw-device-is-denied",
+  "note": "`> /dev/sda` surfaces disk.device:write via the quote-aware redirect candidate and hits deny-raw-device-write in 35-system.yaml (policy deny, hard_stop:false). The compiled hard-stop does not cover bare redirects, so this closes that gap.",
+  "call": { "tool": "Bash", "input": { "command": "echo wipe > /dev/sda" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

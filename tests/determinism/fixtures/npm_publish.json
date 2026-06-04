@@ -1,0 +1,5 @@
+{
+  "name": "npm-publish-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "npm publish --access public" } },
+  "expected": { "kind": "ask_picto", "required_scope": "pkg.npm:publish" }
+}
