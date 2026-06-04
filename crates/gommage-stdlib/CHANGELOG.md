@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.6.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.5.0-alpha.1...gommage-stdlib-v0.6.0-alpha.1) (2026-06-04)
+
+
+### Features
+
+* **core:** shell-aware bash mapper closes command-shape gate evasions ([#77](https://github.com/Arakiss/gommage/issues/77)) ([8b08a3b](https://github.com/Arakiss/gommage/commit/8b08a3b4f4f240f864be555ae08b5d419afa1f09))
+
 ## [0.5.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.4.0-alpha.1...gommage-stdlib-v0.5.0-alpha.1) (2026-05-24)
 
 
