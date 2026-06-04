@@ -1,5 +1,7 @@
 # Changelog — gommage-cli
 
+## [0.40.1-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.40.0-beta.1...gommage-cli-v0.40.1-beta.1) (2026-06-04)
+
 ## [0.40.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.39.0-beta.1...gommage-cli-v0.40.0-beta.1) (2026-06-04)
 
 
