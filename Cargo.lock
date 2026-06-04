@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-audit"
-version = "0.6.3-alpha.1"
+version = "0.6.4-alpha.1"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-cli"
-version = "0.41.0-beta.1"
+version = "0.42.0-beta.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -543,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-core"
-version = "0.13.0-alpha.1"
+version = "0.13.1-alpha.1"
 dependencies = [
  "base64",
  "dirs",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-daemon"
-version = "0.6.3-alpha.1"
+version = "0.6.4-alpha.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-mcp"
-version = "0.8.3-alpha.1"
+version = "0.8.4-alpha.1"
 dependencies = [
  "anyhow",
  "gommage-audit",
@@ -607,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-stdlib"
-version = "0.7.0-alpha.1"
+version = "0.8.0-alpha.1"
 
 [[package]]
 name = "hashbrown"
