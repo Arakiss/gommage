@@ -1,0 +1,6 @@
+{
+  "name": "curl-plain-get-is-not-gated",
+  "note": "GUARD: `curl https://example.com` is a GET with no upload flag, so bash-curl-upload does not fire and net.out.post is never surfaced. Fails closed to gommage; it does NOT become an ask_picto for net.out.post.",
+  "call": { "tool": "Bash", "input": { "command": "curl https://example.com" } },
+  "expected": { "kind": "gommage" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "tee-to-bashrc-is-denied",
+  "note": "tee emits fs.write:~/.bashrc (R2), which deny-shell-rc-write denies. Closes the persistence channel where an agent writes its own startup hook.",
+  "call": { "tool": "Bash", "input": { "command": "echo payload | tee ~/.bashrc" } },
+  "expected": { "kind": "gommage" }
+}

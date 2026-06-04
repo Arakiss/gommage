@@ -1,0 +1,6 @@
+{
+  "name": "ssh-bare-login-is-not-gated",
+  "note": "GUARD: `ssh host` is an interactive login with no remote command and no tunnel flag, so neither bash-ssh-remote-command nor bash-ssh-tunnel fires. `ssh -p 2222 host` is also a guard: value-taking flags consume their argument so the port is never mistaken for a command. Fails closed to gommage; it does NOT become an ask_picto for net.ssh:exec.",
+  "call": { "tool": "Bash", "input": { "command": "ssh -p 2222 host" } },
+  "expected": { "kind": "gommage" }
+}

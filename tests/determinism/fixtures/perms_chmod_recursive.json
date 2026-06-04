@@ -1,0 +1,6 @@
+{
+  "name": "chmod-recursive-asks-for-picto",
+  "note": "chmod -R changes permissions across a whole tree. Target is a project-relative dir (not `/`), so it reaches gate-chmod-dangerous rather than the hs.chmod-system hardstop. A single-file `chmod +x`/`644`/`u+w` is NOT gated (perms_chmod_plus_x_guard).",
+  "call": { "tool": "Bash", "input": { "command": "chmod -R 777 dist" } },
+  "expected": { "kind": "ask_picto", "required_scope": "fs.chmod:dangerous" }
+}

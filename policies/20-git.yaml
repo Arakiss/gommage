@@ -35,3 +35,17 @@
     any_capability:
       - "git.reset.hard:*"
   reason: "git reset --hard is destructive; require picto"
+
+# --- Config hijack ----------------------------------------------------------
+# Setting `url.<x>.insteadOf` silently rewrites every remote (exfil/MITM), and
+# `core.hooksPath` / `core.fsmonitor` point git at an arbitrary executable that
+# runs on routine git operations. Gate with a picto; ordinary
+# `git config user.name X` / `git config --list` surface no capability and stay
+# free.
+- name: gate-git-config-hijack
+  decision: ask_picto
+  required_scope: "git.config:hijack"
+  match:
+    any_capability:
+      - "git.config:hijack"
+  reason: "git config setting url.insteadOf / core.hooksPath / core.fsmonitor can hijack remotes or run code; require a picto"

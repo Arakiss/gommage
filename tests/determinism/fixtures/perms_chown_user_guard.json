@@ -1,0 +1,6 @@
+{
+  "name": "chown-to-normal-user-single-file-is-not-gated",
+  "note": "GUARD: `chown me f` changes ownership of one file to a non-root user — not recursive, not root — so bash-chown-dangerous does not fire. Fails closed to gommage; it does NOT become an ask_picto for fs.chown:dangerous.",
+  "call": { "tool": "Bash", "input": { "command": "chown me notes.txt" } },
+  "expected": { "kind": "gommage" }
+}

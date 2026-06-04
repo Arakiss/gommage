@@ -1,0 +1,6 @@
+{
+  "name": "wget-plain-get-is-not-gated",
+  "note": "GUARD: `wget https://example.com/file` is a GET with no POST/body flag, so bash-wget-post does not fire. Fails closed to gommage; it does NOT become an ask_picto for net.out.post.",
+  "call": { "tool": "Bash", "input": { "command": "wget https://example.com/file" } },
+  "expected": { "kind": "gommage" }
+}

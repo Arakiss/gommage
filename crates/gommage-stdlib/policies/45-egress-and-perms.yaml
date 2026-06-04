@@ -1,0 +1,79 @@
+# Egress, permission, config-hijack, and code-injection policy.
+#
+# This file loads after 40-cloud.yaml and before 50-cloud-tools.yaml. None of
+# these capabilities is matched by an earlier file, so evaluation reaches the
+# gates below. Everything here is POLICY-level: the egress and permission gates
+# ask for a picto (an authorised human can proceed); the code-injection deny
+# blocks outright. None of this touches the compiled hard-stop set.
+
+# --- Exfil / egress: data leaving the host ----------------------------------
+# scp/rsync to a remote, ssh running a remote command or opening a tunnel, and
+# curl/wget uploads are the channels an agent uses to move data off-box. Gate
+# each with a picto; the routine local/GET forms surface no capability and stay
+# free (see the *_guard fixtures).
+
+- name: gate-scp-out
+  decision: ask_picto
+  required_scope: "net.scp:out"
+  match:
+    any_capability:
+      - "net.scp:out"
+  reason: "scp to a remote host can exfiltrate data; require a picto"
+
+- name: gate-rsync-out
+  decision: ask_picto
+  required_scope: "net.rsync:out"
+  match:
+    any_capability:
+      - "net.rsync:out"
+  reason: "rsync to a remote host can exfiltrate data; require a picto"
+
+- name: gate-ssh-exec
+  decision: ask_picto
+  required_scope: "net.ssh:exec"
+  match:
+    any_capability:
+      - "net.ssh:exec"
+  reason: "ssh running a remote command or opening a tunnel is a remote-exec/egress channel; require a picto"
+
+- name: gate-net-out-post
+  decision: ask_picto
+  required_scope: "net.out.post"
+  match:
+    any_capability:
+      - "net.out.post"
+  reason: "an HTTP upload/POST can exfiltrate data to an arbitrary endpoint; require a picto"
+
+# --- Permissions: dangerous chmod / chown -----------------------------------
+# Recursive or world-writable permission changes (and chowning to root) are the
+# shapes that widen access or hand files to root. Gate with a picto; a single-
+# file chmod +x / 644 / u+w and a chown to a normal user stay ungated.
+
+- name: gate-chmod-dangerous
+  decision: ask_picto
+  required_scope: "fs.chmod:dangerous"
+  match:
+    any_capability:
+      - "fs.chmod:dangerous"
+  reason: "recursive or world-writable chmod widens access broadly; require a picto"
+
+- name: gate-chown-dangerous
+  decision: ask_picto
+  required_scope: "fs.chown:dangerous"
+  match:
+    any_capability:
+      - "fs.chown:dangerous"
+  reason: "recursive chown or chowning to root changes ownership broadly; require a picto"
+
+# --- Code injection: dynamic-loader preload ---------------------------------
+# An LD_PRELOAD / DYLD_INSERT_LIBRARIES / DYLD_LIBRARY_PATH env prefix forces a
+# shared library into a spawned process. Deny outright (not a picto): there is
+# no routine agent use, and the blast radius is arbitrary code execution.
+
+- name: deny-env-inject-preload
+  decision: gommage
+  hard_stop: false
+  match:
+    any_capability:
+      - "proc.env.inject:preload"
+  reason: "LD_PRELOAD/DYLD_* injection forces a library into spawned processes; edit this file to override"

@@ -1,0 +1,13 @@
+{
+  "name": "chmod-plus-x-with-octal-filename-is-not-gated",
+  "note": "GUARD: a file named like an octal (777) appears as the second argument; the MODE position (first non-flag arg) is +x, which is not world-writable, so bash-chmod-world-write-mode anchors to the mode and does NOT over-gate. Fails closed to gommage; it does NOT become an ask_picto for fs.chmod:dangerous.",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "chmod +x 777"
+    }
+  },
+  "expected": {
+    "kind": "gommage"
+  }
+}

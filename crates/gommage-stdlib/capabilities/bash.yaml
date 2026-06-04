@@ -298,3 +298,134 @@
     command: "^\\s*tee(?:\\s+-\\S+)*\\s+(?P<dev>/dev/(?:sd|disk|nvme|rdisk)[^\\s]*)"
   emit:
     - "disk.device:write"
+
+# --- Exfil / egress (data leaving the host) ----------------------------------
+#
+# Each rule fires per shell segment (the mapper runs every rule against each
+# prefix-stripped candidate), so `cd /x && scp f host:/p` gates too. The shape
+# being gated is "data leaves to a remote endpoint"; routine local/GET forms are
+# left ungated by the guards below and stay free.
+
+# scp with a remote target: an argument of the form `host:` or `user@host:`
+# (the scp remote convention). `scp a b` (both local, no colon) does NOT match.
+- name: bash-scp-remote
+  tool: Bash
+  match_input:
+    command: "^\\s*scp\\b[^#]*\\s(?:[\\w.-]+@)?[\\w][\\w.-]*:"
+  emit:
+    - "net.scp:out"
+
+# rsync with a remote target: a `host:`/`user@host:` argument or an `rsync://`
+# URL. `rsync a b` (both local) does NOT match.
+- name: bash-rsync-remote
+  tool: Bash
+  match_input:
+    command: "^\\s*rsync\\b[^#]*\\s(?:rsync://|(?:[\\w.-]+@)?[\\w][\\w.-]*:)"
+  emit:
+    - "net.rsync:out"
+
+# ssh that runs a remote COMMAND (a non-option positional after the host) or
+# opens a port-forward tunnel (`-L`/`-R`/`-D`). A bare `ssh host` (interactive
+# login, no trailing command, no tunnel flag) does NOT match.
+- name: bash-ssh-tunnel
+  tool: Bash
+  match_input:
+    command: "^\\s*ssh\\b[^#]*\\s-[LRD]\\b"
+  emit:
+    - "net.ssh:exec"
+
+# ssh host <command>: after the `[user@]host` token, a trailing non-option word
+# is a remote command. Best-effort and conservative: value-taking flags
+# (`-p -i -o -l -F -c -m -b -e -B -E -J -Q -S -W`) MUST consume their argument
+# so a port number is never mistaken for the host; boolean flags
+# (`-4 -6 -A -a -C -f -G -g -K -k -M -N -n -q -s -T -t -V -v -X -x -Y -y`) take
+# none. The first bare token after all flags is the host; a *further* non-flag
+# token is the remote command. A bare `ssh host` (no trailing command) and
+# `ssh -p 2222 host` (flag+value, no command) do NOT match.
+- name: bash-ssh-remote-command
+  tool: Bash
+  match_input:
+    command: "^\\s*ssh(?:\\s+(?:-[pioFlcmbeBEJQSW]\\s*\\S+|-[46AaCfGgKkMNnqsTtVvXxYy]+))*\\s+(?:[\\w.-]+@)?[\\w][\\w.-]*\\s+(?P<cmd>[^-\\s][^\\s]*)"
+  emit:
+    - "net.ssh:exec"
+
+# curl with an upload/POST flag: `-d`/`--data*`, `-F`/`--form`, `-T`/
+# `--upload-file`, or an explicit `-X POST`/`-X PUT`. A plain `curl https://x`
+# (GET) does NOT match.
+- name: bash-curl-upload
+  tool: Bash
+  match_input:
+    command: "^\\s*curl\\b[^#]*\\s(?:-d\\b|--data(?:-\\w+|=|\\b)|-F\\b|--form\\b|-T\\b|--upload-file\\b|-X\\s+(?:POST|PUT))"
+  emit:
+    - "net.out.post"
+
+# wget with a POST/body flag. A plain `wget https://x` (GET) does NOT match.
+- name: bash-wget-post
+  tool: Bash
+  match_input:
+    command: "^\\s*wget\\b[^#]*\\s(?:--post-data\\b|--post-data=|--post-file\\b|--post-file=|--method=POST|--body-data\\b|--body-data=|--body-file\\b|--body-file=)"
+  emit:
+    - "net.out.post"
+
+# --- Permissions: dangerous chmod / chown variants ---------------------------
+#
+# Gate ONLY the recursive or over-broad variant; a single-file `chmod +x`,
+# `chmod 644`, `chmod u+w`, or `chown me f` stays ungated.
+
+# chmod -R / --recursive, OR a world-writable mode: octal `777`/`0777` (any
+# leading owner/group digits with a world digit granting write — `2`/`3`/`6`/`7`
+# in the last position), or the symbolic `a+w` / `o+w`. The symbolic `u+w`
+# (owner write), `g+w` (group write), `+x`, and octal `644` are NOT world-write
+# and stay ungated.
+- name: bash-chmod-recursive
+  tool: Bash
+  match_input:
+    command: "^\\s*chmod\\b[^#]*(?:\\s-R\\b|\\s--recursive\\b)"
+  emit:
+    - "fs.chmod:dangerous"
+
+# World-writable MODE in the mode position (first non-flag arg), so a file that
+# merely happens to be named like an octal (e.g. `chmod +x 777`) is not gated.
+- name: bash-chmod-world-write-mode
+  tool: Bash
+  match_input:
+    command: "^\\s*chmod\\b(?:\\s+-{1,2}[A-Za-z][\\w-]*)*\\s+(?:0?[0-7][0-7][2367]\\b|[ao]\\+[rwxXst]*w[rwxXst]*\\b)"
+  emit:
+    - "fs.chmod:dangerous"
+
+# chown -R / --recursive, OR a target user/group of root (`root`, `root:`,
+# `:root`, `root:root`). `chown me f` (non-root, non-recursive) stays ungated.
+- name: bash-chown-dangerous
+  tool: Bash
+  match_input:
+    command: "^\\s*chown\\b[^#]*\\s(?:-R\\b|--recursive\\b|root\\b|root:|:root\\b|0\\b|0:)"
+  emit:
+    - "fs.chown:dangerous"
+
+# --- Config hijack: git config setting a dangerous key -----------------------
+#
+# `git config` SETTING `url.<x>.insteadOf`, `core.hookspath`, or
+# `core.fsmonitor` lets an attacker silently rewrite remotes or run code on
+# every git operation. `git config user.name X` / `git config --list` (read)
+# do NOT match.
+- name: bash-git-config-hijack
+  tool: Bash
+  match_input:
+    command: "(?i)^\\s*git\\s+config\\b(?:\\s+--\\S+)*\\s+(?:url\\.[^\\s]*\\.insteadof|core\\.hookspath|core\\.fsmonitor)\\b"
+  emit:
+    - "git.config:hijack"
+
+# --- Code injection: dynamic-loader preload env prefix -----------------------
+#
+# An env-assignment prefix that sets LD_PRELOAD / DYLD_INSERT_LIBRARIES /
+# DYLD_LIBRARY_PATH forces a shared library into every spawned process — a
+# classic code-injection vector. This MUST match candidate 0 (the whole
+# command), because the shell-aware command_words strips env-assignment
+# prefixes from the per-segment candidates; the raw command still carries them.
+# An ordinary `FOO=bar mycmd` env prefix does NOT match.
+- name: bash-env-inject-preload
+  tool: Bash
+  match_input:
+    command: "(?:^|[;&|]|\\bsudo\\b|\\benv\\b)\\s*(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*(?:LD_PRELOAD|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH)="
+  emit:
+    - "proc.env.inject:preload"

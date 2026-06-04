@@ -1,0 +1,6 @@
+{
+  "name": "git-config-user-name-is-not-gated",
+  "note": "GUARD: `git config user.name Alice` sets an innocuous identity key, not a hijack key (url.insteadOf / core.hooksPath / core.fsmonitor), so bash-git-config-hijack does not fire and git.config:hijack is never surfaced. Fails closed to gommage; it does NOT become an ask_picto for git.config:hijack.",
+  "call": { "tool": "Bash", "input": { "command": "git config user.name Alice" } },
+  "expected": { "kind": "gommage" }
+}

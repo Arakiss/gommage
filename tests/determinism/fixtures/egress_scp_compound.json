@@ -1,0 +1,6 @@
+{
+  "name": "shell-compound-scp-remote-asks-for-picto",
+  "note": "Proves shell-awareness: `cd /x && scp f host:/p` is gated exactly like a bare scp because the mapper runs capability rules per shell segment.",
+  "call": { "tool": "Bash", "input": { "command": "cd /x && scp f user@host:/p" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.scp:out" }
+}

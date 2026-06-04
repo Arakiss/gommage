@@ -1,0 +1,6 @@
+{
+  "name": "shell-compound-append-to-fish-config-is-denied",
+  "note": "Proves shell-awareness for the rc deny: `cd /x && echo y >> ~/.config/fish/config.fish` still surfaces fs.write:~/.config/fish/config.fish per-segment and hits deny-shell-rc-write.",
+  "call": { "tool": "Bash", "input": { "command": "cd /x && echo y >> ~/.config/fish/config.fish" } },
+  "expected": { "kind": "gommage" }
+}

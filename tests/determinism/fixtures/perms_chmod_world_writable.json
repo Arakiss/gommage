@@ -1,0 +1,6 @@
+{
+  "name": "chmod-world-writable-mode-asks-for-picto",
+  "note": "A world-writable mode (a+w / o+w / octal ending in 2,3,6,7) lets anyone write the file. Gated via bash-chmod-dangerous.",
+  "call": { "tool": "Bash", "input": { "command": "chmod a+w shared.txt" } },
+  "expected": { "kind": "ask_picto", "required_scope": "fs.chmod:dangerous" }
+}

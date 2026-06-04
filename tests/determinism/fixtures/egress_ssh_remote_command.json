@@ -1,0 +1,6 @@
+{
+  "name": "ssh-running-a-remote-command-asks-for-picto",
+  "note": "ssh with a trailing non-option word after the host runs a remote command — a remote-exec/egress channel. A bare `ssh host` is NOT gated (egress_ssh_bare_guard).",
+  "call": { "tool": "Bash", "input": { "command": "ssh user@host rm -rf /data" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.ssh:exec" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "chown-to-root-asks-for-picto",
+  "note": "Chowning a file to root (root / root:root / :root / uid 0) hands it to the privileged user. Gated via bash-chown-dangerous.",
+  "call": { "tool": "Bash", "input": { "command": "chown root:root setuid_helper" } },
+  "expected": { "kind": "ask_picto", "required_scope": "fs.chown:dangerous" }
+}
