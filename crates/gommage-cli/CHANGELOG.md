@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.40.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.39.0-beta.1...gommage-cli-v0.40.0-beta.1) (2026-06-04)
+
+
+### Features
+
+* **cli:** proactively notify when a new gommage version is available ([#74](https://github.com/Arakiss/gommage/issues/74)) ([4149f6c](https://github.com/Arakiss/gommage/commit/4149f6c9a5caf421dafab8e735529db9608a734b))
+
 ## [0.39.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.38.0-beta.1...gommage-cli-v0.39.0-beta.1) (2026-06-04)
 
 
