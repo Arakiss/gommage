@@ -1,0 +1,6 @@
+{
+  "name": "rsync-both-local-is-not-gated",
+  "note": "GUARD: `rsync -a src/ dst/` syncs two local paths (no `host:` / rsync:// target), so bash-rsync-remote does not fire. Fails closed to gommage; it does NOT become an ask_picto for net.rsync:out.",
+  "call": { "tool": "Bash", "input": { "command": "rsync -a src/ dst/" } },
+  "expected": { "kind": "gommage" }
+}

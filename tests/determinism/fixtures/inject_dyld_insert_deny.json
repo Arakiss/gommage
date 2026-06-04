@@ -1,0 +1,6 @@
+{
+  "name": "dyld-insert-libraries-env-prefix-is-denied",
+  "note": "DYLD_INSERT_LIBRARIES is the macOS equivalent of LD_PRELOAD; the env-assignment prefix injects a dylib. Denied via deny-env-inject-preload (policy deny, hard_stop:false).",
+  "call": { "tool": "Bash", "input": { "command": "DYLD_INSERT_LIBRARIES=/tmp/e.dylib ls" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

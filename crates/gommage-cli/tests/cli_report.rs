@@ -104,7 +104,7 @@ fn report_bundle_writes_redacted_support_json() {
             .and_then(|v| v.as_array())
             .unwrap()
             .len(),
-        9
+        10
     );
     assert!(
         report

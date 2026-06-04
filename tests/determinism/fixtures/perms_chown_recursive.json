@@ -1,0 +1,6 @@
+{
+  "name": "chown-recursive-asks-for-picto",
+  "note": "chown -R rewrites ownership across a tree. Gated via bash-chown-dangerous. `chown me f` (non-root, single file) is NOT gated (perms_chown_user_guard).",
+  "call": { "tool": "Bash", "input": { "command": "chown -R me build" } },
+  "expected": { "kind": "ask_picto", "required_scope": "fs.chown:dangerous" }
+}

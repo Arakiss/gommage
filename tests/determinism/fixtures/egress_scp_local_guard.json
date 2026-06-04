@@ -1,0 +1,6 @@
+{
+  "name": "scp-both-local-is-not-gated",
+  "note": "GUARD: `scp a b` copies between two local paths (no `host:` token), so bash-scp-remote does not fire and net.scp:out is never surfaced. With no rule allowing a bare scp it fails closed to gommage; the point is it does NOT become an ask_picto for net.scp:out.",
+  "call": { "tool": "Bash", "input": { "command": "scp a b" } },
+  "expected": { "kind": "gommage" }
+}

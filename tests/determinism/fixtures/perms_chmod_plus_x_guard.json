@@ -1,0 +1,6 @@
+{
+  "name": "chmod-plus-x-single-file-is-not-gated",
+  "note": "GUARD: `chmod +x script.sh` adds execute to one file — not recursive, not world-writable — so bash-chmod-dangerous does not fire. `chmod 644 f`, `chmod 755 f`, `chmod u+w f`, and `chmod g+w f` are guards too. Fails closed to gommage; it does NOT become an ask_picto for fs.chmod:dangerous.",
+  "call": { "tool": "Bash", "input": { "command": "chmod +x script.sh" } },
+  "expected": { "kind": "gommage" }
+}

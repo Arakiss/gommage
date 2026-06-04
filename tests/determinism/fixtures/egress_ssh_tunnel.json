@@ -1,0 +1,6 @@
+{
+  "name": "ssh-opening-a-port-forward-tunnel-asks-for-picto",
+  "note": "ssh -L/-R/-D opens a port-forward tunnel, an egress channel. Gated via bash-ssh-tunnel.",
+  "call": { "tool": "Bash", "input": { "command": "ssh -L 8080:localhost:80 host" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.ssh:exec" }
+}

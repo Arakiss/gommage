@@ -1,0 +1,6 @@
+{
+  "name": "append-to-etc-profile-is-denied",
+  "note": "An absolute /etc/profile (and /etc/profile.d/*) write is a system-wide shell-rc persistence vector. deny-shell-rc-write denies the fs.write:/etc/profile the redirect surfaces.",
+  "call": { "tool": "Bash", "input": { "command": "echo x >> /etc/profile" } },
+  "expected": { "kind": "gommage" }
+}

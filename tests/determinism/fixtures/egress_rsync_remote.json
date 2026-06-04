@@ -1,0 +1,6 @@
+{
+  "name": "rsync-to-remote-host-asks-for-picto",
+  "note": "rsync with a `user@host:` target (or an rsync:// URL) exfiltrates data. `rsync a b` (both local) is NOT gated — see egress_rsync_local_guard.",
+  "call": { "tool": "Bash", "input": { "command": "rsync -avz data/ user@host:/backup" } },
+  "expected": { "kind": "ask_picto", "required_scope": "net.rsync:out" }
+}
