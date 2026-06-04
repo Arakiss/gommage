@@ -44,6 +44,7 @@ mod tui_render;
 mod tui_stream;
 mod tui_views;
 mod uninstall;
+mod update_cache;
 mod util;
 mod verify;
 
@@ -453,8 +454,8 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         }
         Cmd::Agent(sub) => return cmd_agent(sub, layout),
         Cmd::Beta(sub) => return cmd_beta(sub, layout),
-        Cmd::Update(options) => return cmd_update(options),
-        Cmd::Upgrade(options) => return cmd_upgrade(options),
+        Cmd::Update(options) => return cmd_update(&layout, options),
+        Cmd::Upgrade(options) => return cmd_upgrade(&layout, options),
         Cmd::Uninstall {
             agent,
             daemon,

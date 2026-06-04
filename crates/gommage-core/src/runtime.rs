@@ -106,6 +106,7 @@ pub struct HomeLayout {
     pub key_file: PathBuf,
     pub expedition_file: PathBuf,
     pub socket: PathBuf,
+    pub update_check: PathBuf,
 }
 
 impl HomeLayout {
@@ -122,6 +123,7 @@ impl HomeLayout {
             key_file: root.join("key.ed25519"),
             expedition_file: root.join("expedition.json"),
             socket: root.join("gommage.sock"),
+            update_check: root.join("update-check.json"),
         }
     }
 

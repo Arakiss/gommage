@@ -11,6 +11,8 @@ use std::{
     process::{Command, ExitCode},
 };
 
+use crate::self_update::UpdateStatus;
+use crate::update_cache;
 use crate::util::{path_details, path_display};
 
 pub(crate) fn cmd_doctor(layout: HomeLayout, json: bool) -> Result<ExitCode> {
@@ -260,7 +262,49 @@ pub(crate) fn build_doctor_report(layout: &HomeLayout) -> DoctorReport {
     push_companion_binary_check(&mut report, "gommage-daemon");
     push_companion_binary_check(&mut report, "gommage-mcp");
 
+    push_update_check(&mut report, layout);
+
     report
+}
+
+/// Surface the cached new-version check. This is a pure local read — no network
+/// I/O — so doctor never blocks or fails on a transient outage. An available
+/// upgrade is a `Warn` (informational), not a `Fail`, so it never flips the
+/// doctor/verify exit code.
+fn push_update_check(report: &mut DoctorReport, layout: &HomeLayout) {
+    match update_cache::read_cache(&update_cache::cache_path(layout)) {
+        Some(cache) if cache.status == UpdateStatus::UpgradeAvailable => {
+            report.push(
+                "update",
+                DoctorStatus::Warn,
+                format!(
+                    "gommage {} available — run `gommage upgrade`",
+                    cache.latest_version
+                ),
+                Some(serde_json::json!({
+                    "latest_tag": cache.latest_tag,
+                    "latest_version": cache.latest_version,
+                    "checked_at": cache.checked_at.to_string(),
+                })),
+            );
+        }
+        Some(cache) => report.push(
+            "update",
+            DoctorStatus::Ok,
+            "latest",
+            Some(serde_json::json!({
+                "latest_tag": cache.latest_tag,
+                "latest_version": cache.latest_version,
+                "checked_at": cache.checked_at.to_string(),
+            })),
+        ),
+        None => report.push(
+            "update",
+            DoctorStatus::Ok,
+            "update check not run yet — run `gommage update`",
+            None,
+        ),
+    }
 }
 
 fn push_path_check(report: &mut DoctorReport, name: &str, path: &Path) {
@@ -359,4 +403,73 @@ fn print_doctor_report(report: &DoctorReport) {
         "summary: {} failure(s), {} warning(s)",
         report.summary.failures, report.summary.warnings
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::update_cache::UpdateCheckCache;
+    use tempfile::tempdir;
+    use time::OffsetDateTime;
+
+    fn find_update_check(report: &DoctorReport) -> &DoctorCheck {
+        report
+            .checks
+            .iter()
+            .find(|check| check.name == "update")
+            .expect("doctor report must contain an `update` check")
+    }
+
+    fn write_update_cache(layout: &HomeLayout, status: UpdateStatus) {
+        let cache = UpdateCheckCache {
+            checked_at: OffsetDateTime::now_utc(),
+            current_version: "0.39.0-beta.1".to_string(),
+            latest_tag: "gommage-cli-v0.40.0-beta.1".to_string(),
+            latest_version: "0.40.0-beta.1".to_string(),
+            status,
+        };
+        let bytes = serde_json::to_vec_pretty(&cache).unwrap();
+        std::fs::write(&layout.update_check, bytes).unwrap();
+    }
+
+    #[test]
+    fn doctor_surfaces_upgrade_available() {
+        let td = tempdir().unwrap();
+        let layout = HomeLayout::at(td.path());
+        layout.ensure().unwrap();
+        write_update_cache(&layout, UpdateStatus::UpgradeAvailable);
+
+        let report = build_doctor_report(&layout);
+        let check = find_update_check(&report);
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.message.contains("available"));
+        assert!(check.message.contains("gommage upgrade"));
+    }
+
+    #[test]
+    fn doctor_update_ok_when_latest() {
+        let td = tempdir().unwrap();
+        let layout = HomeLayout::at(td.path());
+        layout.ensure().unwrap();
+        write_update_cache(&layout, UpdateStatus::UpToDate);
+
+        let report = build_doctor_report(&layout);
+        let check = find_update_check(&report);
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert_eq!(check.message, "latest");
+    }
+
+    #[test]
+    fn doctor_update_missing_cache_is_ok() {
+        let td = tempdir().unwrap();
+        let layout = HomeLayout::at(td.path());
+        layout.ensure().unwrap();
+        // No cache file written.
+
+        let report = build_doctor_report(&layout);
+        let check = find_update_check(&report);
+        assert_eq!(check.status, DoctorStatus::Ok);
+        // A missing cache must never flip doctor's exit code.
+        assert_eq!(report.summary.failures, 0);
+    }
 }

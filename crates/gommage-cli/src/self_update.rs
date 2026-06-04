@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, ValueEnum};
+use gommage_core::runtime::HomeLayout;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -9,9 +10,9 @@ use std::{
 
 use crate::release::resolve_asset;
 
-const DEFAULT_REPO: &str = "Arakiss/gommage";
+pub(crate) const DEFAULT_REPO: &str = "Arakiss/gommage";
 const INSTALLER_BRANCH: &str = "main";
-const TAG_PREFIX: &str = "gommage-cli-v";
+pub(crate) const TAG_PREFIX: &str = "gommage-cli-v";
 
 #[derive(Args)]
 pub(crate) struct UpdateOptions {
@@ -27,6 +28,12 @@ pub(crate) struct UpdateOptions {
     /// Exit 1 when a newer installable release exists.
     #[arg(long)]
     check: bool,
+    /// Throttled background check: refresh the cached result only when it is
+    /// stale, print a one-line notice if a newer version exists, and always
+    /// exit 0 (quiet, fail-open). Intended for SessionStart hooks and other
+    /// periodic callers that must never block or error.
+    #[arg(long)]
+    if_stale: bool,
 }
 
 #[derive(Args)]
@@ -93,20 +100,20 @@ impl UpgradeSkillAgent {
 }
 
 #[derive(Debug, Serialize)]
-struct UpdateReport {
-    status: UpdateStatus,
-    current_version: String,
+pub(crate) struct UpdateReport {
+    pub(crate) status: UpdateStatus,
+    pub(crate) current_version: String,
     current_tag: String,
-    latest_version: String,
-    latest_tag: String,
+    pub(crate) latest_version: String,
+    pub(crate) latest_tag: String,
     repo: String,
     asset: String,
     upgrade_command: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum UpdateStatus {
+pub(crate) enum UpdateStatus {
     UpToDate,
     UpgradeAvailable,
     AheadOfRelease,
@@ -148,8 +155,23 @@ struct GithubAsset {
     name: String,
 }
 
-pub(crate) fn cmd_update(options: UpdateOptions) -> Result<ExitCode> {
+pub(crate) fn cmd_update(layout: &HomeLayout, options: UpdateOptions) -> Result<ExitCode> {
+    if options.if_stale {
+        // Proactive background mode: refresh only if the cache is stale (the
+        // TTL throttles network calls to at most once per window), then print a
+        // one-line notice when an upgrade is available. Always exit 0 and never
+        // surface errors so a SessionStart hook can call this unconditionally.
+        crate::update_cache::refresh(layout, &options.repo);
+        if let Some(line) = crate::update_cache::notice_line(layout) {
+            println!("{line}");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
     let report = build_update_report(&options.repo, &options.asset)?;
+    // The report was just fetched from GitHub; persist it so `gommage doctor`
+    // can surface the result without any network I/O. Best-effort: a write
+    // failure never affects the update command's exit code.
+    crate::update_cache::persist_report(layout, &report);
     if options.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -164,7 +186,7 @@ pub(crate) fn cmd_update(options: UpdateOptions) -> Result<ExitCode> {
     )
 }
 
-pub(crate) fn cmd_upgrade(options: UpgradeOptions) -> Result<ExitCode> {
+pub(crate) fn cmd_upgrade(layout: &HomeLayout, options: UpgradeOptions) -> Result<ExitCode> {
     let installer = options.installer_url();
     let args = options.installer_args();
 
@@ -173,7 +195,7 @@ pub(crate) fn cmd_upgrade(options: UpgradeOptions) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    if should_skip_latest_upgrade(&options)? {
+    if should_skip_latest_upgrade(layout, &options)? {
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -241,7 +263,7 @@ impl UpgradeOptions {
     }
 }
 
-fn build_update_report(repo: &str, raw_asset: &str) -> Result<UpdateReport> {
+pub(crate) fn build_update_report(repo: &str, raw_asset: &str) -> Result<UpdateReport> {
     let asset = resolve_asset(raw_asset)?;
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let current_tag = format!("{TAG_PREFIX}{current_version}");
@@ -320,11 +342,14 @@ fn print_upgrade_plan(options: &UpgradeOptions, installer: &str, args: &[String]
     println!("command: {}", display_installer_command(installer, args));
 }
 
-fn should_skip_latest_upgrade(options: &UpgradeOptions) -> Result<bool> {
+fn should_skip_latest_upgrade(layout: &HomeLayout, options: &UpgradeOptions) -> Result<bool> {
     if options.force || options.skill_only || options.with_skill || options.version != "latest" {
         return Ok(false);
     }
     let report = build_update_report(&options.repo, "auto")?;
+    // The report was just fetched; persist it so doctor can surface the result
+    // with no network I/O. Best-effort: never affects the upgrade exit code.
+    crate::update_cache::persist_report(layout, &report);
     match report.status {
         UpdateStatus::UpgradeAvailable => Ok(false),
         UpdateStatus::UpToDate => {
@@ -415,6 +440,8 @@ fn authenticated_curl(url: &str) -> Command {
         .arg("--proto")
         .arg("=https")
         .arg("--tlsv1.2")
+        .arg("--max-time")
+        .arg("10")
         .arg("-sSfL");
     if let Some(token) = github_token() {
         command
