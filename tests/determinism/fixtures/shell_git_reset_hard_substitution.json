@@ -1,0 +1,5 @@
+{
+  "name": "shell-substitution-git-reset-hard-asks-for-picto",
+  "call": { "tool": "Bash", "input": { "command": "$(git reset --hard origin/main)" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.reset.hard" }
+}

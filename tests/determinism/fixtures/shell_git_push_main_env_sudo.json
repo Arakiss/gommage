@@ -1,0 +1,5 @@
+{
+  "name": "shell-env-sudo-prefix-git-push-main-asks-for-picto",
+  "call": { "tool": "Bash", "input": { "command": "env GIT_TRACE=1 sudo git push origin main" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.push:main" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "shell-quoted-git-push-string-is-data-not-a-push",
+  "note": "echo 'git push origin main' is a quoted string, not a git push. The mapper must NOT emit git.push, so this does NOT hit the main-push picto gate. With no rule allowing a bare echo proc.exec, it fails closed to gommage. If the quote guard regressed and git.push were emitted, the decision would flip to ask_picto — that flip is what this fixture catches.",
+  "call": { "tool": "Bash", "input": { "command": "echo 'git push origin main'" } },
+  "expected": { "kind": "gommage" }
+}

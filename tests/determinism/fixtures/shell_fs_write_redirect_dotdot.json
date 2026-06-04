@@ -1,0 +1,7 @@
+{
+  "name": "shell-redirect-to-dotdot-path-emits-fs-write-and-is-gommaged",
+  "note": "A '>' redirect target surfaces fs.write on the path; a '..'-escaping target hits deny-dotdot-escape.",
+  "call": { "tool": "Bash", "input": { "command": "echo data > /tmp/proj/../../etc/passwd" } },
+  "expected": { "kind": "gommage" },
+  "expedition_root": "/tmp/proj"
+}

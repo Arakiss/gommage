@@ -14,6 +14,7 @@ pub mod mapper;
 pub mod picto;
 pub mod policy;
 pub mod runtime;
+pub(crate) mod shell;
 pub mod toolcall;
 pub mod webhook_signature;
 

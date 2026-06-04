@@ -416,6 +416,32 @@ mod tests {
     }
 
     #[test]
+    fn dotdot_glob_matches_shell_verb_write_paths() {
+        // Locks the contract the shell-aware bash.yaml verb rules rely on: a
+        // `tee`/`cp`/redirect target that escapes via `..` must hit
+        // deny-dotdot-escape exactly like a Write tool call would.
+        let yaml = r#"
+- name: deny-dotdot
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write:**/../**"
+      - "fs.read:**/../**"
+  reason: "no dotdot"
+"#;
+        let p = Policy::from_yaml_string(yaml, &HashMap::new(), "test.yaml").unwrap();
+        let r = &p.rules[0];
+        assert!(
+            r.r#match
+                .matches(&[Capability::new("fs.write:/tmp/proj/../../etc/passwd")])
+        );
+        assert!(
+            !r.r#match
+                .matches(&[Capability::new("fs.write:/tmp/proj/src/lib.rs")])
+        );
+    }
+
+    #[test]
     fn policy_hash_is_independent_of_root_path() {
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();

@@ -91,13 +91,13 @@ pub fn check(caps: &[Capability]) -> Option<HardStopHit> {
 }
 
 fn semantic_proc_exec_hit(command: &str) -> Option<(&'static str, &'static str)> {
-    for substitution in command_substitutions(command) {
+    for substitution in crate::shell::command_substitutions(command) {
         if let Some(hit) = semantic_proc_exec_hit(&substitution) {
             return Some(hit);
         }
     }
 
-    for segment in shell_segments(command) {
+    for segment in crate::shell::shell_segments(command) {
         if let Some(hit) = semantic_segment_hit(&segment) {
             return Some(hit);
         }
@@ -106,11 +106,14 @@ fn semantic_proc_exec_hit(command: &str) -> Option<(&'static str, &'static str)>
 }
 
 fn semantic_segment_hit(words: &[String]) -> Option<(&'static str, &'static str)> {
-    let words = command_words(words)?;
-    let (cmd, args) = words.split_first()?;
+    let words = crate::shell::command_words(words)?;
+    let (cmd_token, args) = words.split_first()?;
+    // Normalise an absolute/relative path head (`/bin/rm`, `./bin/rm`) to its
+    // basename so a fully-pathed invocation hits the same hardstops.
+    let cmd = crate::shell::head_basename(cmd_token);
 
-    if matches!(cmd.as_str(), "bash" | "sh" | "zsh")
-        && let Some(script) = shell_c_payload(args)
+    if matches!(cmd, "bash" | "sh" | "zsh")
+        && let Some(script) = crate::shell::shell_c_payload(args)
     {
         return semantic_proc_exec_hit(script);
     }
@@ -127,64 +130,6 @@ fn semantic_segment_hit(words: &[String]) -> Option<(&'static str, &'static str)
         return Some(("hs.dd-to-device", SEMANTIC_DD_DEVICE_PATTERN));
     }
 
-    None
-}
-
-fn command_words(words: &[String]) -> Option<&[String]> {
-    let mut index = 0;
-    while index < words.len() {
-        match words[index].as_str() {
-            "sudo" => {
-                index += 1;
-                while index < words.len() && words[index].starts_with('-') {
-                    if matches!(
-                        words[index].as_str(),
-                        "-u" | "--user" | "-g" | "--group" | "-h" | "--host"
-                    ) {
-                        index += 1;
-                    }
-                    index += 1;
-                }
-            }
-            "env" => {
-                index += 1;
-                while index < words.len()
-                    && (is_assignment(&words[index]) || words[index].starts_with('-'))
-                {
-                    index += 1;
-                }
-            }
-            word if is_assignment(word) => index += 1,
-            _ => break,
-        }
-    }
-    words.get(index..)
-}
-
-fn is_assignment(word: &str) -> bool {
-    let Some((name, _)) = word.split_once('=') else {
-        return false;
-    };
-    let mut chars = name.chars();
-    chars
-        .next()
-        .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
-        && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-}
-
-fn shell_c_payload(args: &[String]) -> Option<&str> {
-    let mut index = 0;
-    while index < args.len() {
-        let arg = args[index].as_str();
-        if arg == "-c" {
-            return args.get(index + 1).map(String::as_str);
-        }
-        if arg.starts_with('-') {
-            index += 1;
-            continue;
-        }
-        return None;
-    }
     None
 }
 
@@ -241,118 +186,6 @@ fn rm_rf_flags(args: &[String]) -> bool {
         }
     }
     recursive && force
-}
-
-fn shell_segments(command: &str) -> Vec<Vec<String>> {
-    let mut segments = Vec::new();
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut chars = command.chars().peekable();
-    let mut single = false;
-    let mut double = false;
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\'' if !double => single = !single,
-            '"' if !single => double = !double,
-            '\\' if !single => {
-                if let Some(next) = chars.next() {
-                    word.push(next);
-                }
-            }
-            ';' | '\n' if !single && !double => {
-                push_word(&mut words, &mut word);
-                push_segment(&mut segments, &mut words);
-            }
-            '&' if !single && !double && chars.peek() == Some(&'&') => {
-                chars.next();
-                push_word(&mut words, &mut word);
-                push_segment(&mut segments, &mut words);
-            }
-            '|' if !single && !double => {
-                if chars.peek() == Some(&'|') {
-                    chars.next();
-                }
-                push_word(&mut words, &mut word);
-                push_segment(&mut segments, &mut words);
-            }
-            ch if ch.is_whitespace() && !single && !double => push_word(&mut words, &mut word),
-            _ => word.push(ch),
-        }
-    }
-    push_word(&mut words, &mut word);
-    push_segment(&mut segments, &mut words);
-    segments
-}
-
-fn push_word(words: &mut Vec<String>, word: &mut String) {
-    if !word.is_empty() {
-        words.push(std::mem::take(word));
-    }
-}
-
-fn push_segment(segments: &mut Vec<Vec<String>>, words: &mut Vec<String>) {
-    if !words.is_empty() {
-        segments.push(std::mem::take(words));
-    }
-}
-
-fn command_substitutions(command: &str) -> Vec<String> {
-    let chars = command.char_indices().collect::<Vec<_>>();
-    let mut substitutions = Vec::new();
-    let mut single = false;
-    let mut double = false;
-    let mut index = 0;
-
-    while index < chars.len() {
-        let (_, ch) = chars[index];
-        match ch {
-            '\'' if !double => single = !single,
-            '"' if !single => double = !double,
-            '$' if !single && chars.get(index + 1).is_some_and(|(_, next)| *next == '(') => {
-                if let Some((end, content)) = read_command_substitution(command, &chars, index + 2)
-                {
-                    substitutions.push(content);
-                    index = end;
-                    continue;
-                }
-            }
-            _ => {}
-        }
-        index += 1;
-    }
-    substitutions
-}
-
-fn read_command_substitution(
-    command: &str,
-    chars: &[(usize, char)],
-    start: usize,
-) -> Option<(usize, String)> {
-    let mut depth = 1usize;
-    let mut single = false;
-    let mut double = false;
-    let content_start = chars.get(start).map_or(command.len(), |(byte, _)| *byte);
-    let mut index = start;
-
-    while index < chars.len() {
-        let (_, ch) = chars[index];
-        match ch {
-            '\'' if !double => single = !single,
-            '"' if !single => double = !double,
-            '(' if !single && !double => depth += 1,
-            ')' if !single && !double => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    let content_end = chars[index].0;
-                    return Some((index + 1, command[content_start..content_end].to_string()));
-                }
-            }
-            _ => {}
-        }
-        index += 1;
-    }
-    None
 }
 
 #[cfg(test)]

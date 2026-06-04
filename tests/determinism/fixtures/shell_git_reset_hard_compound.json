@@ -1,0 +1,5 @@
+{
+  "name": "shell-compound-git-reset-hard-asks-for-picto",
+  "call": { "tool": "Bash", "input": { "command": "echo ok; git reset --hard HEAD~1" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.reset.hard" }
+}
