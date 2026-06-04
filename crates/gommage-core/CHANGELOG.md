@@ -3,6 +3,13 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.13.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.12.0-alpha.1...gommage-core-v0.13.0-alpha.1) (2026-06-04)
+
+
+### Features
+
+* **stdlib:** gate publish, persistence, device-write, docker escape ([#79](https://github.com/Arakiss/gommage/issues/79)) ([837a6ae](https://github.com/Arakiss/gommage/commit/837a6aeeb0c552d63637b0bb08ba1a48fa0f086b))
+
 ## [0.12.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.11.0-alpha.1...gommage-core-v0.12.0-alpha.1) (2026-06-04)
 
 
