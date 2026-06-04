@@ -216,6 +216,25 @@ fn recovery_self_test_failures(layout: &HomeLayout, agents: &[AgentKind]) -> Res
         ),
     ];
 
+    // Agent posture: a freshly onboarded agent must be able to do routine work
+    // out of the box (allow), while the gates above still fire (ask/deny).
+    let home = std::env::var("HOME").unwrap_or_default();
+    checks.extend([
+        RecoveryCheck::allow("posture_routine_bash", bash_call("echo gommage-selftest")),
+        RecoveryCheck::allow(
+            "posture_project_write",
+            write_call(&format!("{home}/gommage-selftest.txt")),
+        ),
+        RecoveryCheck::ask_picto("posture_main_push_asks", bash_call("git push origin main")),
+    ]);
+
+    if agents.contains(&AgentKind::Claude) {
+        checks.push(RecoveryCheck::allow(
+            "posture_claude_config_writable",
+            write_call(&format!("{home}/.claude/gommage-selftest")),
+        ));
+    }
+
     if agents.contains(&AgentKind::Claude) {
         checks.extend([
             RecoveryCheck::allow(
@@ -292,11 +311,20 @@ impl RecoveryCheck {
             },
         }
     }
+
+    fn ask_picto(name: &'static str, call: ToolCall) -> Self {
+        Self {
+            name,
+            call,
+            expectation: RecoveryExpectation::AskPicto,
+        }
+    }
 }
 
 enum RecoveryExpectation {
     Allow,
     Gommage { hard_stop: Option<bool> },
+    AskPicto,
 }
 
 impl RecoveryExpectation {
@@ -307,6 +335,7 @@ impl RecoveryExpectation {
                 hard_stop: Some(value),
             } => format!("gommage hard_stop={value}"),
             Self::Gommage { hard_stop: None } => "gommage".to_string(),
+            Self::AskPicto => "ask_picto".to_string(),
         }
     }
 
@@ -319,8 +348,16 @@ impl RecoveryExpectation {
                 },
                 Decision::Gommage { hard_stop, .. },
             ) => expected.is_none_or(|expected| expected == *hard_stop),
+            (Self::AskPicto, Decision::AskPicto { .. }) => true,
             _ => false,
         }
+    }
+}
+
+fn write_call(path: &str) -> ToolCall {
+    ToolCall {
+        tool: "Write".to_string(),
+        input: serde_json::json!({ "file_path": path }),
     }
 }
 
