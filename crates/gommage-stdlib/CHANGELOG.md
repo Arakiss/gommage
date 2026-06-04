@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.8.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.7.0-alpha.1...gommage-stdlib-v0.8.0-alpha.1) (2026-06-04)
+
+
+### Features
+
+* **stdlib:** gate exfil, dangerous perms, config-hijack, env-injection ([#81](https://github.com/Arakiss/gommage/issues/81)) ([3b17e45](https://github.com/Arakiss/gommage/commit/3b17e4530727c3a8c1d302c8a172e29eaac9c820))
+
 ## [0.7.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.6.0-alpha.1...gommage-stdlib-v0.7.0-alpha.1) (2026-06-04)
 
 

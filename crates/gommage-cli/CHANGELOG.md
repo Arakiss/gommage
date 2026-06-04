@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.42.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.41.0-beta.1...gommage-cli-v0.42.0-beta.1) (2026-06-04)
+
+
+### Features
+
+* **stdlib:** gate exfil, dangerous perms, config-hijack, env-injection ([#81](https://github.com/Arakiss/gommage/issues/81)) ([3b17e45](https://github.com/Arakiss/gommage/commit/3b17e4530727c3a8c1d302c8a172e29eaac9c820))
+
 ## [0.41.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.40.1-beta.1...gommage-cli-v0.41.0-beta.1) (2026-06-04)
 
 
