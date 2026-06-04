@@ -1,0 +1,5 @@
+{
+  "name": "shell-timeout-wrapper-git-push-main-asks-for-picto",
+  "call": { "tool": "Bash", "input": { "command": "timeout 30 git push origin main" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.push:main" }
+}

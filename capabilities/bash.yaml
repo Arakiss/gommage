@@ -97,3 +97,57 @@
   emit:
     - "proc.exec.curl-pipe-sh:<any>"
     - "net.out:<untrusted>"
+
+# --- Filesystem verbs through Bash (R2) -------------------------------------
+#
+# The mapper runs every rule below against each shell *candidate* — a single
+# prefix-stripped, basename-normalised segment (see CapabilityMapper::map). So a
+# `cat /etc/secret` segment surfaces an `fs.read:/etc/secret` capability that
+# the filesystem policy can gate exactly as it gates a `Read` tool call, and a
+# `tee ../x` / `cp a ../x` / `> ../x` segment surfaces `fs.write:../x`.
+#
+# These are best-effort single-path extractors: they capture the first non-flag
+# argument (read verbs, tee) or the obvious destination/redirect target (cp,
+# install, dd of=, > / >>). Flag-heavy, multi-path, or here-doc forms may not
+# fully parse — fail-closed evaluation remains the backstop, and proc.exec for
+# the whole command is always emitted regardless.
+
+# Read verbs: first non-flag argument is treated as the read path.
+- name: bash-fs-read-verb
+  tool: Bash
+  match_input:
+    command: "^\\s*(?:cat|head|tail|less|od|xxd|base64|strings|file)(?:\\s+-\\S+)*\\s+(?P<rpath>[^-\\s][^\\s]*)"
+  emit:
+    - "fs.read:${rpath}"
+
+# tee writes its (first non-flag) path argument.
+- name: bash-fs-write-tee
+  tool: Bash
+  match_input:
+    command: "^\\s*tee(?:\\s+-\\S+)*\\s+(?P<wpath>[^-\\s][^\\s]*)"
+  emit:
+    - "fs.write:${wpath}"
+
+# cp / install: best-effort two-argument `<src> <dest>` form; dest is the write.
+- name: bash-fs-write-cp
+  tool: Bash
+  match_input:
+    command: "^\\s*(?:cp|install)\\s+(?:-\\S+\\s+)*[^-\\s]\\S*\\s+(?P<wpath>[^-\\s][^\\s]*)"
+  emit:
+    - "fs.write:${wpath}"
+
+# dd of=PATH writes PATH.
+- name: bash-fs-write-dd
+  tool: Bash
+  match_input:
+    command: "\\bof=(?P<wpath>[^\\s]+)"
+  emit:
+    - "fs.write:${wpath}"
+
+# Redirection targets: `> PATH` and `>> PATH` (with or without a space).
+- name: bash-fs-write-redirect
+  tool: Bash
+  match_input:
+    command: ">>?\\s*(?P<wpath>[^\\s>&|][^\\s>&|]*)"
+  emit:
+    - "fs.write:${wpath}"

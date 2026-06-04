@@ -1,0 +1,5 @@
+{
+  "name": "shell-compound-git-force-push-is-gommaged",
+  "call": { "tool": "Bash", "input": { "command": "cd /r && git push --force origin feature/x" } },
+  "expected": { "kind": "gommage" }
+}
