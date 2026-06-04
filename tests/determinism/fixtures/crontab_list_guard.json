@@ -1,0 +1,6 @@
+{
+  "name": "crontab-list-is-not-gated-by-persistence",
+  "note": "GUARD: the persistence gate targets only the write/edit variant. `crontab -l` (list) surfaces no sched.cron capability, so the new gate does not fire. With no rule allowing a bare crontab -l it fails closed to gommage; the point is that it does NOT become an ask_picto for sched.cron:edit.",
+  "call": { "tool": "Bash", "input": { "command": "crontab -l" } },
+  "expected": { "kind": "gommage" }
+}

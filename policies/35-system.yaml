@@ -1,0 +1,73 @@
+# System-level policy: persistence, raw devices, and container escape.
+#
+# This file loads after 03-recovery.yaml (03 < 35), so the specific
+# gommage-daemon launchctl/systemctl recovery commands that 03-recovery.yaml
+# allows keep working — they are matched and allowed before evaluation ever
+# reaches the gates below.
+#
+# Everything here is POLICY-level: the persistence and docker gates ask for a
+# picto (recoverable with authorisation); the raw-device gate denies (host
+# destruction). None of this touches the compiled hard-stop set.
+
+# --- Persistence: scheduler / service registration --------------------------
+# Installing a recurring job or a system daemon is how an agent makes itself
+# survive a reboot. Gate the write variants with a picto; the read/inspect
+# variants (crontab -l, launchctl list, systemctl status) are never surfaced.
+
+- name: gate-crontab-edit
+  decision: ask_picto
+  required_scope: "sched.cron:edit"
+  match:
+    any_capability:
+      - "sched.cron:edit"
+  reason: "editing the crontab installs a persistent scheduled job; require a picto"
+
+- name: gate-launchd-write
+  decision: ask_picto
+  required_scope: "sched.launchd:write"
+  match:
+    any_capability:
+      - "sched.launchd:write"
+  reason: "launchctl load/bootstrap/enable registers a persistent macOS service; require a picto"
+
+- name: gate-systemd-write
+  decision: ask_picto
+  required_scope: "sched.systemd:write"
+  match:
+    any_capability:
+      - "sched.systemd:write"
+  reason: "systemctl enable/start/daemon-reload on a system unit installs a persistent service; require a picto"
+
+# --- Raw device writes: host destruction ------------------------------------
+# Writing to a raw block device (/dev/sd*, /dev/disk*, /dev/nvme*, /dev/rdisk*)
+# can wipe the host. The compiled hard-stop already catches `dd of=/dev/*`;
+# this policy deny closes the redirect/tee/no-if= shapes. Deny, not picto.
+
+- name: deny-raw-device-write
+  decision: gommage
+  hard_stop: false
+  match:
+    any_capability:
+      - "disk.device:write"
+  reason: "writing to a raw block device can destroy the host; edit this file to override"
+
+# --- Docker container escape ------------------------------------------------
+# A privileged container or one mounting the host root / Docker socket can
+# break out to the host. Gate these shapes with a picto; ordinary docker run
+# and project-dir mounts are never surfaced and stay free.
+
+- name: gate-docker-run-privileged
+  decision: ask_picto
+  required_scope: "docker.run.privileged"
+  match:
+    any_capability:
+      - "docker.run.privileged"
+  reason: "a privileged container has near-host capabilities; require a picto"
+
+- name: gate-docker-run-hostmount
+  decision: ask_picto
+  required_scope: "docker.run.hostmount"
+  match:
+    any_capability:
+      - "docker.run.hostmount"
+  reason: "mounting the host root, /etc, or the Docker socket enables container escape; require a picto"

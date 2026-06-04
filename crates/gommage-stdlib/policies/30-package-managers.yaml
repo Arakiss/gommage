@@ -21,3 +21,31 @@
     any_capability:
       - "pkg.cargo:install"
   reason: "global cargo install touches ~/.cargo/bin; require picto"
+
+# --- Supply-chain publish: irreversible registry mutation -------------------
+# Publishing a package to a public registry cannot be undone (versions are
+# immutable). Gate the publish verb with a picto; install/build/test stay free.
+
+- name: gate-npm-publish
+  decision: ask_picto
+  required_scope: "pkg.npm:publish"
+  match:
+    any_capability:
+      - "pkg.npm:publish"
+  reason: "npm publish pushes to the public registry; a published version cannot be unpublished"
+
+- name: gate-cargo-publish
+  decision: ask_picto
+  required_scope: "pkg.cargo:publish"
+  match:
+    any_capability:
+      - "pkg.cargo:publish"
+  reason: "cargo publish pushes to crates.io; a published version is permanent"
+
+- name: gate-python-publish
+  decision: ask_picto
+  required_scope: "pkg.python:publish"
+  match:
+    any_capability:
+      - "pkg.python:publish"
+  reason: "twine/pip upload pushes to PyPI; a published version cannot be replaced"

@@ -210,6 +210,71 @@ pub(crate) fn shell_c_payload(args: &[String]) -> Option<&str> {
     None
 }
 
+/// Extract the targets of genuine output redirections (`>` / `>>`) in
+/// `command`, honouring quote and escape context so a redirect operator that
+/// appears inside quotes is treated as data, not a redirect.
+///
+/// This exists because the segment-join the mapper uses for candidates strips
+/// quotes: `echo "> /dev/sda"` would otherwise look identical to
+/// `echo data > /dev/sda` once re-joined. A naive regex over the raw string
+/// cannot tell the two apart; this scanner can, because it tracks quote state
+/// exactly like [`shell_segments`]. Returns the target token following each
+/// unquoted `>`/`>>` (file-descriptor prefixes like `2>` are honoured, the fd
+/// digit is not part of the target). Used by the capability mapper to surface
+/// device-write redirects without the quoted-data false positive.
+pub(crate) fn redirect_targets(command: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    let mut chars = command.chars().peekable();
+    let mut single = false;
+    let mut double = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\'' if !double => single = !single,
+            '"' if !single => double = !double,
+            '\\' if !single => {
+                chars.next();
+            }
+            '>' if !single && !double => {
+                // Consume a possible second '>' (>>), then any whitespace, then
+                // read the target token up to the next whitespace or operator.
+                if chars.peek() == Some(&'>') {
+                    chars.next();
+                }
+                while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                    chars.next();
+                }
+                // Read the target token, stripping quotes from the target itself
+                // so `> "/dev/sda"` yields the same `/dev/sda` as `> /dev/sda`
+                // (a quoted *target* is still a real redirect; only a quoted
+                // operator is data, handled by the outer single/double guards).
+                let mut target = String::new();
+                let mut tsingle = false;
+                let mut tdouble = false;
+                while let Some(&c) = chars.peek() {
+                    match c {
+                        '\'' if !tdouble => tsingle = !tsingle,
+                        '"' if !tsingle => tdouble = !tdouble,
+                        c if (c.is_whitespace() || matches!(c, '>' | '<' | '|' | '&' | ';'))
+                            && !tsingle
+                            && !tdouble =>
+                        {
+                            break;
+                        }
+                        c => target.push(c),
+                    }
+                    chars.next();
+                }
+                if !target.is_empty() {
+                    targets.push(target);
+                }
+            }
+            _ => {}
+        }
+    }
+    targets
+}
+
 /// Extract the bodies of all `$(...)` and backtick command substitutions in
 /// `command`, honouring quote context (a substitution inside single quotes is
 /// data, not a substitution). Nested `$(...)` parens are balanced; the returned
@@ -397,5 +462,33 @@ mod tests {
     fn shell_c_payload_is_extracted() {
         let args: Vec<String> = vec!["-c".into(), "rm -rf /".into()];
         assert_eq!(shell_c_payload(&args), Some("rm -rf /"));
+    }
+
+    #[test]
+    fn redirect_targets_unquoted() {
+        assert_eq!(
+            redirect_targets("echo data > /dev/sda"),
+            vec!["/dev/sda".to_string()]
+        );
+        assert_eq!(
+            redirect_targets("echo x >> /dev/disk2"),
+            vec!["/dev/disk2".to_string()]
+        );
+        assert_eq!(
+            redirect_targets("printf a > /tmp/a; printf b > /dev/sdb"),
+            vec!["/tmp/a".to_string(), "/dev/sdb".to_string()]
+        );
+    }
+
+    #[test]
+    fn redirect_targets_ignores_quoted_operator() {
+        // The whole `> /dev/sda` is inside quotes — it is data, not a redirect.
+        assert!(redirect_targets("echo \"> /dev/sda\"").is_empty());
+        assert!(redirect_targets("echo '> /dev/sda'").is_empty());
+        // A redirect target that itself is quoted is still a real redirect.
+        assert_eq!(
+            redirect_targets("echo x > \"/dev/sda\""),
+            vec!["/dev/sda".to_string()]
+        );
     }
 }

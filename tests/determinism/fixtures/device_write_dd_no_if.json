@@ -1,0 +1,6 @@
+{
+  "name": "dd-of-device-without-if-is-denied",
+  "note": "`dd of=/dev/sdb` (no if=) surfaces disk.device:write for the policy deny, AND is caught by the compiled hard-stop hs.dd-to-device (which keys on of=/dev/* regardless of if=). The hard-stop runs first, so this resolves to gommage either way; hard_stop is intentionally not asserted so the fixture is robust to which layer denies.",
+  "call": { "tool": "Bash", "input": { "command": "dd of=/dev/sdb bs=1M" } },
+  "expected": { "kind": "gommage" }
+}

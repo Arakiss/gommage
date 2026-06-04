@@ -1,0 +1,6 @@
+{
+  "name": "launchctl-load-of-nongommage-plist-requires-picto",
+  "note": "Loading an arbitrary LaunchAgent registers a persistent macOS service; gated as sched.launchd:write. The gommage-daemon recovery commands in 03-recovery.yaml load before this gate (03 < 35) and stay allowed (see systemctl_user_recovery_guard).",
+  "call": { "tool": "Bash", "input": { "command": "launchctl load -w /Library/LaunchAgents/com.evil.persist.plist" } },
+  "expected": { "kind": "ask_picto", "required_scope": "sched.launchd:write" }
+}

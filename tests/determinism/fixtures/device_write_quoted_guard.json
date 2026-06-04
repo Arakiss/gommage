@@ -1,0 +1,6 @@
+{
+  "name": "quoted-device-redirect-string-is-data-not-a-device-write",
+  "note": "GUARD: `echo \"> /dev/sda\"` is a quoted string, not a redirect. The quote-aware redirect scanner must NOT surface disk.device:write, so deny-raw-device-write does NOT fire. With no rule allowing a bare echo, it fails closed to gommage. If the quote guard regressed and disk.device:write were emitted, the matched rule would change to the device deny — same decision kind, but the wrong reason. This fixture pins the decision to a non-hard-stop gommage; it is the determinism+mapper unit tests that pin which rule fires.",
+  "call": { "tool": "Bash", "input": { "command": "echo \"> /dev/sda\"" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

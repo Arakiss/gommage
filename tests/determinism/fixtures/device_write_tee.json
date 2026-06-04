@@ -1,0 +1,6 @@
+{
+  "name": "tee-to-raw-device-is-denied",
+  "note": "`tee /dev/sda` surfaces disk.device:write via the anchored tee rule and hits deny-raw-device-write (policy deny, hard_stop:false). The compiled hard-stop does not cover tee, so this closes that gap.",
+  "call": { "tool": "Bash", "input": { "command": "tee /dev/sda" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

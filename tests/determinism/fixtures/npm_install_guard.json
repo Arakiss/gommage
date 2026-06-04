@@ -1,0 +1,6 @@
+{
+  "name": "npm-install-still-allowed",
+  "note": "GUARD: the publish gates must not touch install. `npm install` stays allowed via allow-npm-install; only `npm publish` is gated.",
+  "call": { "tool": "Bash", "input": { "command": "npm install" } },
+  "expected": { "kind": "allow" }
+}

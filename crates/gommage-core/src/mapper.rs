@@ -262,6 +262,17 @@ fn collect_candidates(
     for sub in crate::shell::command_substitutions(command) {
         collect_candidates(&sub, out, seen, depth + 1);
     }
+
+    // 3. Genuine (quote-aware) output-redirection targets, surfaced as a small
+    //    synthetic candidate of the form `> <target>`. A YAML rule anchored at
+    //    `^>` matches these but never matches quoted data (whose segment join
+    //    and raw candidate never *begin* with `>`), so a device-write redirect
+    //    is caught while `echo "> /dev/sda"` is left as inert data. The leading
+    //    operator is preserved verbatim so the existing fs.write redirect rule's
+    //    semantics are untouched (it keeps matching segments/candidate 0).
+    for target in crate::shell::redirect_targets(command) {
+        push_candidate(format!("> {target}"), out, seen);
+    }
 }
 
 fn push_candidate(
