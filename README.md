@@ -97,6 +97,12 @@ smoke tests, policy regression fixtures, crates.io publishing gates, policy
 import fidelity, deeper host-smoke evidence, mapper coverage, and clearer
 harness-stack integrations. See [ROADMAP](#roadmap).
 
+**Windows is not supported.** The daemon is a Unix-domain-socket service
+(`tokio::net::UnixListener`), so `gommage-daemon` does not build on Windows; a
+non-Unix build fails fast with an explicit message. Named-pipe / TCP transport
+is a post-1.0 item (roadmap v1.x). Use macOS or Linux today, or WSL2 on a
+Windows host.
+
 The prerelease distribution has two install surfaces:
 
 - **Runtime binaries**: the verified GitHub Release archive contains
@@ -196,6 +202,11 @@ Gommage follows **Semantic Versioning**, with pre-1.0 rules applied strictly:
 - Compatible fixes and internal hardening use **patch** bumps.
 - Release notes are generated through **release-please** from Conventional Commits; do not tag releases manually.
 - Repo-level changes are tracked in [`CHANGELOG.md`](CHANGELOG.md); crate-level changes live in `crates/*/CHANGELOG.md`.
+
+Because Gommage is pre-1.0, a minor (`0.x`) bump MAY contain breaking changes to
+policy and capability semantics. Downstream crate consumers should pin exact
+versions until 1.0 — see [`BREAKING_CHANGES.md`](BREAKING_CHANGES.md) for the
+full policy.
 
 Beta releases use `gommage-cli-vX.Y.Z-beta.N` tags and remain GitHub
 prereleases until the project reaches a production-ready line. The presence of
