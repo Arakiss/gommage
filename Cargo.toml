@@ -44,12 +44,12 @@ globset       = "=0.4.18"
 regex         = "=1.12.3"
 ed25519-dalek = { version = "=2.2.0", features = ["rand_core", "std"] }
 rand_core     = { version = "=0.6.4", features = ["std"] }
-rusqlite      = { version = "=0.39.0", features = ["bundled"] }
+rusqlite      = { version = "=0.40.0", features = ["bundled"] }
 sha2          = "=0.11.0"
 hex           = "=0.4.3"
 base64        = "=0.22.1"
 time          = { version = "=0.3.47", features = ["serde", "formatting", "parsing", "macros"] }
-uuid          = { version = "=1.23.1", features = ["v7", "serde"] }
+uuid          = { version = "=1.23.2", features = ["v7", "serde"] }
 
 # serde_yaml migrated to serde_yaml_ng (maintained fork, drop-in API
 # compatible). Aliased so every `use serde_yaml::*` in-tree keeps working
