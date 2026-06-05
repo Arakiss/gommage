@@ -64,6 +64,12 @@ async fn run_hook() -> Result<()> {
         .read_to_string(&mut buf)
         .context("reading stdin")?;
     if bypass_enabled() {
+        // STDERR ONLY: stdout must stay the single hook-decision JSON object.
+        // Warn loudly that GOMMAGE_BYPASS=1 skipped normal policy evaluation
+        // (hard-stops still apply; see handle_bypass).
+        eprintln!(
+            "gommage-mcp: WARNING: GOMMAGE_BYPASS=1 is set; skipping policy evaluation (compiled hard-stops still apply)"
+        );
         return handle_bypass(&buf);
     }
 
@@ -99,7 +105,15 @@ async fn run_hook() -> Result<()> {
 async fn decide_call(layout: &HomeLayout, call: &ToolCall) -> Result<gommage_core::EvalResult> {
     match forward_to_daemon(layout, call).await {
         Ok(e) => Ok(e),
-        Err(e) if is_missing_daemon(&e) => decide_in_process_and_audit(layout, call),
+        Err(e) if is_missing_daemon(&e) => {
+            // STDERR ONLY: stdout carries the hook decision JSON and must stay a
+            // single JSON object. This line just tells the operator the daemon
+            // socket was unreachable and Gommage decided + audited in-process.
+            eprintln!(
+                "gommage-mcp: daemon socket unavailable; evaluating policy in-process and writing the audit entry directly"
+            );
+            decide_in_process_and_audit(layout, call)
+        }
         Err(e) => Err(e),
     }
 }

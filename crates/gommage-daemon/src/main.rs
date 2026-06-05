@@ -8,6 +8,14 @@
 //! Example request:  `{"op":"decide","call":{"tool":"Bash","input":{"command":"ls"}}}`
 //! Example response: `{"ok":true,"result":{...EvalResult...}}`
 
+// The daemon is a Unix-domain-socket service (`tokio::net::UnixListener`).
+// Fail fast with a clear message on non-Unix targets instead of an opaque
+// "UnixListener not found" type error. Named-pipe / TCP mode is post-1.0.
+#[cfg(not(unix))]
+compile_error!(
+    "gommage-daemon requires a Unix platform (Unix-domain sockets); Windows is not yet supported."
+);
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use ed25519_dalek::VerifyingKey;

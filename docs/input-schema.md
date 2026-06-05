@@ -96,6 +96,20 @@ pub fn map(&self, call: &ToolCall) -> Vec<Capability>;
 
 The capability `Vec` is not deduplicated. A rule that emits two capabilities will show both, in order. Multiple rules that each emit will concatenate in rule-declaration order.
 
+### 4.1 Tool boundary
+
+Capabilities are matched on the **operation**, not on the tool handle that requested it. A filesystem read is `fs.read:<path>` whether it arrived as a `Read` tool call or as `cat <path>` inside `Bash`.
+
+The bundled stdlib mapper makes `Bash` file-verbs emit the same filesystem capabilities the dedicated tools do, so the filesystem gates apply tool-agnostically:
+
+- `cat` / `head` / `tail` / `less` / `od` / `xxd` / `base64` / `strings` / `file` emit `fs.read:<path>` (like `Read`).
+- `tee`, `cp` / `install` (destination), `dd of=<path>`, and `>` / `>>` redirect targets emit `fs.write:<path>` (like `Write`).
+- Every `Bash` call also emits `proc.exec:<command>` for the whole command, plus a per-segment `proc.exec:<segment>` after wrapper/prefix stripping (`env`, `sudo`, `bash -c`, absolute-path heads, command substitution). Compound and wrapped commands are scanned segment by segment, so `cd /x && cat /etc/shadow` still surfaces `fs.read:/etc/shadow`.
+
+These shell extractors are best-effort single-path matchers, not a full shell parser. Flag-heavy, multi-path, or here-doc forms may not parse precisely. When that happens the operation does not silently pass: the per-command `proc.exec` capability is always emitted, and the **fail-closed default denies any capability no rule allowed**. That fail-closed backstop is the safety net under the mapper, not the mapper itself.
+
+**Recommendation for strict fs gating.** If you need the filesystem gates to hold tightly, restrict or deny raw `Bash` (gate `proc.exec:*` for the shells you do not trust) and route file access through the dedicated `Read` / `Write` / `Edit` tools, whose path arguments map exactly. See [`THREAT_MODEL.md`](../docs/THREAT_MODEL.md) for the residual shapes that fail closed but do not yet hit a precise gate scope.
+
 ---
 
 ## 5. The policy evaluator's contract
