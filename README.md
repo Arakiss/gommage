@@ -45,7 +45,95 @@ cluster API.
 
 Gommage is **not a sandbox** and does not mediate execution. It decides, audits, and optionally requires a signed grant (picto) to proceed. For OS-level confinement, stack it under AppArmor / SELinux / `seccomp-bpf` / macOS Seatbelt / Codex's own `--sandbox` modes. See [`THREAT_MODEL.md`](THREAT_MODEL.md) for what that split means in practice.
 
-Within its scope, the decision is **deterministic**: same `(tool_call, policy)` pair → same decision, every time, in forward order, in shuffled order, on every OS. No classifier, no Bayesian prior over the transcript, no mystery denies halfway through a task. CI enforces that property with a determinism regression suite that runs 10 times per build.
+Within its scope, the decision is **deterministic**: same `(tool_call, policy)` pair → same decision, every time, in forward order, in shuffled order, on every OS. No classifier, no Bayesian prior over the transcript, no mystery denies halfway through a task. CI enforces that property with a determinism regression suite (107 fixtures, run forward and shuffled on every build).
+
+## See it — a gate you can't slip by command shape
+
+Most tool-call guardrails key on the command string. Wrap the command and the
+specialized rule no longer matches. Gommage's Bash mapper parses shell structure
+and runs every policy rule **per segment**, so the same gate fires however the
+command is dressed up:
+
+| the agent runs… | a command-string gate | gommage |
+|---|---|---|
+| `git push origin main` | gated | **ask** · picto `git.push:main` |
+| `cd /repo && git push origin main` | missed | **ask** |
+| `env X=1 sudo git push origin main` | missed | **ask** |
+| `/usr/bin/git push origin main` | missed | **ask** |
+| `timeout 30 git push origin main` | missed | **ask** |
+| `bash -c 'git push origin main'` | missed | **ask** |
+| `echo $(git push origin main)` | missed | **ask** |
+| `echo 'git push origin main'` (quoted data) | — | **not matched** · it's a string, not a command |
+
+Those seven evasion shapes are committed fixtures
+(`tests/determinism/fixtures/shell_git_push_main_{abspath,bash_c,compound,env_sudo,leading_true,substitution,timeout}.json`,
+all resolving to `ask_picto` scope `git.push:main`); the quoted-data row is a
+guard fixture proving it does **not** false-positive on data. The same
+shell-awareness routes `cat`, `cp`, `tee`, and `>`/`>>` redirects through the
+filesystem gates — a read or write done from Bash is decided like the agent's
+Read/Write tool, not waved through because a shell produced it. Source:
+[`crates/gommage-core/src/shell.rs`](crates/gommage-core/src/shell.rs) and
+[`mapper.rs`](crates/gommage-core/src/mapper.rs).
+
+The coverage is honest, not total. A few wrapper forms — `git -C <dir>`,
+`eval`/`xargs`, the refspec `HEAD:main` — currently **deny fail-closed** (a
+generic deny) instead of resolving to the precise gate scope; they never leak to
+`allow`. And an operator policy that grants a broad `proc.exec:*` allow re-opens
+shape-based bypass, so keep allows narrow. See
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
+
+## What it gates
+
+The bundled stdlib decides these out of the box. Anything unmatched is
+**fail-closed** (denied) unless your policy allows it. `ask` needs a signed
+[picto](#vocabulary) to proceed; `deny` cannot be satisfied by a picto.
+
+| surface | examples | decision |
+|---|---|---|
+| Git | push to `main`/`release/*`, force-push, `reset --hard`, `config url.*.insteadOf`/`core.hooksPath` | ask |
+| Filesystem (write) | dotfile/credential dirs, build artifacts & `.git`, shell-rc (`~/.zshrc`…), `..` traversal | deny |
+| Filesystem | reads/writes outside the expedition root | fail-closed deny |
+| Supply chain | `npm` / `cargo` / `twine` **publish** | ask |
+| Persistence | `crontab -e`, `launchctl load`, `systemctl --system enable` | ask |
+| Host devices | `> /dev/sd*`, `dd of=/dev/…`, `tee /dev/sd*` | deny |
+| Containers | `docker run --privileged`, host-path / docker.sock mounts | ask |
+| Egress | `scp`/`rsync` to a remote, `ssh` remote-command, `curl`/`wget` upload·POST | ask |
+| Permissions | `chmod -R` or world-writable mode, `chown -R` or to root | ask |
+| Code injection | `LD_PRELOAD=` / `DYLD_INSERT_LIBRARIES=` command prefixes | deny |
+| Package / cloud | `bun`/`npm install` (allow), Vercel prod deploy, kubectl/terraform/aws/gh mutations | allow · ask |
+
+Routine work stays out of the way: `npm install`, `chmod +x script.sh`,
+`git config user.name`, a plain `curl https://…` GET, `kill 1234`, and a
+project-local build all pass. Capability mappers live in
+[`crates/gommage-stdlib/capabilities/`](crates/gommage-stdlib/capabilities/),
+gates in [`crates/gommage-stdlib/policies/`](crates/gommage-stdlib/policies/).
+
+Ahead of all policy sits a small set of **compiled hard-stops** — denied
+unconditionally, before policy, pictos, or `GOMMAGE_BYPASS`: `rm -rf /` and
+`/*`, `sudo rm -rf …`, `dd if=… of=/dev/…`, `shred /dev/…`, `chmod -R … /`,
+the classic fork bomb, plus shell-semantic scanners for `rm -rf <absolute>`,
+`dd of=/dev/…`, and `xargs rm -rf` so wrapping doesn't help. These are code, not policy
+([`crates/gommage-core/src/hardstop.rs`](crates/gommage-core/src/hardstop.rs));
+the policy-level denies above (device writes, injection, …) are separate and
+satisfiable only by editing policy.
+
+## Why not just…?
+
+- **…the agent's built-in permissions?** Keep them on — gommage runs *with*
+  them, not instead. But they're opaque, per-agent, and live in transcript/UI
+  state you can't version, diff in a PR, or replay on another machine. gommage is
+  YAML in a repo plus a signed audit trail.
+- **…a shell hook with an allowlist regex?** That string/regex match is dodged
+  by command shape (`cd x && …`, `$(…)`, `env … sudo …`) — the exact problem the
+  per-segment mapper above exists to close.
+- **…OPA or a general policy engine?** You could, but you'd build the tool-call
+  mappers, the shell parser, the signed-grant (picto) model, and the offline-
+  verifiable audit yourself. gommage is the narrow, batteries-included version
+  for this one job, deterministic by construction.
+- **…an OS sandbox (seccomp / AppArmor / Seatbelt)?** Different layer — stack it
+  *under* gommage. A sandbox confines what a process may do; gommage decides and
+  audits whether the agent should make the call at all, with a human-approvable
+  grant in the middle.
 
 ## Where it fits
 
@@ -78,7 +166,7 @@ Gommage takes a narrow stance:
 
 - **Deterministic, and we define what that means.** The evaluator reads exactly `(capabilities, policy)` and nothing else — no clock, no env, no CWD, no transcript, no filesystem state. Regex matching on tool inputs and glob matching on capability patterns are part of the deterministic transform; they are not heuristics. What Gommage does NOT do: classify, score, infer intent, or accumulate state across decisions. See [`THREAT_MODEL.md` §3](THREAT_MODEL.md#3-canonical-decision-input) for the exact contract.
 - **Declarative.** Policies are YAML in `~/.gommage/policy.d/`. Version them, review them in PRs, `cat` them to understand why something got denied.
-- **Capability-first.** Tool calls are mapped to capabilities (`git.push:main`, `fs.write:**/node_modules/**`, `net.out:api.stripe.com`). Policies match on capabilities, not on command strings.
+- **Capability-first.** Tool calls are mapped to capabilities (`git.push:refs/heads/main`, `fs.write:**/.git/**`, `pkg.npm:publish`, `net.out.post`, `disk.device:write`). Policies match on capabilities, not on command strings — and the Bash mapper derives them from parsed shell segments, so the capability is the same whether the command is bare or wrapped. See [What it gates](#what-it-gates) for the full bundled set.
 - **Break-glass is real.** _Pictos_ (signed, TTL'd, usage-bounded grants) are first-class citizens of the policy. If a picto matches, it passes — no secret layer vetoing from above. The only override is a hardcoded, documented, finite hard-stop set.
 - **Signed audit, verifiable offline.** Every decision is one line in an append-only JSONL log, ed25519-signed per line. Kill the daemon mid-write and at most the last line is corrupt; everything prior stays independently verifiable with `gommage audit-verify`.
 - **Out-of-band approval.** `ask` decisions escalate to a human channel (TUI, webhook, push) — never back to the transcript. Keeps the agent and the approver on different wires.
