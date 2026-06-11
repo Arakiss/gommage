@@ -242,7 +242,14 @@ fn collect_candidates(
             if real.is_empty() {
                 continue;
             }
-            let mut normalized = real.to_vec();
+            // Drop redirections / background `&` before joining: they are not
+            // arguments, and leaving them in lets a gate keyed on a refspec
+            // (e.g. `git.push:refs/heads/main`) be evaded by appending `2>&1`
+            // or `&`, which would otherwise land in the refspec position.
+            let mut normalized = crate::shell::strip_redirections(real);
+            if normalized.is_empty() {
+                continue;
+            }
             normalized[0] = crate::shell::head_basename(&normalized[0]).to_string();
             let joined = normalized.join(" ");
             push_candidate(joined, out, seen);
@@ -732,6 +739,38 @@ mod tests {
     fn timeout_wrapper_git_push_main_emits_git_push() {
         let m = shell_mapper();
         let caps = caps_of(&m, "timeout 30 git push origin main");
+        assert!(
+            caps.iter().any(|c| c == "git.push:refs/heads/main"),
+            "caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn redirected_git_push_main_still_emits_real_refspec() {
+        // Gate-evasion regression: appending a redirection must not knock the
+        // real branch out of the refspec. The derived segment candidate is
+        // redirection-stripped, so `git.push:refs/heads/main` is still emitted
+        // and the main-push gate can fire.
+        let m = shell_mapper();
+        for cmd in [
+            "git push origin main 2>&1",
+            "git push origin main >/tmp/log",
+            "git push origin main 2> /dev/null",
+            "git push origin main >out.txt 2>&1",
+            "git push origin main &",
+        ] {
+            let caps = caps_of(&m, cmd);
+            assert!(
+                caps.iter().any(|c| c == "git.push:refs/heads/main"),
+                "redirected `{cmd}` must still surface the real refspec; caps: {caps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compound_redirected_git_push_main_emits_real_refspec() {
+        let m = shell_mapper();
+        let caps = caps_of(&m, "cd /r && git push origin main 2>&1 | tee log");
         assert!(
             caps.iter().any(|c| c == "git.push:refs/heads/main"),
             "caps: {caps:?}"

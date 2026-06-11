@@ -77,17 +77,32 @@ Then, when you want to push: `gommage grant --scope git.push:main --uses 1 --ttl
       - "git.push:refs/heads/fix/**"
 ```
 
-### Deny force-push (but allow with picto)
+### Deny force-push by default, but allow with a break-glass picto
+
+Use `decision: ask_picto` for the break-glass pattern. A `decision: gommage`
+deny — even with `hard_stop: false` — is terminal: the picto store is never
+consulted, so no picto can unlock it. Only an `ask_picto` rule with a
+`required_scope` is picto-bypassable.
 
 ```yaml
 - name: no-force-push
-  decision: gommage
-  hard_stop: false   # allow break-glass
+  decision: ask_picto
+  required_scope: "git.push.force"
   match:
     any_capability:
       - "git.push.force:*"
-  reason: "force push requires a picto"
+  reason: "force push rewrites shared history; require a signed picto"
 ```
+
+Unlock a single force push with:
+
+```bash
+gommage grant --scope git.push.force --reason "rebase landed; rewriting my topic branch"
+gommage confirm <picto-id>
+```
+
+To make force-push an un-bypassable hard deny instead, use
+`decision: gommage` with `hard_stop: true`.
 
 ## Network / package managers
 

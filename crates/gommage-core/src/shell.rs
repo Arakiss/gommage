@@ -170,6 +170,106 @@ pub(crate) fn command_words(words: &[String]) -> Option<&[String]> {
     words.get(index..)
 }
 
+/// Remove shell redirections and the background-`&` control operator from a
+/// simple command's word list, returning only the genuine command + argument
+/// tokens.
+///
+/// A redirection is **not** an argument: `git push origin main 2>&1` must be
+/// reasoned about as `git push origin main`, not capture `2>&1` as a refspec.
+/// Without this, a gate keyed on a capability (e.g. `git.push:refs/heads/main`)
+/// is trivially evaded by appending a redirection — the candidate the mapper
+/// builds would carry `2>&1` into the refspec position and miss the gate.
+///
+/// Handles both forms the (whitespace-only) tokenizer produces:
+/// - glued (`>file`, `>>log`, `2>&1`, `2>/dev/null`, `&>log`, `<input`): the
+///   whole token is one redirection, dropped.
+/// - spaced (`> file`, `2> file`, `>> log`, `< input`): the operator token is
+///   dropped *and* the following token (its target) is consumed too.
+///
+/// A lone `&` token (background) is also dropped: the tokenizer keeps it as a
+/// word (only `&&` splits a segment), so `git push origin main &` would
+/// otherwise leave `&` in the refspec position.
+///
+/// This only ever *removes* control tokens, never command/argument tokens, so
+/// the surrounding fail-closed evaluation is unaffected.
+pub(crate) fn strip_redirections(words: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(words.len());
+    let mut index = 0;
+    while index < words.len() {
+        match classify_control_token(&words[index]) {
+            ControlToken::None => {
+                out.push(words[index].clone());
+                index += 1;
+            }
+            // `>file`, `2>&1`, `&>log`, lone `&` — self-contained, drop the token.
+            ControlToken::SelfContained => index += 1,
+            // `>`, `2>`, `>>`, `<` — the target is the *next* token; drop both.
+            ControlToken::BareOperator => {
+                index += 1;
+                if index < words.len() {
+                    index += 1;
+                }
+            }
+        }
+    }
+    out
+}
+
+enum ControlToken {
+    /// Not a redirection or background operator: a real command/argument token.
+    None,
+    /// A whole-token control operator (glued redirect, fd-dup, or lone `&`).
+    SelfContained,
+    /// A redirection operator whose target is the following whitespace-separated
+    /// token (`>`, `2>`, `>>`, `<`, `&>`, …).
+    BareOperator,
+}
+
+/// Classify a single whitespace-separated token as a redirection / control
+/// operator. Recognises an optional leading file descriptor (`2>`) or the
+/// stdout+stderr `&>` form, the operators `> >> < << <<< <> >|`, and a lone
+/// background `&`.
+fn classify_control_token(word: &str) -> ControlToken {
+    if word == "&" {
+        return ControlToken::SelfContained;
+    }
+    // Strip an optional leading file descriptor before the operator: digits
+    // (`2>`), or `&` for the stdout+stderr `&>` form.
+    let rest = if let Some(after_amp) = word.strip_prefix('&') {
+        if !after_amp.starts_with('>') {
+            return ControlToken::None;
+        }
+        after_amp
+    } else {
+        let digits = word.chars().take_while(char::is_ascii_digit).count();
+        let rest = &word[digits..];
+        // Leading digits with no following operator are a plain argument
+        // (e.g. a bare `2`), not a redirection.
+        if digits > 0 && !(rest.starts_with('>') || rest.starts_with('<')) {
+            return ControlToken::None;
+        }
+        rest
+    };
+    let op_len = if rest.starts_with("<<<") {
+        3
+    } else if rest.starts_with(">>")
+        || rest.starts_with("<<")
+        || rest.starts_with("<>")
+        || rest.starts_with(">|")
+    {
+        2
+    } else if rest.starts_with('>') || rest.starts_with('<') {
+        1
+    } else {
+        return ControlToken::None;
+    };
+    if rest[op_len..].is_empty() {
+        ControlToken::BareOperator
+    } else {
+        ControlToken::SelfContained
+    }
+}
+
 /// The basename of a command head token: `/usr/bin/git` → `git`, `git` → `git`.
 /// Used so that absolute/relative-path invocations match the same rules and
 /// hardstops as the bare command name. A token with no `/` is returned as-is.
@@ -478,6 +578,62 @@ mod tests {
             redirect_targets("printf a > /tmp/a; printf b > /dev/sdb"),
             vec!["/tmp/a".to_string(), "/dev/sdb".to_string()]
         );
+    }
+
+    fn strip(cmd: &str) -> Vec<String> {
+        let words: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+        strip_redirections(&words)
+    }
+
+    #[test]
+    fn strip_redirections_drops_glued_fd_dup() {
+        // The reported gate-evasion: `2>&1` must not survive into the refspec.
+        assert_eq!(
+            strip("git push origin main 2>&1"),
+            vec!["git", "push", "origin", "main"]
+        );
+    }
+
+    #[test]
+    fn strip_redirections_drops_glued_and_spaced_targets() {
+        assert_eq!(
+            strip("git push origin main >log"),
+            vec!["git", "push", "origin", "main"]
+        );
+        assert_eq!(
+            strip("git push origin main > log"),
+            vec!["git", "push", "origin", "main"]
+        );
+        assert_eq!(
+            strip("git push origin main 2> /dev/null"),
+            vec!["git", "push", "origin", "main"]
+        );
+        assert_eq!(
+            strip("git push origin main 2>/dev/null >>out.txt"),
+            vec!["git", "push", "origin", "main"]
+        );
+    }
+
+    #[test]
+    fn strip_redirections_drops_trailing_background() {
+        assert_eq!(
+            strip("git push origin main &"),
+            vec!["git", "push", "origin", "main"]
+        );
+    }
+
+    #[test]
+    fn strip_redirections_keeps_real_arguments() {
+        // Refspecs and numeric-looking args are never stripped.
+        assert_eq!(
+            strip("git push origin feature/x"),
+            vec!["git", "push", "origin", "feature/x"]
+        );
+        assert_eq!(
+            strip("git reset --hard HEAD~1"),
+            vec!["git", "reset", "--hard", "HEAD~1"]
+        );
+        assert_eq!(strip("kill -9 1234"), vec!["kill", "-9", "1234"]);
     }
 
     #[test]

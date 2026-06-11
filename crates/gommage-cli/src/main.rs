@@ -498,6 +498,11 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             layout.ensure()?;
             let sk = layout.load_key()?;
             let rt = Runtime::open(HomeLayout::at(&layout.root)).context("opening runtime")?;
+            // A picto only ever unlocks an `ask_picto` rule whose `required_scope`
+            // equals this scope (exact string match). Warn loudly when the scope
+            // matches no loaded rule, so an operator does not burn a picto on a
+            // typo or an invented scope that can never be consumed.
+            warn_if_scope_unknown(&rt, &scope);
             let id = format!("picto_{}", uuid::Uuid::now_v7());
             let picto = rt
                 .pictos
@@ -680,6 +685,33 @@ fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
         return Err("ttl must be between 1 second and 24 hours".to_string());
     }
     Ok(seconds)
+}
+
+/// Warn (to stderr) when a grant scope matches no `ask_picto` rule in the loaded
+/// policy. A picto is consumed only by exact-scope match against a rule's
+/// `required_scope`, so an unknown scope produces a picto that can never unlock
+/// anything — the failure mode the Polaris field report hit (`git.force-push`).
+fn warn_if_scope_unknown(rt: &Runtime, scope: &str) {
+    let mut known: Vec<&str> = rt
+        .policy
+        .rules
+        .iter()
+        .filter_map(|r| r.required_scope.as_deref())
+        .collect();
+    if known.contains(&scope) {
+        return;
+    }
+    known.sort_unstable();
+    known.dedup();
+    eprintln!(
+        "warning: scope {scope:?} matches no ask_picto rule in the loaded policy; \
+         this picto can never be consumed. Known scopes: {}",
+        if known.is_empty() {
+            "<none>".to_string()
+        } else {
+            known.join(", ")
+        }
+    );
 }
 
 pub(crate) fn decide_with_pictos(

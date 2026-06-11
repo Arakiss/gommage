@@ -1,5 +1,5 @@
 {
-  "name": "shell-compound-git-force-push-is-gommaged",
+  "name": "shell-compound-git-force-push-asks-for-picto",
   "call": { "tool": "Bash", "input": { "command": "cd /r && git push --force origin feature/x" } },
-  "expected": { "kind": "gommage" }
+  "expected": { "kind": "ask_picto", "required_scope": "git.push.force" }
 }

@@ -4,15 +4,24 @@
 # This file adds policy-level hard-stops — denials that match your local workflow
 # but aren't universal enough to belong in the compiled-in list.
 #
-# Use `hard_stop: true` here when you want the deny to be un-bypassable by pictos.
+# Decision semantics, so a rule does what its comment promises:
+#   - `decision: gommage` is a terminal deny. The picto store is NOT consulted,
+#     so `hard_stop: false` does NOT make a gommage deny picto-bypassable; the
+#     flag only changes the deny message. Override such a deny by editing policy.
+#   - `decision: ask_picto` (with a `required_scope`) is the break-glass path: a
+#     signed picto whose scope equals `required_scope` turns the ask into allow.
+#     Use this for "deny by default, but allow with a signed, audited picto".
 
+# Force pushes rewrite shared history; gate them behind a signed picto rather
+# than a hard deny so a deliberate, audited override is possible. Grant with
+# `gommage grant --scope git.push.force --reason "<why>"` then `gommage confirm`.
 - name: no-force-push
-  decision: gommage
-  hard_stop: false  # allow break-glass picto if you know what you're doing
+  decision: ask_picto
+  required_scope: "git.push.force"
   match:
     any_capability:
       - "git.push.force:*"
-  reason: "force pushes require a picto (dangerous to shared history)"
+  reason: "force pushes rewrite shared history; require a signed picto (scope git.push.force)"
 
 - name: no-curl-pipe-sh
   decision: gommage
