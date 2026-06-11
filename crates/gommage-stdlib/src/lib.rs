@@ -72,6 +72,43 @@ pub const CAPABILITIES: &[StdlibFile] = &[
     },
 ];
 
+/// Map a tool call to capabilities using the **bundled** stdlib capability
+/// mappers (not the user's on-disk files). Falls back to a bare
+/// `proc.exec:<command>` for a Bash call if the bundled mappers fail to compile,
+/// so a compiled hard-stop on the raw command is still surfaced.
+///
+/// This is the capability source for the `GOMMAGE_BYPASS` kill-switch: it must
+/// not read on-disk policy/capabilities, because the whole point of the
+/// kill-switch is to keep working when those are broken.
+pub fn bypass_capabilities(call: &gommage_core::ToolCall) -> Vec<gommage_core::Capability> {
+    use gommage_core::{Capability, CapabilityMapper};
+    let yaml = CAPABILITIES
+        .iter()
+        .map(|file| file.contents)
+        .collect::<Vec<_>>()
+        .join("\n");
+    match CapabilityMapper::from_yaml_string(&yaml, "<compiled-stdlib-capabilities>") {
+        Ok(mapper) => mapper.map(call),
+        Err(_) => {
+            if call.tool == "Bash"
+                && let Some(command) = call.input.get("command").and_then(|value| value.as_str())
+            {
+                return vec![Capability::new(format!("proc.exec:{command}"))];
+            }
+            Vec::new()
+        }
+    }
+}
+
+/// Full `GOMMAGE_BYPASS` evaluation: map capabilities from the bundled stdlib,
+/// then apply the bypass decision (compiled hard-stops still deny; everything
+/// else is allowed with policy skipped). Single entry point shared by the
+/// `gommage-mcp` hook binary and the `gommage mcp` CLI adapter so both behave
+/// identically under the kill-switch.
+pub fn evaluate_bypass(call: &gommage_core::ToolCall) -> gommage_core::EvalResult {
+    gommage_core::evaluate_bypass(bypass_capabilities(call))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +117,23 @@ mod tests {
     fn recovery_policy_has_unambiguous_early_prefix() {
         assert!(POLICIES.iter().any(|file| file.name == "03-recovery.yaml"));
         assert!(!POLICIES.iter().any(|file| file.name == "05-recovery.yaml"));
+    }
+
+    #[test]
+    fn bypass_evaluation_denies_hardstop_but_allows_normal() {
+        use gommage_core::{Decision, ToolCall};
+        let bash = |cmd: &str| ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({ "command": cmd }),
+        };
+        assert_eq!(evaluate_bypass(&bash("ls -la")).decision, Decision::Allow);
+        let denied = evaluate_bypass(&bash("rm -rf /"));
+        assert!(matches!(
+            denied.decision,
+            Decision::Gommage {
+                hard_stop: true,
+                ..
+            }
+        ));
     }
 }

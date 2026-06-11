@@ -11,3 +11,11 @@ description = "Bundled policy and capability mapper stdlib for Gommage."
 [lib]
 name = "gommage_stdlib"
 path = "src/lib.rs"
+
+[dependencies]
+# Normal dep on core (core only dev-depends on stdlib, so the runtime graph
+# stays acyclic). Lets the bundled bypass path reuse core's mapper + decision.
+gommage-core.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
