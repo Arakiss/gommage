@@ -29,7 +29,7 @@ pub use approval_webhook::{
 };
 pub use capability::Capability;
 pub use error::GommageError;
-pub use evaluator::{Decision, EvalResult, MatchedRule, evaluate};
+pub use evaluator::{Decision, EvalResult, MatchedRule, evaluate, evaluate_bypass};
 pub use hardstop::HardStopHit;
 pub use mapper::CapabilityMapper;
 pub use picto::{Picto, PictoConsume, PictoLookup, PictoStatus, PictoStore};

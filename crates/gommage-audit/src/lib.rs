@@ -461,6 +461,44 @@ pub fn key_fingerprint(vk: &VerifyingKey) -> String {
     digest[..16].to_string()
 }
 
+/// Append a signed `BypassActivated` event for a `GOMMAGE_BYPASS` decision.
+///
+/// Best-effort: a failure to load the signing key or open the audit log is
+/// swallowed, because the bypass is a recovery path and must never be blocked by
+/// an audit problem. Shared by the `gommage-mcp` hook binary and the
+/// `gommage mcp` CLI adapter so both leave an identical, tamper-evident trail.
+pub fn append_bypass_event_best_effort(
+    layout: &gommage_core::runtime::HomeLayout,
+    call: &ToolCall,
+    eval: &EvalResult,
+    bypass_decision: &str,
+) {
+    let Ok(sk) = layout.load_key() else {
+        return;
+    };
+    let Ok(mut writer) = AuditWriter::open(&layout.audit_log, sk) else {
+        return;
+    };
+    let (original_decision, original_reason, hard_stop) = match &eval.decision {
+        Decision::Allow => (
+            "allow".to_string(),
+            "policy evaluation skipped".to_string(),
+            false,
+        ),
+        Decision::Gommage { reason, hard_stop } => ("deny".to_string(), reason.clone(), *hard_stop),
+        Decision::AskPicto { reason, .. } => ("ask".to_string(), reason.clone(), false),
+    };
+    let _ = writer.append_event(AuditEvent::BypassActivated {
+        tool: call.tool.clone(),
+        input_hash: call.input_hash(),
+        capabilities: eval.capabilities.clone(),
+        original_decision,
+        original_reason,
+        hard_stop,
+        bypass_decision: bypass_decision.to_string(),
+    });
+}
+
 /// Walk the log and produce a `VerifyReport`. Does NOT abort on the first
 /// failure — continues recording anomalies. Returns `Ok(report)` as long as
 /// the file can be opened and read; individual line errors are anomalies.

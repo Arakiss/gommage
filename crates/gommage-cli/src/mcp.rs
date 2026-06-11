@@ -2,9 +2,69 @@ use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use gommage_audit::AuditWriter;
 use gommage_core::{Decision, runtime::HomeLayout};
+use gommage_stdlib::evaluate_bypass;
 use std::process::ExitCode;
 
 use crate::{decide_with_pictos, input::tool_call_from_hook_payload};
+
+/// True when the kill-switch env var is set. Mirrors the standalone
+/// `gommage-mcp` binary so a legacy install whose hook command is
+/// `gommage mcp` honours `GOMMAGE_BYPASS=1` identically.
+fn bypass_enabled() -> bool {
+    std::env::var("GOMMAGE_BYPASS")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+}
+
+fn write_hook_decision(decision: &str, reason: &str) -> Result<ExitCode> {
+    let out = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+            "permissionDecisionReason": reason,
+        }
+    });
+    println!("{}", serde_json::to_string(&out)?);
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Handle a hook call under `GOMMAGE_BYPASS=1`: skip policy evaluation but keep
+/// the compiled hard-stops and the signed audit trail. Checked before opening
+/// the runtime so the kill-switch still works when the on-disk policy is broken.
+fn run_mcp_bypass(layout: &HomeLayout, buf: &str) -> Result<ExitCode> {
+    eprintln!(
+        "gommage: WARNING: GOMMAGE_BYPASS=1 is set; skipping policy evaluation (compiled hard-stops still apply)"
+    );
+    let call = match serde_json::from_str(buf)
+        .ok()
+        .and_then(|input| tool_call_from_hook_payload(input).ok())
+    {
+        Some(call) => call,
+        None => {
+            return write_hook_decision(
+                "allow",
+                "gommage bypass: GOMMAGE_BYPASS=1 was set, but the hook payload could not be parsed; policy evaluation skipped for hook recovery",
+            );
+        }
+    };
+    let eval = evaluate_bypass(&call);
+    match &eval.decision {
+        Decision::Gommage { reason, .. } => {
+            gommage_audit::append_bypass_event_best_effort(layout, &call, &eval, "deny");
+            write_hook_decision(
+                "deny",
+                &format!("gommage bypass refused: {reason}; hard-stops cannot be bypassed"),
+            )
+        }
+        _ => {
+            gommage_audit::append_bypass_event_best_effort(layout, &call, &eval, "allow");
+            write_hook_decision(
+                "allow",
+                "gommage bypass: GOMMAGE_BYPASS=1 was set by the host environment; policy evaluation skipped after hard-stop check",
+            )
+        }
+    }
+}
 
 /// MCP / PreToolUse hook adapter. Reads one Claude Code hook JSON object from
 /// stdin and writes one hook response JSON object to stdout.
@@ -26,6 +86,11 @@ pub(crate) fn run_mcp(layout: HomeLayout) -> Result<ExitCode> {
 
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf)?;
+
+    if bypass_enabled() {
+        return run_mcp_bypass(&layout, &buf);
+    }
+
     let input: serde_json::Value = serde_json::from_str(&buf).context("parsing hook input")?;
     let call = tool_call_from_hook_payload(input)?;
 

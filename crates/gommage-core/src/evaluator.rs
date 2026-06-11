@@ -97,6 +97,43 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
     }
 }
 
+/// Decision for a tool call when policy evaluation is bypassed
+/// (`GOMMAGE_BYPASS=1`), given the capabilities already mapped for it. Compiled
+/// hard-stops still deny — they are never bypassable — and everything else is
+/// allowed with policy explicitly skipped.
+///
+/// The caller maps `caps` (the bypass path uses the bundled stdlib mappers, in
+/// `gommage-stdlib`, so the kill-switch works even when the on-disk policy is
+/// broken). Keeping the decision here, in core, makes it the single source of
+/// truth shared by the `gommage-mcp` hook binary and the `gommage mcp` CLI
+/// adapter, without core depending on the (unpublished) stdlib assets.
+pub fn evaluate_bypass(caps: Vec<Capability>) -> EvalResult {
+    if let Some(hit) = hardstop::check(&caps) {
+        return EvalResult {
+            decision: Decision::Gommage {
+                reason: format!(
+                    "hard-stop {}: pattern {:?} matched {}",
+                    hit.name, hit.pattern, hit.capability
+                ),
+                hard_stop: true,
+            },
+            matched_rule: Some(MatchedRule {
+                name: format!("<hardcoded:{}>", hit.name),
+                file: "<compiled-in>".to_string(),
+                index: 0,
+            }),
+            capabilities: caps,
+            policy_version: "bypass:compiled-hardstop".to_string(),
+        };
+    }
+    EvalResult {
+        decision: Decision::Allow,
+        matched_rule: None,
+        capabilities: caps,
+        policy_version: "bypass:policy-skipped".to_string(),
+    }
+}
+
 fn decision_from_rule(rule: &Rule) -> Decision {
     match rule.decision {
         RuleDecision::Allow => Decision::Allow,
@@ -164,6 +201,22 @@ mod tests {
             panic!("expected gommage");
         };
         assert!(hard_stop);
+    }
+
+    #[test]
+    fn bypass_allows_when_no_hardstop() {
+        let eval = evaluate_bypass(vec![Capability::new("proc.exec:ls -la")]);
+        assert_eq!(eval.decision, Decision::Allow);
+        assert_eq!(eval.policy_version, "bypass:policy-skipped");
+    }
+
+    #[test]
+    fn bypass_still_denies_compiled_hardstop() {
+        let eval = evaluate_bypass(vec![Capability::new("proc.exec:rm -rf /")]);
+        let Decision::Gommage { hard_stop, .. } = eval.decision else {
+            panic!("expected gommage deny under bypass");
+        };
+        assert!(hard_stop, "compiled hard-stops are never bypassable");
     }
 
     #[test]
