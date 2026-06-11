@@ -210,8 +210,8 @@ fn recovery_self_test_failures(layout: &HomeLayout, agents: &[AgentKind]) -> Res
             bash_call("systemctl --user status gommage-daemon.service"),
         ),
         RecoveryCheck::gommage_hard_stop("rm_root_hardstop", bash_call("rm -rf /")),
-        RecoveryCheck::gommage(
-            "force_push_still_denied",
+        RecoveryCheck::ask_picto(
+            "force_push_asks_picto",
             bash_call("git push --force origin main"),
         ),
     ];
@@ -291,14 +291,6 @@ impl RecoveryCheck {
             name,
             call,
             expectation: RecoveryExpectation::Allow,
-        }
-    }
-
-    fn gommage(name: &'static str, call: ToolCall) -> Self {
-        Self {
-            name,
-            call,
-            expectation: RecoveryExpectation::Gommage { hard_stop: None },
         }
     }
 

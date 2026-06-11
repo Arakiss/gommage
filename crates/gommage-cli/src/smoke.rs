@@ -202,11 +202,11 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             },
         },
         SmokeFixture {
-            name: "deny_force_push",
-            description: "force pushes deny before the main-push gate can grant",
+            name: "gate_force_push",
+            description: "force pushes are deny-by-default but unlockable with a git.push.force picto",
             call: bash_call("git push --force origin main"),
-            expectation: SmokeExpectation::Gommage {
-                hard_stop: Some(false),
+            expectation: SmokeExpectation::AskPicto {
+                scope: "git.push.force",
             },
         },
         SmokeFixture {

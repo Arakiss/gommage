@@ -690,7 +690,8 @@ fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
 /// Warn (to stderr) when a grant scope matches no `ask_picto` rule in the loaded
 /// policy. A picto is consumed only by exact-scope match against a rule's
 /// `required_scope`, so an unknown scope produces a picto that can never unlock
-/// anything — the failure mode the Polaris field report hit (`git.force-push`).
+/// anything — the failure mode a field report hit (scope `git.force-push`,
+/// which matches no rule, instead of the real `git.push.force`).
 fn warn_if_scope_unknown(rt: &Runtime, scope: &str) {
     let mut known: Vec<&str> = rt
         .policy
