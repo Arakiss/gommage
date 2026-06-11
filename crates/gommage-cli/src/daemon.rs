@@ -41,6 +41,10 @@ pub(crate) enum DaemonCmd {
         #[arg(long, value_enum)]
         manager: Option<ServiceManager>,
     },
+    /// Tell the running daemon to reload policy + capability mappers from disk,
+    /// without a restart. Use after editing `~/.gommage/policy.d/*.yaml` so the
+    /// daemon's in-memory policy matches what `gommage decide` reads fresh.
+    Reload,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
@@ -81,6 +85,48 @@ pub(crate) fn cmd_daemon(sub: DaemonCmd, layout: HomeLayout) -> Result<ExitCode>
             daemon_uninstall(resolve_service_manager(manager)?, dry_run)
         }
         DaemonCmd::Status { manager } => daemon_status(resolve_service_manager(manager)?),
+        DaemonCmd::Reload => daemon_reload(&layout),
+    }
+}
+
+/// Connect to the running daemon's Unix socket and ask it to reload policy +
+/// capability mappers from disk (the `{"op":"reload"}` IPC the daemon already
+/// serves). Exits non-zero with a clear message if no daemon is listening.
+fn daemon_reload(layout: &HomeLayout) -> Result<ExitCode> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let socket = &layout.socket;
+    let mut stream = match UnixStream::connect(socket) {
+        Ok(stream) => stream,
+        Err(error) => {
+            eprintln!(
+                "no daemon listening on {} ({error}). Is it running? `gommage daemon status`",
+                socket.display()
+            );
+            return Ok(ExitCode::from(1));
+        }
+    };
+    stream.write_all(b"{\"op\":\"reload\"}\n")?;
+    stream.flush()?;
+
+    let mut line = String::new();
+    BufReader::new(&stream).read_line(&mut line)?;
+    let resp: serde_json::Value = serde_json::from_str(line.trim()).unwrap_or_default();
+    if resp.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
+        let detail = resp
+            .get("result")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("policy reloaded");
+        println!("ok daemon: {detail}");
+        Ok(ExitCode::SUCCESS)
+    } else {
+        let error = resp
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("daemon returned an error");
+        eprintln!("daemon reload failed: {error}");
+        Ok(ExitCode::from(1))
     }
 }
 
