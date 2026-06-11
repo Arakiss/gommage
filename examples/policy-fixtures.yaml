@@ -36,14 +36,14 @@ cases:
       required_scope: git.push:main
       matched_rule: gate-main-push
 
-  - name: deny_force_push
-    description: Force pushes should be denied by policy before a main-push approval can help.
+  - name: gate_force_push
+    description: Force pushes are deny-by-default but unlockable with a signed git.push.force picto (break-glass), and no-force-push wins over the main-push gate.
     tool: Bash
     input:
       command: git push --force origin main
     expect:
-      decision: gommage
-      hard_stop: false
+      decision: ask_picto
+      required_scope: git.push.force
       matched_rule: no-force-push
 
   - name: ask_web_fetch

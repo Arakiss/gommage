@@ -1,6 +1,6 @@
 {
-  "name": "polaris-force-push-to-main-with-redirect-asks-for-picto",
-  "note": "The exact Polaris field scenario: `git push --force origin main 2>&1`. The redirection no longer corrupts the refspec (strip_redirections), and no-force-push is now ask_picto, so the force push is deny-by-default with a real break-glass path instead of an un-bypassable gommage deny. no-force-push (00-hard-stops, loaded first) wins over gate-main-push, so the required scope is git.push.force.",
+  "name": "force-push-to-main-with-redirect-asks-for-picto",
+  "note": "The exact field-reported scenario: `git push --force origin main 2>&1`. The redirection no longer corrupts the refspec (strip_redirections), and no-force-push is now ask_picto, so the force push is deny-by-default with a real break-glass path instead of an un-bypassable gommage deny. no-force-push (00-hard-stops, loaded first) wins over gate-main-push, so the required scope is git.push.force.",
   "call": { "tool": "Bash", "input": { "command": "git push --force origin main 2>&1" } },
   "expected": { "kind": "ask_picto", "required_scope": "git.push.force" }
 }
