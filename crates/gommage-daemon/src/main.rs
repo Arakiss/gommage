@@ -97,6 +97,18 @@ async fn main() -> Result<()> {
 
     let socket_path = args.socket.unwrap_or_else(|| layout.socket.clone());
     if socket_path.exists() {
+        // A stale socket from a crashed daemon is safe to replace; a *live*
+        // daemon answering on it is not. Probe before unlinking so a second
+        // daemon does not silently steal the path (leaving two daemons, the
+        // older one serving a now-rancid policy).
+        if socket_is_live(&socket_path) {
+            anyhow::bail!(
+                "another gommage daemon is already listening on {}; \
+                 stop it first (or pass a different --socket). \
+                 Reload its policy with `gommage daemon reload` instead of starting a second daemon.",
+                socket_path.display()
+            );
+        }
         std::fs::remove_file(&socket_path).ok();
     }
     let listener = UnixListener::bind(&socket_path).context("binding socket")?;
@@ -168,6 +180,34 @@ async fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Best-effort liveness probe for an existing socket path: connect and ping.
+/// Returns true only if a daemon answers `pong` within a short timeout. A
+/// missing socket, a refused connection (stale socket file), or a timeout all
+/// resolve to false — meaning "no live daemon", so rebinding the path is safe.
+///
+/// Synchronous on purpose: it runs once at startup before the async listener
+/// exists, and `set_read_timeout` bounds a wedged peer without pulling in the
+/// tokio `time` feature.
+fn socket_is_live(socket_path: &std::path::Path) -> bool {
+    use std::io::{BufRead, BufReader as StdBufReader, Write};
+    use std::os::unix::net::UnixStream as StdUnixStream;
+    use std::time::Duration;
+
+    let Ok(mut stream) = StdUnixStream::connect(socket_path) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    if stream.write_all(b"{\"op\":\"ping\"}\n").is_err() {
+        return false;
+    }
+    let mut line = String::new();
+    match StdBufReader::new(&stream).read_line(&mut line) {
+        Ok(read) if read > 0 => line.contains("pong"),
+        _ => false,
+    }
 }
 
 struct State {
@@ -432,4 +472,63 @@ fn err(msg: String) -> String {
         error: Some(msg),
     })
     .unwrap_or_else(|_| "{\"ok\":false,\"error\":\"serialize\"}".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::socket_is_live;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    fn unique_sock(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("gommage-live-{}-{tag}.sock", std::process::id()))
+    }
+
+    #[test]
+    fn socket_is_live_is_false_for_missing_path() {
+        assert!(!socket_is_live(&unique_sock("missing")));
+    }
+
+    #[test]
+    fn socket_is_live_is_true_when_peer_answers_pong() {
+        let path = unique_sock("pong");
+        std::fs::remove_file(&path).ok();
+        let listener = UnixListener::bind(&path).expect("bind probe socket");
+        let server = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut line = String::new();
+                let reader = stream.try_clone().expect("clone stream");
+                BufReader::new(reader).read_line(&mut line).ok();
+                stream
+                    .write_all(b"{\"ok\":true,\"result\":\"pong\"}\n")
+                    .ok();
+            }
+        });
+        assert!(
+            socket_is_live(&path),
+            "a peer answering pong must read as live"
+        );
+        server.join().ok();
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn socket_is_live_is_false_when_peer_is_silent() {
+        let path = unique_sock("silent");
+        std::fs::remove_file(&path).ok();
+        let listener = UnixListener::bind(&path).expect("bind probe socket");
+        // Accept but never reply — the read timeout must make this read as dead.
+        let server = std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                std::thread::sleep(std::time::Duration::from_millis(900));
+                drop(stream);
+            }
+        });
+        assert!(
+            !socket_is_live(&path),
+            "a peer that never answers must read as not-live within the timeout"
+        );
+        server.join().ok();
+        std::fs::remove_file(&path).ok();
+    }
 }
