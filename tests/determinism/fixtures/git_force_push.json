@@ -1,5 +1,6 @@
 {
-  "name": "git-force-push-is-gommaged",
+  "name": "git-force-push-asks-for-break-glass-picto",
+  "note": "no-force-push is decision: ask_picto (required_scope git.push.force), so a force push is deny-by-default but unlockable with a signed, confirmed picto — the break-glass path the rule comment always promised. Previously decision: gommage made the picto impossible to honor.",
   "call": { "tool": "Bash", "input": { "command": "git push --force origin feature/x" } },
-  "expected": { "kind": "gommage" }
+  "expected": { "kind": "ask_picto", "required_scope": "git.push.force" }
 }

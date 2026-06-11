@@ -11,10 +11,15 @@
     - "proc.exec:${input.command}"
 
 # --- Git --------------------------------------------------------------------
+# The `ref` capture excludes shell redirection/control metacharacters
+# (`< > & | ;`) so a trailing `2>&1` / `&` / `>log` can never land in the
+# refspec position and slip a push past the branch gate. The mapper also
+# strips redirections from the per-segment candidate (see collect_candidates);
+# this charset is the defense-in-depth backstop on the raw command.
 - name: bash-git-push
   tool: Bash
   match_input:
-    command: "^\\s*git\\s+push(?:\\s+[-\\w]+)*\\s+(?P<remote>[\\w.-]+)\\s+(?P<ref>\\S+)"
+    command: "^\\s*git\\s+push(?:\\s+[-\\w]+)*\\s+(?P<remote>[\\w.-]+)\\s+(?P<ref>[^\\s<>&|;]+)"
   emit:
     - "git.push:refs/heads/${ref}"
     - "net.out:github.com"

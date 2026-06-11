@@ -1,0 +1,6 @@
+{
+  "name": "redirected-git-push-to-main-still-asks-for-picto",
+  "note": "Gate-evasion regression (field report): appending `2>&1` made the mapper capture the refspec as `git.push:refs/heads/2>&1`, which did not match gate-main-push, so the push slipped through. strip_redirections in the per-segment candidate now yields the real `git.push:refs/heads/main`, and the main-push gate fires as it does for the bare command.",
+  "call": { "tool": "Bash", "input": { "command": "git push origin main 2>&1" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.push:main" }
+}

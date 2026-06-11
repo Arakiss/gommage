@@ -1,0 +1,6 @@
+{
+  "name": "backgrounded-git-push-to-main-still-asks-for-picto",
+  "note": "Sibling of the redirection evasion: a trailing background `&` is a control operator the tokenizer keeps as a word, so it would otherwise land in the refspec position (`git.push:refs/heads/&`). strip_redirections drops the lone `&`, and the charset on the bash-git-push `ref` capture is the defense-in-depth backstop on the raw command.",
+  "call": { "tool": "Bash", "input": { "command": "git push origin main &" } },
+  "expected": { "kind": "ask_picto", "required_scope": "git.push:main" }
+}
