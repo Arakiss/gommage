@@ -13,6 +13,12 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- `gommage daemon reload` reloads policy and capability mappers in the running
+  daemon over its socket, with no restart — so the daemon's in-memory policy
+  stops diverging from what `gommage decide` reads fresh after a policy edit.
+- `gommage grant` now warns when `--scope` matches no `ask_picto` rule's
+  `required_scope` in the loaded policy, and lists the known scopes, so a typo'd
+  or invented scope no longer silently produces a picto nothing can consume.
 - `gommage beta check` provides a single beta-readiness gate that aggregates
   doctor, smoke, agent integration status, optional policy fixtures, operator
   dashboard availability, and actionable next steps for host test loops.
@@ -234,8 +240,32 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   CI and release-please, so living README/docs/script/skill examples use
   `latest` or placeholder tags instead of stale concrete alpha release tags.
 
+### Security
+
+- **Branch-gate evasion via redirections fixed (decision-behavior change,
+  breaking).** A push such as `git push origin main 2>&1` mapped to the
+  capability `git.push:refs/heads/2>&1` because the per-segment candidate kept
+  the redirection token and the refspec capture swallowed it; that capability
+  matched no gate, so with a late broad allow the push to a gated branch could
+  slip through ungated. The capability mapper now strips redirections (glued
+  `2>&1`/`>log`, spaced `> log`/`2> file`) and a trailing background `&` from the
+  normalised segment before the refspec is read, so the real
+  `git.push:refs/heads/main` is emitted and the gate fires. The `bash-git-push`
+  `ref` capture additionally excludes shell metacharacters (`< > & | ;`) as a
+  defense-in-depth backstop on the raw command.
+
 ### Fixed
 
+- The daemon now refuses to start when a live daemon is already listening on its
+  socket (connect + ping probe) instead of unlinking the socket and leaving two
+  daemons running — the older one serving a now-stale policy. A stale socket
+  from a crashed daemon still rebinds freely.
+- The `gommage mcp` CLI hook adapter now honours `GOMMAGE_BYPASS=1` identically
+  to the standalone `gommage-mcp` binary (compiled hard-stops still apply; the
+  decision is audited). A legacy install whose hook command was `gommage mcp`
+  previously had a dead kill-switch. The bypass decision and its signed
+  `bypass_activated` audit event are now one shared implementation across both
+  hook entry points.
 - Hard-stop matching for shell commands now uses semantic command segments for
   destructive `rm -rf`/`dd` shapes instead of broad raw-line substring globs,
   so quoted fixture data such as `echo '{"command":"rm -rf /"}'` no longer
@@ -247,6 +277,15 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- **Force-push is now `ask_picto`, not a terminal deny (decision-behavior
+  change, breaking).** The bundled `no-force-push` rule was `decision: gommage`
+  with a comment promising a break-glass picto, but a `gommage` deny never
+  consults the picto store, so the promised override could never fire. It is now
+  `decision: ask_picto` (`required_scope: git.push.force`): force-push is
+  deny-by-default with a real, signed, audited override —
+  `gommage grant --scope git.push.force --reason <why>` then `gommage confirm`.
+  To keep force-push an un-bypassable hard deny instead, use `decision: gommage`
+  with `hard_stop: true` (now documented in the policy header and cookbook).
 - README agent guidance now uses short command blocks and stable contract
   tables instead of an oversized all-in-one command block.
 - Release automation now treats `gommage-cli-v*` as the only user-facing
