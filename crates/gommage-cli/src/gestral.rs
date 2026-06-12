@@ -75,39 +75,6 @@ pub(crate) fn paint(text: impl AsRef<str>, tone: UiTone, bold: bool, colors: boo
     format!("\x1b[{}m{text}\x1b[0m", codes.join(";"))
 }
 
-pub(crate) fn strip_ansi(input: &str) -> String {
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            output.push(ch);
-        }
-    }
-    output
-}
-
-pub(crate) fn truncate_plain(input: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let plain = strip_ansi(input);
-    if plain.chars().count() <= width {
-        return input.to_string();
-    }
-    plain
-        .chars()
-        .take(width.saturating_sub(1))
-        .collect::<String>()
-        + "~"
-}
-
 impl UiTone {
     fn ansi_code(self) -> &'static str {
         match self {

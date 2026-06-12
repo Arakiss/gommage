@@ -37,6 +37,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 clap       = { version = "4", features = ["derive", "env"] }
 tokio      = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "signal", "sync"] }
 dirs       = "6"
+# Interactive TUI only. Default features bundle the crossterm backend, which we
+# consume via `ratatui::crossterm` (no separate crossterm pin). MIT-licensed.
+ratatui    = "0.30"
 
 # --- Determinism-critical (exact pins: any change here can flip a decision) -
 # Touching any of these requires a PR with a green determinism-suite run.
