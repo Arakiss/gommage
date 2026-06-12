@@ -12,13 +12,12 @@ use anyhow::{Context, Result};
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
     ApprovalRequest, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
-    ApprovalWebhookSource, Decision, EvalResult, PictoConsume, PictoLookup, ToolCall,
-    approval_webhook_generic_payload, deliver_prepared_approval_webhook, evaluate,
-    prepare_approval_webhook,
+    ApprovalWebhookSource, Capability, CapabilityMapper, Decision, EvalResult, PictoConsume,
+    PictoLookup, ToolCall, approval_webhook_generic_payload, deliver_prepared_approval_webhook,
+    evaluate, evaluate_bypass, prepare_approval_webhook,
     runtime::{HomeLayout, Runtime},
     webhook_signature::WebhookSignatureReport,
 };
-use gommage_stdlib::evaluate_bypass;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -395,9 +394,10 @@ fn handle_bypass(buf: &str) -> Result<()> {
     };
 
     let layout = HomeLayout::default();
-    // Single source of truth for the bypass decision (gommage-core): compiled
+    // Map from the bundled stdlib (not on-disk policy — the kill-switch must
+    // work when that is broken), then apply the shared core decision: compiled
     // hard-stops still deny, everything else is allowed with policy skipped.
-    let eval = evaluate_bypass(&call);
+    let eval = evaluate_bypass(bypass_capabilities(&call));
     match &eval.decision {
         Decision::Gommage { reason, .. } => {
             gommage_audit::append_bypass_event_best_effort(&layout, &call, &eval, "deny");
@@ -415,6 +415,30 @@ fn handle_bypass(buf: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Map a tool call to capabilities using the compiled-in stdlib mappers for the
+/// bypass path. Falls back to a bare `proc.exec:<command>` for a Bash call if
+/// the bundled mappers fail to compile, so a compiled hard-stop on the raw
+/// command is still surfaced. Kept here (and mirrored in the `gommage mcp` CLI
+/// adapter) rather than in `gommage-stdlib` so the crate graph stays acyclic.
+fn bypass_capabilities(call: &ToolCall) -> Vec<Capability> {
+    let yaml = gommage_stdlib::CAPABILITIES
+        .iter()
+        .map(|file| file.contents)
+        .collect::<Vec<_>>()
+        .join("\n");
+    match CapabilityMapper::from_yaml_string(&yaml, "<compiled-stdlib-capabilities>") {
+        Ok(mapper) => mapper.map(call),
+        Err(_) => {
+            if call.tool == "Bash"
+                && let Some(command) = call.input.get("command").and_then(Value::as_str)
+            {
+                return vec![Capability::new(format!("proc.exec:{command}"))];
+            }
+            Vec::new()
+        }
+    }
 }
 
 fn write_hook_response(decision: &str, reason: &str) -> Result<()> {

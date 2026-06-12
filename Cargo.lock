@@ -608,10 +608,6 @@ dependencies = [
 [[package]]
 name = "gommage-stdlib"
 version = "0.8.0-alpha.1"
-dependencies = [
- "gommage-core",
- "serde_json",
-]
 
 [[package]]
 name = "hashbrown"
