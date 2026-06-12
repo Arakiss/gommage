@@ -1,5 +1,20 @@
 # Changelog — gommage-cli
 
+## [0.43.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.42.0-beta.1...gommage-cli-v0.43.0-beta.1) (2026-06-12)
+
+
+### Features
+
+* **daemon:** add reload command and a double-start guard ([8990882](https://github.com/Arakiss/gommage/commit/8990882f64a64d342d5ae2fae60e89049586cacc))
+
+
+### Bug fixes
+
+* **core:** strip shell redirections before refspec capture ([65411a5](https://github.com/Arakiss/gommage/commit/65411a5d36be735fd556c7feec4405b913ff1c48))
+* **mcp:** honor GOMMAGE_BYPASS in the legacy gommage mcp adapter ([a593998](https://github.com/Arakiss/gommage/commit/a59399890dc218d33b465800133e469b9f877ad3))
+* **policies:** make the force-push break-glass picto work ([91bff81](https://github.com/Arakiss/gommage/commit/91bff817394095b8696041af2bf8fbd621326432))
+* **release:** break stdlib-core dep cycle that crashed release-please ([260ec53](https://github.com/Arakiss/gommage/commit/260ec5359adc80e1bd3c9c9175194964d3f90325))
+
 ## [0.42.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.41.0-beta.1...gommage-cli-v0.42.0-beta.1) (2026-06-04)
 
 
