@@ -1,8 +1,7 @@
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use gommage_audit::AuditWriter;
-use gommage_core::{Decision, runtime::HomeLayout};
-use gommage_stdlib::evaluate_bypass;
+use gommage_core::{Capability, CapabilityMapper, Decision, evaluate_bypass, runtime::HomeLayout};
 use std::process::ExitCode;
 
 use crate::{decide_with_pictos, input::tool_call_from_hook_payload};
@@ -47,7 +46,7 @@ fn run_mcp_bypass(layout: &HomeLayout, buf: &str) -> Result<ExitCode> {
             );
         }
     };
-    let eval = evaluate_bypass(&call);
+    let eval = evaluate_bypass(bypass_capabilities(&call));
     match &eval.decision {
         Decision::Gommage { reason, .. } => {
             gommage_audit::append_bypass_event_best_effort(layout, &call, &eval, "deny");
@@ -62,6 +61,30 @@ fn run_mcp_bypass(layout: &HomeLayout, buf: &str) -> Result<ExitCode> {
                 "allow",
                 "gommage bypass: GOMMAGE_BYPASS=1 was set by the host environment; policy evaluation skipped after hard-stop check",
             )
+        }
+    }
+}
+
+/// Map a tool call to capabilities using the compiled-in stdlib mappers for the
+/// bypass path (mirrors the standalone `gommage-mcp` binary). Kept local rather
+/// than in `gommage-stdlib` so the crate graph stays acyclic for the release
+/// tooling. Falls back to a bare `proc.exec:<command>` if the bundled mappers
+/// fail to compile, so a compiled hard-stop on the raw command still fires.
+fn bypass_capabilities(call: &gommage_core::ToolCall) -> Vec<Capability> {
+    let yaml = gommage_stdlib::CAPABILITIES
+        .iter()
+        .map(|file| file.contents)
+        .collect::<Vec<_>>()
+        .join("\n");
+    match CapabilityMapper::from_yaml_string(&yaml, "<compiled-stdlib-capabilities>") {
+        Ok(mapper) => mapper.map(call),
+        Err(_) => {
+            if call.tool == "Bash"
+                && let Some(command) = call.input.get("command").and_then(|value| value.as_str())
+            {
+                return vec![Capability::new(format!("proc.exec:{command}"))];
+            }
+            Vec::new()
         }
     }
 }
