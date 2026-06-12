@@ -1,23 +1,21 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use gommage_core::runtime::HomeLayout;
 use std::{
-    io::{self, IsTerminal, Read, Write},
-    process::{Command, ExitCode, Stdio},
+    io::{self, IsTerminal, Write},
+    process::ExitCode,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use crate::{
     agent::AgentKind,
     agent_status::build_agent_status_report,
     doctor::{DoctorStatus, build_doctor_report},
-    gestral::{UiStatus, color_enabled, truncate_plain},
+    gestral::UiStatus,
     operator_metrics::build_operator_telemetry,
     smoke::{SmokeStatus, build_smoke_report},
-    tui_actions::{ApprovalDraft, PendingTuiAction, execute_tui_action},
-    tui_render::{RenderState, render_lines},
     tui_stream::print_stream,
-    tui_views::{TuiView, build_view_report, pending_approval_ids},
+    tui_views::{TuiView, build_view_report},
     util::path_display,
 };
 
@@ -87,7 +85,7 @@ pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCod
         return Ok(ExitCode::SUCCESS);
     }
 
-    match run_interactive(
+    match crate::tui_app::run_interactive(
         &layout,
         &agents,
         options.view,
@@ -104,7 +102,7 @@ pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCod
     }
 }
 
-fn build_dashboard(layout: &HomeLayout, agents: &[AgentKind]) -> Result<Dashboard> {
+pub(crate) fn build_dashboard(layout: &HomeLayout, agents: &[AgentKind]) -> Result<Dashboard> {
     let mut rows = Vec::new();
     let doctor = build_doctor_report(layout);
     rows.push(StatusRow {
@@ -294,292 +292,6 @@ fn print_watch(
     Ok(())
 }
 
-#[cfg(unix)]
-fn run_interactive(
-    layout: &HomeLayout,
-    agents: &[AgentKind],
-    initial_view: TuiView,
-    refresh: Duration,
-) -> Result<()> {
-    let refresh = refresh.clamp(Duration::from_millis(250), Duration::from_millis(10_000));
-    let _session = TerminalSession::enter()?;
-    let mut stdin = io::stdin();
-    let mut stdout = io::stdout();
-    let colors = color_enabled();
-    let mut dashboard = build_dashboard(layout, agents)?;
-    let mut selected = dashboard.primary_row_index().unwrap_or(0);
-    let mut selected_approval = 0usize;
-    let mut view = normalize_interactive_view(initial_view);
-    let mut notice: Option<String> = None;
-    let mut confirm: Option<PendingTuiAction> = None;
-    let mut approval_draft = ApprovalDraft::default();
-    let confirm_prompt = confirm.as_ref().map(PendingTuiAction::prompt);
-    draw_dashboard(
-        &mut stdout,
-        layout,
-        &dashboard,
-        colors,
-        RenderState {
-            selected,
-            selected_approval,
-            view,
-            approval_uses: approval_draft.uses,
-            approval_ttl: approval_draft.ttl_label(),
-            notice: notice.as_deref(),
-            confirm: confirm_prompt.as_deref(),
-        },
-    )?;
-    let mut last_refresh = Instant::now();
-    let mut input = [0_u8; 1];
-
-    loop {
-        match stdin.read(&mut input) {
-            Ok(0) => {}
-            Ok(_) => {
-                if let Some(action) = confirm.take() {
-                    match input[0] {
-                        b'y' | b'Y' => {
-                            notice = Some(execute_tui_action(layout, action));
-                            dashboard = build_dashboard(layout, agents)?;
-                            selected = selected.min(dashboard.rows.len().saturating_sub(1));
-                            selected_approval = clamp_approval_selection(layout, selected_approval);
-                            last_refresh = Instant::now();
-                        }
-                        b'n' | b'N' | 27 => {
-                            notice = Some("cancelled approval action".to_string());
-                        }
-                        other => {
-                            confirm = Some(action);
-                            notice = Some(format!(
-                                "press y to confirm or n to cancel; ignored {:?}",
-                                other as char
-                            ));
-                        }
-                    }
-                } else {
-                    match input[0] {
-                        b'q' | 27 => break,
-                        b'j' | b'J' => {
-                            if view == TuiView::Approvals {
-                                selected_approval =
-                                    (selected_approval + 1).min(pending_approval_max(layout));
-                            } else {
-                                selected =
-                                    (selected + 1).min(dashboard.rows.len().saturating_sub(1));
-                            }
-                            notice = None;
-                        }
-                        b'k' | b'K' => {
-                            if view == TuiView::Approvals {
-                                selected_approval = selected_approval.saturating_sub(1);
-                            } else {
-                                selected = selected.saturating_sub(1);
-                            }
-                            notice = None;
-                        }
-                        b'r' | b'R' => {
-                            dashboard = build_dashboard(layout, agents)?;
-                            selected = selected.min(dashboard.rows.len().saturating_sub(1));
-                            selected_approval = clamp_approval_selection(layout, selected_approval);
-                            notice = Some("refreshed".to_string());
-                            last_refresh = Instant::now();
-                        }
-                        b'1' => view = TuiView::Dashboard,
-                        b'2' => view = TuiView::Approvals,
-                        b'3' => view = TuiView::Policies,
-                        b'4' => view = TuiView::Audit,
-                        b'5' => view = TuiView::Capabilities,
-                        b'6' => view = TuiView::Recovery,
-                        b'7' => view = TuiView::Onboarding,
-                        b'8' => view = TuiView::Metrics,
-                        b't' if view == TuiView::Approvals => {
-                            approval_draft.cycle_ttl(false);
-                            notice = Some(format!(
-                                "approval ttl set to {}",
-                                approval_draft.ttl_label()
-                            ));
-                        }
-                        b'T' if view == TuiView::Approvals => {
-                            approval_draft.cycle_ttl(true);
-                            notice = Some(format!(
-                                "approval ttl set to {}",
-                                approval_draft.ttl_label()
-                            ));
-                        }
-                        b'u' if view == TuiView::Approvals => {
-                            approval_draft.cycle_uses(false);
-                            notice = Some(format!("approval uses set to {}", approval_draft.uses));
-                        }
-                        b'U' if view == TuiView::Approvals => {
-                            approval_draft.cycle_uses(true);
-                            notice = Some(format!("approval uses set to {}", approval_draft.uses));
-                        }
-                        b'A' if view == TuiView::Approvals => {
-                            if let Some(id) = selected_approval_id(layout, selected_approval) {
-                                confirm =
-                                    Some(PendingTuiAction::Approve(id, approval_draft.clone()));
-                                notice = None;
-                            } else {
-                                notice = Some("no pending approval selected".to_string());
-                            }
-                        }
-                        b'D' if view == TuiView::Approvals => {
-                            if let Some(id) = selected_approval_id(layout, selected_approval) {
-                                confirm = Some(PendingTuiAction::Deny(id));
-                                notice = None;
-                            } else {
-                                notice = Some("no pending approval selected".to_string());
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error).context("reading terminal input"),
-        }
-
-        if last_refresh.elapsed() >= refresh {
-            dashboard = build_dashboard(layout, agents)?;
-            selected = selected.min(dashboard.rows.len().saturating_sub(1));
-            selected_approval = clamp_approval_selection(layout, selected_approval);
-            last_refresh = Instant::now();
-        }
-        let confirm_prompt = confirm.as_ref().map(PendingTuiAction::prompt);
-        draw_dashboard(
-            &mut stdout,
-            layout,
-            &dashboard,
-            colors,
-            RenderState {
-                selected,
-                selected_approval,
-                view,
-                approval_uses: approval_draft.uses,
-                approval_ttl: approval_draft.ttl_label(),
-                notice: notice.as_deref(),
-                confirm: confirm_prompt.as_deref(),
-            },
-        )?;
-    }
-
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn run_interactive(
-    _layout: &HomeLayout,
-    _agents: &[AgentKind],
-    _initial_view: TuiView,
-    _refresh: Duration,
-) -> Result<()> {
-    anyhow::bail!("interactive TUI is currently available on Unix terminals only")
-}
-
-#[cfg(unix)]
-struct TerminalSession {
-    stty_state: String,
-}
-
-#[cfg(unix)]
-impl TerminalSession {
-    fn enter() -> Result<Self> {
-        let state = Command::new("stty")
-            .arg("-g")
-            .stdin(Stdio::inherit())
-            .output()
-            .context("capturing terminal mode with stty -g")?;
-        if !state.status.success() {
-            anyhow::bail!("stty -g failed");
-        }
-        let stty_state = String::from_utf8(state.stdout)
-            .context("decoding stty state")?
-            .trim()
-            .to_string();
-        let status = Command::new("stty")
-            .args(["raw", "-echo", "min", "0", "time", "1"])
-            .stdin(Stdio::inherit())
-            .status()
-            .context("entering raw terminal mode")?;
-        if !status.success() {
-            anyhow::bail!("stty raw -echo failed");
-        }
-        let mut stdout = io::stdout();
-        write!(stdout, "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H")?;
-        stdout.flush()?;
-        Ok(Self { stty_state })
-    }
-}
-
-#[cfg(unix)]
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        let _ = Command::new("stty")
-            .arg(&self.stty_state)
-            .stdin(Stdio::inherit())
-            .status();
-        let mut stdout = io::stdout();
-        let _ = write!(stdout, "\x1b[0m\x1b[?25h\x1b[2J\x1b[H\x1b[?1049l");
-        let _ = stdout.flush();
-    }
-}
-
-fn draw_dashboard(
-    stdout: &mut impl Write,
-    layout: &HomeLayout,
-    dashboard: &Dashboard,
-    colors: bool,
-    state: RenderState<'_>,
-) -> io::Result<()> {
-    let (cols, rows) = terminal_size();
-    let width = cols.clamp(40, 120);
-    let height = rows.max(12);
-    let lines = render_lines(layout, dashboard, width, colors, state);
-    write!(stdout, "\x1b[H\x1b[2J")?;
-    for line in lines.into_iter().take(height) {
-        writeln!(stdout, "{}", truncate_plain(&line, width))?;
-    }
-    stdout.flush()
-}
-
-fn selected_approval_id(layout: &HomeLayout, selected: usize) -> Option<String> {
-    pending_approval_ids(layout).into_iter().nth(selected)
-}
-
-fn pending_approval_max(layout: &HomeLayout) -> usize {
-    pending_approval_ids(layout).len().saturating_sub(1)
-}
-
-fn clamp_approval_selection(layout: &HomeLayout, selected: usize) -> usize {
-    selected.min(pending_approval_max(layout))
-}
-
-fn terminal_size() -> (usize, usize) {
-    if let (Ok(cols), Ok(lines)) = (std::env::var("COLUMNS"), std::env::var("LINES"))
-        && let (Ok(cols), Ok(lines)) = (cols.parse::<usize>(), lines.parse::<usize>())
-    {
-        return (cols, lines);
-    }
-    #[cfg(unix)]
-    {
-        if let Ok(output) = Command::new("stty")
-            .arg("size")
-            .stdin(Stdio::inherit())
-            .output()
-            && output.status.success()
-            && let Ok(size) = String::from_utf8(output.stdout)
-        {
-            let mut parts = size.split_whitespace();
-            if let (Some(lines), Some(cols)) = (parts.next(), parts.next())
-                && let (Ok(lines), Ok(cols)) = (lines.parse::<usize>(), cols.parse::<usize>())
-            {
-                return (cols, lines);
-            }
-        }
-    }
-    (80, 24)
-}
-
 fn next_actions(rows: &[StatusRow]) -> Vec<String> {
     let mut actions = Vec::new();
     if rows
@@ -623,7 +335,7 @@ fn normalize_agents(agents: Vec<AgentKind>) -> Vec<AgentKind> {
     normalized
 }
 
-fn normalize_interactive_view(view: TuiView) -> TuiView {
+pub(crate) fn normalize_interactive_view(view: TuiView) -> TuiView {
     if view == TuiView::All {
         TuiView::Dashboard
     } else {
@@ -694,7 +406,7 @@ impl Dashboard {
             .and_then(|index| self.rows.get(index))
     }
 
-    fn primary_row_index(&self) -> Option<usize> {
+    pub(crate) fn primary_row_index(&self) -> Option<usize> {
         let overall = self.overall_status();
         self.rows.iter().position(|row| row.status == overall)
     }

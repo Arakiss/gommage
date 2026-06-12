@@ -40,7 +40,7 @@ mod smoke;
 mod state;
 mod tui;
 mod tui_actions;
-mod tui_render;
+mod tui_app;
 mod tui_stream;
 mod tui_views;
 mod uninstall;
