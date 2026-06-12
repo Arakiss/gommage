@@ -1,5 +1,12 @@
 # Changelog — gommage-audit
 
+## [0.6.5-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.6.4-alpha.1...gommage-audit-v0.6.5-alpha.1) (2026-06-12)
+
+
+### Bug fixes
+
+* **mcp:** honor GOMMAGE_BYPASS in the legacy gommage mcp adapter ([a593998](https://github.com/Arakiss/gommage/commit/a59399890dc218d33b465800133e469b9f877ad3))
+
 ## [0.6.4-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.6.3-alpha.1...gommage-audit-v0.6.4-alpha.1) (2026-06-04)
 
 ## [0.6.3-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.6.2-alpha.1...gommage-audit-v0.6.3-alpha.1) (2026-06-04)

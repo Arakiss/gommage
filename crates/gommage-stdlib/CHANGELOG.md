@@ -1,5 +1,14 @@
 # Changelog — gommage-stdlib
 
+## [0.8.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.8.0-alpha.1...gommage-stdlib-v0.8.1-alpha.1) (2026-06-12)
+
+
+### Bug fixes
+
+* **core:** strip shell redirections before refspec capture ([65411a5](https://github.com/Arakiss/gommage/commit/65411a5d36be735fd556c7feec4405b913ff1c48))
+* **mcp:** honor GOMMAGE_BYPASS in the legacy gommage mcp adapter ([a593998](https://github.com/Arakiss/gommage/commit/a59399890dc218d33b465800133e469b9f877ad3))
+* **release:** break stdlib-core dep cycle that crashed release-please ([260ec53](https://github.com/Arakiss/gommage/commit/260ec5359adc80e1bd3c9c9175194964d3f90325))
+
 ## [0.8.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.7.0-alpha.1...gommage-stdlib-v0.8.0-alpha.1) (2026-06-04)
 
 

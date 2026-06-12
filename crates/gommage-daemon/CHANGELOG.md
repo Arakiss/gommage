@@ -1,5 +1,12 @@
 # Changelog — gommage-daemon
 
+## [0.7.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.6.4-alpha.1...gommage-daemon-v0.7.0-alpha.1) (2026-06-12)
+
+
+### Features
+
+* **daemon:** add reload command and a double-start guard ([8990882](https://github.com/Arakiss/gommage/commit/8990882f64a64d342d5ae2fae60e89049586cacc))
+
 ## [0.6.4-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.6.3-alpha.1...gommage-daemon-v0.6.4-alpha.1) (2026-06-04)
 
 ## [0.6.3-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.6.2-alpha.1...gommage-daemon-v0.6.3-alpha.1) (2026-06-04)

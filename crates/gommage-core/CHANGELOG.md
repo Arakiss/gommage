@@ -3,6 +3,14 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.13.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.13.1-alpha.1...gommage-core-v0.13.2-alpha.1) (2026-06-12)
+
+
+### Bug fixes
+
+* **core:** strip shell redirections before refspec capture ([65411a5](https://github.com/Arakiss/gommage/commit/65411a5d36be735fd556c7feec4405b913ff1c48))
+* **mcp:** honor GOMMAGE_BYPASS in the legacy gommage mcp adapter ([a593998](https://github.com/Arakiss/gommage/commit/a59399890dc218d33b465800133e469b9f877ad3))
+
 ## [0.13.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.13.0-alpha.1...gommage-core-v0.13.1-alpha.1) (2026-06-04)
 
 ## [0.13.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.12.0-alpha.1...gommage-core-v0.13.0-alpha.1) (2026-06-04)
