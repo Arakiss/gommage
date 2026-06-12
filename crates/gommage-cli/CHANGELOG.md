@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.44.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.43.0-beta.1...gommage-cli-v0.44.0-beta.1) (2026-06-12)
+
+
+### Features
+
+* **cli:** rewrite interactive tui on ratatui ([#91](https://github.com/Arakiss/gommage/issues/91)) ([6fb8a01](https://github.com/Arakiss/gommage/commit/6fb8a0174a109c3241321e8fc20c64161666e764))
+
 ## [0.43.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.42.0-beta.1...gommage-cli-v0.43.0-beta.1) (2026-06-12)
 
 

@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "gommage-cli"
-version = "0.43.0-beta.1"
+version = "0.44.0-beta.1"
 dependencies = [
  "anyhow",
  "clap",
