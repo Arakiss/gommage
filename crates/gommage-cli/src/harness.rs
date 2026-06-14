@@ -456,7 +456,7 @@ fn render_agent_context_markdown(report: &HarnessReport) -> String {
     out.push_str("- Generated policy layers: `06-agent-config-writable.yaml` (edit your own `~/.claude` / `~/.codex` / `~/.gommage`), `95-agent-catch-all.yaml` (fail-open except gates, for shell/file/outbound). Delete a file to tighten that surface back to strict mode.\n");
     out.push_str("- Web fetch/search and MCP write stay gated by `15-agent-tools` (they cross the local trust boundary); approve per call with a picto, or add a local allow layer if your operator wants them frictionless.\n");
     out.push_str("- An `ask` decision needs a signed picto: request one with `gommage grant --scope <scope> --reason <why>` then `gommage confirm <id>`, and retry. Typical gates: push to `main`/`release`, force-push, `git reset --hard`, cloud prod deploy/destroy, repo delete.\n");
-    out.push_str("- A `deny` decision is final for that call (secret reads, dotfile/credential writes, `rm -rf /`, `curl|sh`). Hard-stops cannot be bypassed by a picto — change the action, not the gate.\n");
+    out.push_str("- A `deny` decision is final for that call (secret reads, dotfile/credential writes, `rm -rf` of any absolute path — not just `/`, but `/tmp/scratch`, `/home/me/build`, … — `curl|sh`). Hard-stops cannot be bypassed by a picto — change the action (a relative path like `./build` is out of hard-stop scope), not the gate.\n");
     out.push_str("- Kill-switch if the gate ever blocks real work: set `GOMMAGE_BYPASS=1` in the hook environment (hard-stops still apply), restore the newest `settings.json.gommage-bak-*` backup, or run `gommage agent uninstall <agent>`.\n\n");
 
     for agent in &report.agents {
