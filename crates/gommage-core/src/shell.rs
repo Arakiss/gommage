@@ -391,6 +391,14 @@ pub(crate) fn command_substitutions(command: &str) -> Vec<String> {
         match ch {
             '\'' if !double => single = !single,
             '"' if !single => double = !double,
+            // A backslash-escaped delimiter (`\`` or `\$`) is a literal in the
+            // shell, not the start of a substitution. Skip the backslash and the
+            // escaped char so `"\`rm -rf /\`"` is treated as data — matching the
+            // escape handling already in `shell_segments` / `redirect_targets`.
+            '\\' if !single => {
+                index += 2;
+                continue;
+            }
             '$' if !single && chars.get(index + 1).is_some_and(|(_, next)| *next == '(') => {
                 if let Some((end, content)) = read_command_substitution(command, &chars, index + 2)
                 {
@@ -556,6 +564,29 @@ mod tests {
     fn single_quoted_substitution_is_data() {
         assert!(command_substitutions("echo '$(git push)'").is_empty());
         assert!(command_substitutions("echo '`git push`'").is_empty());
+    }
+
+    #[test]
+    fn backslash_escaped_delimiters_are_data() {
+        // Escaped backticks / `$(` inside double quotes are literals in the
+        // shell, not substitutions. Regression: a git commit whose message
+        // carried `\`rm -rf /\`` was hard-stopped as a fake substitution.
+        assert!(command_substitutions(r#"echo "\`rm -rf /\`""#).is_empty());
+        assert!(command_substitutions(r#"echo "\$(rm -rf /)""#).is_empty());
+    }
+
+    #[test]
+    fn unescaped_substitution_still_extracted_with_escape_support() {
+        // A genuine (unescaped) substitution is still found — the escape
+        // handling only suppresses the provably-literal escaped form.
+        assert_eq!(
+            command_substitutions(r#"echo "$(git push)""#),
+            vec!["git push"]
+        );
+        assert_eq!(
+            command_substitutions(r#"echo "`git push`""#),
+            vec!["git push"]
+        );
     }
 
     #[test]
