@@ -279,6 +279,23 @@ mod tests {
     }
 
     #[test]
+    fn escaped_backtick_in_double_quotes_is_not_hardstopped() {
+        // `\`rm -rf /\`` inside double quotes is a literal string, not a
+        // command substitution — so a commit message documenting it must pass.
+        let caps = vec![Capability::new(
+            r#"proc.exec:git commit -m "deny scope: \`rm -rf /\`""#,
+        )];
+        assert!(check(&caps).is_none());
+    }
+
+    #[test]
+    fn unescaped_command_substitution_rm_rf_still_caught() {
+        // The fix must not regress detection of a real substitution.
+        let caps = vec![Capability::new(r#"proc.exec:git commit -m "$(rm -rf /)""#)];
+        assert!(check(&caps).is_some());
+    }
+
+    #[test]
     fn compound_rm_rf_root_is_caught() {
         let caps = vec![Capability::new("proc.exec:echo ok; rm -rf /")];
         assert!(check(&caps).is_some());
