@@ -224,7 +224,8 @@ fn build_codex_status_report() -> AgentStatusReport {
             return report;
         }
     };
-    let matchers = gommage_hook_matchers(&hooks, "/PreToolUse");
+    let pre_tool_use_pointer = codex_pre_tool_use_pointer(&hooks);
+    let matchers = gommage_hook_matchers(&hooks, pre_tool_use_pointer);
     if matchers.is_empty() {
         report.push(
             "pre_tool_use",
@@ -232,7 +233,7 @@ fn build_codex_status_report() -> AgentStatusReport {
             "no Codex PreToolUse hook invoking gommage-mcp",
             Some(serde_json::json!({
                 "path": path_display(&hooks_path),
-                "pointer": "/PreToolUse",
+                "pointer": pre_tool_use_pointer,
             })),
         );
     } else {
@@ -251,7 +252,7 @@ fn build_codex_status_report() -> AgentStatusReport {
         AgentKind::Codex,
         &hooks_path,
         &hooks,
-        "/PreToolUse",
+        pre_tool_use_pointer,
     );
 
     let config = match read_toml_document(&config_path) {
@@ -334,6 +335,14 @@ fn build_codex_status_report() -> AgentStatusReport {
     }
 
     report
+}
+
+fn codex_pre_tool_use_pointer(root: &serde_json::Value) -> &'static str {
+    if root.pointer("/hooks/PreToolUse").is_some() {
+        "/hooks/PreToolUse"
+    } else {
+        "/PreToolUse"
+    }
 }
 
 fn push_agent_path_check(report: &mut AgentStatusReport, name: &str, path: &Path) {
