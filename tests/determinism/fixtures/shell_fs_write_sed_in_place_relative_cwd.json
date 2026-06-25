@@ -1,0 +1,12 @@
+{
+  "name": "shell-sed-in-place-relative-hook-path-resolves-inside-expedition-root",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "sed -i 's/x/y/' src/lib.rs",
+      "__gommage_cwd": "/tmp/proj"
+    }
+  },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

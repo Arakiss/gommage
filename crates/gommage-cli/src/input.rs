@@ -1,8 +1,13 @@
 use anyhow::{Context, Result};
 use gommage_core::{ToolCall, evaluate, runtime::Runtime};
-use std::io::{self, Read};
+use std::{
+    io::{self, Read},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const MAX_APPLY_PATCH_PATHS: usize = 16;
+const MAX_GIT_WRITE_CONTEXTS: usize = 16;
 
 pub(crate) fn evaluate_only(rt: &Runtime, call: &ToolCall) -> gommage_core::EvalResult {
     let caps = rt.mapper.map(call);
@@ -65,34 +70,62 @@ pub(crate) fn enrich_hook_tool_input(
     mut input: serde_json::Value,
     cwd: Option<&str>,
 ) -> serde_json::Value {
-    let Some(cwd) = cwd else {
-        return input;
-    };
     let serde_json::Value::Object(map) = &mut input else {
         return input;
     };
 
+    strip_internal_fields(map);
+
+    let Some(cwd) = cwd else {
+        return input;
+    };
+
     match tool {
-        "apply_patch" => enrich_apply_patch_input(map, cwd),
+        "Read" => {
+            enrich_resolved_path(map, cwd, "file_path", "__gommage_file_path");
+        }
+        "Write" | "Edit" | "MultiEdit" => {
+            if let Some(path) = enrich_resolved_path(map, cwd, "file_path", "__gommage_file_path") {
+                add_git_write_contexts(map, [path]);
+            }
+        }
+        "NotebookEdit" => {
+            if let Some(path) =
+                enrich_resolved_path(map, cwd, "notebook_path", "__gommage_notebook_path")
+            {
+                add_git_write_contexts(map, [path]);
+            }
+        }
+        "apply_patch" => {
+            let paths = enrich_apply_patch_input(map, cwd);
+            add_git_write_contexts(map, paths);
+        }
+        "Bash" => enrich_bash_input(map, cwd),
         "Grep" => {
             let base = map
                 .get("path")
                 .and_then(|v| v.as_str())
                 .map(|path| resolve_hook_path(cwd, path))
                 .unwrap_or_else(|| cwd.to_string());
-            map.entry("__gommage_path".to_string())
-                .or_insert_with(|| serde_json::Value::String(base.clone()));
+            map.insert(
+                "__gommage_path".to_string(),
+                serde_json::Value::String(base.clone()),
+            );
             if let Some(glob) = map.get("glob").and_then(|v| v.as_str()) {
                 let glob_path = resolve_hook_path(&base, glob);
-                map.entry("__gommage_glob_path".to_string())
-                    .or_insert_with(|| serde_json::Value::String(glob_path));
+                map.insert(
+                    "__gommage_glob_path".to_string(),
+                    serde_json::Value::String(glob_path),
+                );
             }
         }
         "Glob" => {
             if let Some(pattern) = map.get("pattern").and_then(|v| v.as_str()) {
                 let pattern_path = resolve_hook_path(cwd, pattern);
-                map.entry("__gommage_pattern".to_string())
-                    .or_insert_with(|| serde_json::Value::String(pattern_path));
+                map.insert(
+                    "__gommage_pattern".to_string(),
+                    serde_json::Value::String(pattern_path),
+                );
             }
         }
         _ => {}
@@ -101,15 +134,56 @@ pub(crate) fn enrich_hook_tool_input(
     input
 }
 
-fn enrich_apply_patch_input(map: &mut serde_json::Map<String, serde_json::Value>, cwd: &str) {
-    map.retain(|key, _| !key.starts_with("__gommage_patch_"));
+fn strip_internal_fields(map: &mut serde_json::Map<String, serde_json::Value>) {
+    map.retain(|key, _| !key.starts_with("__gommage_"));
+}
 
+fn enrich_resolved_path(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    cwd: &str,
+    source_key: &str,
+    target_key: &str,
+) -> Option<String> {
+    let path = map.get(source_key).and_then(|v| v.as_str())?;
+    let resolved = resolve_hook_path(cwd, path);
+    map.insert(
+        target_key.to_string(),
+        serde_json::Value::String(resolved.clone()),
+    );
+    Some(resolved)
+}
+
+fn enrich_bash_input(map: &mut serde_json::Map<String, serde_json::Value>, cwd: &str) {
+    map.insert(
+        "__gommage_cwd".to_string(),
+        serde_json::Value::String(cwd.to_string()),
+    );
+    if let Some(branch) = git_branch_for_path(cwd) {
+        map.insert(
+            "__gommage_cwd_git_branch".to_string(),
+            serde_json::Value::String(branch),
+        );
+    }
+    let Some(command) = map.get("command").and_then(|v| v.as_str()) else {
+        return;
+    };
+    let paths = gommage_core::shell_write_targets(command)
+        .into_iter()
+        .map(|path| resolve_hook_path(cwd, &path))
+        .collect::<Vec<_>>();
+    add_git_write_contexts(map, paths);
+}
+
+fn enrich_apply_patch_input(
+    map: &mut serde_json::Map<String, serde_json::Value>,
+    cwd: &str,
+) -> Vec<String> {
     let Some(command) = map.get("command").and_then(|v| v.as_str()) else {
         map.insert(
             "__gommage_patch_unparsed".to_string(),
             serde_json::Value::Bool(true),
         );
-        return;
+        return Vec::new();
     };
 
     let paths = apply_patch_paths(command);
@@ -118,16 +192,17 @@ fn enrich_apply_patch_input(map: &mut serde_json::Map<String, serde_json::Value>
             "__gommage_patch_unparsed".to_string(),
             serde_json::Value::Bool(true),
         );
-        return;
+        return Vec::new();
     }
     if paths.len() > MAX_APPLY_PATCH_PATHS {
         map.insert(
             "__gommage_patch_overflow".to_string(),
             serde_json::Value::Bool(true),
         );
-        return;
+        return Vec::new();
     }
 
+    let mut resolved_paths = Vec::new();
     for (index, path) in paths.iter().enumerate() {
         if path.starts_with('/') {
             map.insert(
@@ -135,11 +210,14 @@ fn enrich_apply_patch_input(map: &mut serde_json::Map<String, serde_json::Value>
                 serde_json::Value::Bool(true),
             );
         }
+        let resolved = resolve_hook_path(cwd, path);
         map.insert(
             format!("__gommage_patch_path_{index}"),
-            serde_json::Value::String(resolve_hook_path(cwd, path)),
+            serde_json::Value::String(resolved.clone()),
         );
+        resolved_paths.push(resolved);
     }
+    resolved_paths
 }
 
 fn apply_patch_paths(command: &str) -> Vec<String> {
@@ -177,6 +255,69 @@ fn resolve_hook_path(base: &str, path: &str) -> String {
     )
 }
 
+fn add_git_write_contexts<I>(map: &mut serde_json::Map<String, serde_json::Value>, paths: I)
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut seen = std::collections::HashSet::new();
+    let mut index = 0usize;
+    for path in paths {
+        if index >= MAX_GIT_WRITE_CONTEXTS {
+            break;
+        }
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        let Some(branch) = git_branch_for_path(&path) else {
+            continue;
+        };
+        map.insert(
+            format!("__gommage_git_write_path_{index}"),
+            serde_json::Value::String(path),
+        );
+        map.insert(
+            format!("__gommage_git_write_branch_{index}"),
+            serde_json::Value::String(branch),
+        );
+        index += 1;
+    }
+}
+
+fn git_branch_for_path(path: &str) -> Option<String> {
+    let anchor = nearest_existing_anchor(Path::new(path))?;
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(anchor)
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (!branch.is_empty()).then_some(branch)
+}
+
+fn nearest_existing_anchor(path: &Path) -> Option<PathBuf> {
+    let mut current = if path.exists() {
+        if path.is_dir() {
+            path.to_path_buf()
+        } else {
+            path.parent()?.to_path_buf()
+        }
+    } else {
+        path.parent()?.to_path_buf()
+    };
+    loop {
+        if current.exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +343,38 @@ mod tests {
         let input = enrich_hook_tool_input("apply_patch", json!({}), Some("/tmp/proj"));
 
         assert_eq!(input["__gommage_patch_unparsed"], true);
+    }
+
+    #[test]
+    fn enriches_relative_write_paths_against_cwd() {
+        let input = enrich_hook_tool_input(
+            "Write",
+            json!({"file_path": "src/lib.rs", "__gommage_file_path": "/spoofed"}),
+            Some("/tmp/proj"),
+        );
+
+        assert_eq!(input["__gommage_file_path"], "/tmp/proj/src/lib.rs");
+    }
+
+    #[test]
+    fn enriches_bash_with_cwd_and_write_targets() {
+        let input = enrich_hook_tool_input(
+            "Bash",
+            json!({"command": "cat > src/lib.rs <<EOF\nx\nEOF"}),
+            Some("/tmp/proj"),
+        );
+
+        assert_eq!(input["__gommage_cwd"], "/tmp/proj");
+    }
+
+    #[test]
+    fn strips_reserved_fields_even_without_cwd() {
+        let input = enrich_hook_tool_input(
+            "Write",
+            json!({"file_path": "src/lib.rs", "__gommage_file_path": "/spoofed"}),
+            None,
+        );
+
+        assert!(input.get("__gommage_file_path").is_none());
     }
 }

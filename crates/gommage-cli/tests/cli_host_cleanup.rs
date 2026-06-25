@@ -734,6 +734,99 @@ fn agent_status_warns_for_legacy_codex_hook_feature_flag() {
 }
 
 #[test]
+fn agent_status_warns_when_claude_hook_misses_mcp_surface() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let settings = temp.path().join("claude").join("settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep|WebFetch|WebSearch","hooks":[{"type":"command","command":"gommage-mcp"}]}]}}"#,
+    )
+    .unwrap();
+
+    let status = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &settings)
+        .args(["agent", "status", "claude", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    let check = doctor_check(&report, "hook_coverage");
+    assert_eq!(
+        check.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert!(
+        check
+            .pointer("/details/missing")
+            .and_then(|value| value.as_array())
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == Some("mcp__.*"))
+    );
+}
+
+#[test]
+fn agent_status_warns_when_codex_hook_misses_mcp_surface() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(
+        &hooks,
+        r#"{"PreToolUse":[{"matcher":"^Bash$|^apply_patch$","hooks":[{"type":"command","command":"gommage-mcp"}]}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\n",
+    )
+    .unwrap();
+
+    let status = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["agent", "status", "codex", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    let check = doctor_check(&report, "hook_coverage");
+    assert_eq!(
+        check.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert!(
+        check
+            .pointer("/details/missing")
+            .and_then(|value| value.as_array())
+            .unwrap()
+            .iter()
+            .any(|value| value.as_str() == Some("mcp__.*"))
+    );
+}
+
+#[test]
 fn agent_install_codex_preserves_unrelated_hooks_by_default() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

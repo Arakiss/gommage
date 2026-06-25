@@ -43,7 +43,8 @@ assets whenever the TUI's primary sections or vocabulary change.
 `gommage agent status <claude|codex>` is the host-agent integration check. Use
 `--json` when an installer, skill, or CI script needs to prove that the host
 hook is actually wired, that generated Claude native-permission imports are
-present when applicable, and that Codex hooks are enabled.
+present when applicable, that the installed matcher covers the current mapped
+tool surface, and that Codex hooks are enabled.
 
 `gommage harness diagnose` is the agent-readable harness explanation surface.
 Use `gommage harness diagnose --json` before installing on mature dotfiles, and
@@ -159,10 +160,12 @@ gommage agent status codex --json
 ```
 
 The JSON report includes `agent`, top-level `status`, `summary`, and `checks`.
-Claude checks cover the settings file, `PreToolUse` hook group, generated deny
-imports, and generated allow imports. Codex checks cover `hooks.json`,
-`config.toml`, the `PreToolUse` hook group, canonical `features.hooks`, and the
-configured sandbox mode. A missing hook or disabled hook feature is `fail`; a
+Claude checks cover the settings file, `PreToolUse` hook group, matcher
+coverage, generated deny imports, and generated allow imports. Codex checks
+cover `hooks.json`, `config.toml`, the `PreToolUse` hook group, matcher
+coverage, canonical `features.hooks`, and the configured sandbox mode. A
+missing hook or disabled hook feature is `fail`; a hook that exists but misses
+new mapped surfaces such as `mcp__.*` is `warn` and should be repaired. A
 legacy-only `features.codex_hooks` setting is `warn` and should be migrated by
 rerunning `gommage agent install codex`. A dangerous Codex sandbox is `warn`
 because Gommage governs matched hook events only; Codex's sandbox remains the

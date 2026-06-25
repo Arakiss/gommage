@@ -31,12 +31,14 @@ On the wire — which is what agents send over the `PreToolUse` hook or the daem
 
 **Two tool calls with the same canonical JSON produce the same decision.** "Canonical" means: `tool` string equal, `input` value structurally equal under object-key-sort and array-preserve. The `ToolCall::input_hash()` method computes this canonicalisation for audit purposes.
 
-The `gommage-mcp` adapter preserves the agent's `tool_input` and may add
-reserved `__gommage_*` fields before constructing the canonical `ToolCall`.
-Today this is used only to copy Claude Code hook `cwd` into path-bearing
-`Grep`/`Glob` calls so relative searches can be mapped deterministically. Once
-added, those fields are ordinary input fields and are covered by the audit
-input hash.
+The `gommage-mcp` adapter preserves the agent's `tool_input`, strips any
+agent-supplied `__gommage_*` fields, and then may add reserved
+`__gommage_*` fields before constructing the canonical `ToolCall`. Today this
+is used to resolve hook-relative `Read` / `Write` / `Edit` / `NotebookEdit`,
+`apply_patch`, `Grep` / `Glob`, and shell write targets against the hook `cwd`.
+When the destination is inside a Git worktree, the adapter may also add branch
+context used by `fs.write.git_branch:<branch>:<path>` capabilities. Once added,
+those fields are ordinary input fields and are covered by the audit input hash.
 
 ---
 
@@ -51,11 +53,11 @@ Gommage treats every path it sees in `input.*` fields as an **opaque UTF-8 strin
 - Apply Unicode normalisation (NFC / NFD / NFKC / NFKD).
 - Decode percent-encoded bytes.
 
-A policy pattern like `fs.write:${EXPEDITION_ROOT}/**` matches the **literal string** the agent emitted. If the agent says `file_path = "/Users/you/proj/src/x.rs"`, the capability is `fs.write:/Users/you/proj/src/x.rs` and the glob is matched against that string.
+A policy pattern like `fs.write:${EXPEDITION_ROOT}/**` matches the **literal string** in the capability. If the agent says `file_path = "/Users/you/proj/src/x.rs"`, the capability is `fs.write:/Users/you/proj/src/x.rs` and the glob is matched against that string. If the hook payload instead says `file_path = "src/x.rs"` with `cwd = "/Users/you/proj"`, the adapter adds `__gommage_file_path = "/Users/you/proj/src/x.rs"` so the stdlib emits both the raw and resolved forms.
 
 **Why no normalisation?** Every normalisation is a small inference step that depends on filesystem state at decision time. Resolving a symlink today is a different decision than resolving it tomorrow. Gommage's contract is that the decision is a pure function of the input — so the input must carry whatever semantics the agent wants honoured. Agents that want canonicalised behaviour should canonicalise in their tool-call construction (`realpath`, Node `fs.realpath`, etc.) before emitting.
 
-**Implication for policy authors**: your patterns must account for likely variations the agent might emit. If your agent sometimes sends relative paths and sometimes absolute, write your policy to accept the forms you care about explicitly, or rely on the fail-closed default to deny the rest.
+**Implication for policy authors**: for real hook traffic, prefer the resolved stdlib capabilities (`fs.write:/absolute/path` and, when available, `fs.write.git_branch:<branch>:/absolute/path`) for project-scoped gates. For raw daemon `ToolCall` JSON that did not pass through the hook adapter, your patterns still need to account for the literal paths the caller supplied, or rely on the fail-closed default to deny the rest.
 
 ---
 
@@ -103,7 +105,8 @@ Capabilities are matched on the **operation**, not on the tool handle that reque
 The bundled stdlib mapper makes `Bash` file-verbs emit the same filesystem capabilities the dedicated tools do, so the filesystem gates apply tool-agnostically:
 
 - `cat` / `head` / `tail` / `less` / `od` / `xxd` / `base64` / `strings` / `file` emit `fs.read:<path>` (like `Read`).
-- `tee`, `cp` / `install` (destination), `dd of=<path>`, and `>` / `>>` redirect targets emit `fs.write:<path>` (like `Write`).
+- `tee`, `cp` / `install` (destination), `sed -i` targets, `dd of=<path>`, and `>` / `>>` redirect targets emit `fs.write:<path>` (like `Write`).
+- For hook payloads with `cwd`, relative write paths also emit the resolved `fs.write:<cwd>/<path>` form. When the destination belongs to a Git worktree with a symbolic branch, the stdlib also emits `fs.write.git_branch:<branch>:<resolved-path>`.
 - Every `Bash` call also emits `proc.exec:<command>` for the whole command, plus a per-segment `proc.exec:<segment>` after wrapper/prefix stripping (`env`, `sudo`, `bash -c`, absolute-path heads, command substitution). Compound and wrapped commands are scanned segment by segment, so `cd /x && cat /etc/shadow` still surfaces `fs.read:/etc/shadow`.
 
 These shell extractors are best-effort single-path matchers, not a full shell parser. Flag-heavy, multi-path, or here-doc forms may not parse precisely. When that happens the operation does not silently pass: the per-command `proc.exec` capability is always emitted, and the **fail-closed default denies any capability no rule allowed**. That fail-closed backstop is the safety net under the mapper, not the mapper itself.

@@ -1,0 +1,13 @@
+{
+  "name": "fs-write-relative-hook-path-resolves-inside-expedition-root",
+  "call": {
+    "tool": "Write",
+    "input": {
+      "file_path": "src/lib.rs",
+      "__gommage_file_path": "/tmp/proj/src/lib.rs",
+      "content": "x"
+    }
+  },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

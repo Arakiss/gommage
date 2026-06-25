@@ -5,8 +5,9 @@ use std::{path::Path, process::ExitCode};
 
 use crate::{
     agent::{
-        AgentKind, native_permission_rules, translate_claude_native_rules,
-        translate_claude_permission_allow, translate_claude_permission_deny,
+        AgentKind, CODEX_GOMMAGE_MATCHER, claude_gommage_matcher, native_permission_rules,
+        translate_claude_native_rules, translate_claude_permission_allow,
+        translate_claude_permission_deny,
     },
     codex_config::codex_hooks_feature_state,
     util::{env_path_or_home, path_details, path_display, read_json_object, read_toml_document},
@@ -174,6 +175,14 @@ fn build_claude_status_report(layout: &HomeLayout) -> AgentStatusReport {
                 "matchers": matchers,
             })),
         );
+        let expected = claude_gommage_matcher(&settings);
+        push_hook_coverage_report(
+            &mut report,
+            AgentKind::Claude,
+            &settings_path,
+            &matchers,
+            &expected,
+        );
     }
     push_hook_hygiene_report(
         &mut report,
@@ -244,6 +253,13 @@ fn build_codex_status_report() -> AgentStatusReport {
                 "path": path_display(&hooks_path),
                 "matchers": matchers,
             })),
+        );
+        push_hook_coverage_report(
+            &mut report,
+            AgentKind::Codex,
+            &hooks_path,
+            &matchers,
+            CODEX_GOMMAGE_MATCHER,
         );
     }
     push_hook_hygiene_report(
@@ -471,6 +487,81 @@ fn push_hook_hygiene_report(
             })),
         );
     }
+}
+
+fn push_hook_coverage_report(
+    report: &mut AgentStatusReport,
+    agent: AgentKind,
+    path: &Path,
+    installed_matchers: &[String],
+    expected_matcher: &str,
+) {
+    let required = matcher_alternatives(expected_matcher);
+    if required.is_empty() {
+        return;
+    }
+    let missing = required
+        .into_iter()
+        .filter(|required| {
+            !installed_matchers
+                .iter()
+                .any(|matcher| matcher_covers_required(matcher, required))
+        })
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        report.push(
+            "hook_coverage",
+            AgentStatus::Ok,
+            "Gommage hook matcher covers the current mapped tool surface",
+            Some(serde_json::json!({
+                "path": path_display(path),
+                "installed_matchers": installed_matchers,
+                "expected_matcher": expected_matcher,
+            })),
+        );
+        return;
+    }
+
+    report.push(
+        "hook_coverage",
+        AgentStatus::Warn,
+        format!(
+            "Gommage hook matcher is missing current mapped tool coverage: {}",
+            missing.join(", ")
+        ),
+        Some(serde_json::json!({
+            "path": path_display(path),
+            "installed_matchers": installed_matchers,
+            "expected_matcher": expected_matcher,
+            "missing": missing,
+            "repair": format!("gommage repair agent {} --dry-run", agent.as_str()),
+        })),
+    );
+}
+
+fn matcher_covers_required(matcher: &str, required: &str) -> bool {
+    if matcher_is_global(matcher) {
+        return true;
+    }
+    matcher_alternatives(matcher)
+        .iter()
+        .any(|alternative| alternative == required)
+}
+
+fn matcher_alternatives(matcher: &str) -> Vec<String> {
+    matcher
+        .split('|')
+        .map(normalize_matcher_alternative)
+        .filter(|alternative| !alternative.is_empty())
+        .collect()
+}
+
+fn normalize_matcher_alternative(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches('^')
+        .trim_end_matches('$')
+        .to_string()
 }
 
 fn gommage_hook_entries(root: &serde_json::Value, pointer: &str) -> Vec<HookEntry> {
