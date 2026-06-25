@@ -1,6 +1,10 @@
 mod support;
 
-use std::{fs, io::Write, process::Stdio};
+use std::{
+    fs,
+    io::Write,
+    process::{Command, Stdio},
+};
 use support::gommage;
 use tempfile::tempdir;
 
@@ -374,6 +378,149 @@ fn map_hook_json_reports_codex_apply_patch_and_mcp_capabilities() {
         .collect::<Vec<_>>();
     assert!(capabilities.contains(&"mcp.write:mcp__github__create_issue"));
     assert!(capabilities.contains(&"mcp.call:mcp__github__create_issue"));
+}
+
+#[test]
+fn map_hook_json_resolves_relative_writes_and_git_branch_context() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let project = temp.path().join("project");
+    fs::create_dir_all(project.join("src")).unwrap();
+    let git_status = Command::new("git")
+        .args(["init", "-b", "main"])
+        .current_dir(&project)
+        .status()
+        .unwrap();
+    assert!(git_status.success());
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let project_path = project.to_string_lossy().to_string();
+    let write_payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": project_path.clone(),
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": "src/lib.rs",
+            "content": "x",
+            "__gommage_file_path": "/spoofed"
+        }
+    });
+    let mut child = gommage(&home)
+        .args(["map", "--json", "--hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&write_payload).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let capabilities = report["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    let resolved = format!("{}/src/lib.rs", project.display());
+    let resolved_capability = format!("fs.write:{resolved}");
+    let branch_capability = format!("fs.write.git_branch:main:{resolved}");
+    assert!(capabilities.contains(&"fs.write:src/lib.rs"));
+    assert!(capabilities.contains(&resolved_capability.as_str()));
+    assert!(capabilities.contains(&branch_capability.as_str()));
+    assert!(!capabilities.contains(&"fs.write:/spoofed"));
+
+    let bash_payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": project_path,
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "cat > src/lib.rs <<EOF\nx\nEOF"
+        }
+    });
+    let mut child = gommage(&home)
+        .args(["map", "--json", "--hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&bash_payload).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let capabilities = report["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"fs.write:src/lib.rs"));
+    assert!(capabilities.contains(&resolved_capability.as_str()));
+    assert!(capabilities.contains(&branch_capability.as_str()));
+    assert!(capabilities.contains(&"git.cwd_branch:main"));
+    assert!(!capabilities.contains(&"fs.read:>"));
+
+    let sed_payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": project.to_string_lossy().to_string(),
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": "sed -i 's/x/y/' src/lib.rs"
+        }
+    });
+    let mut child = gommage(&home)
+        .args(["map", "--json", "--hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&sed_payload).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let capabilities = report["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"fs.write:src/lib.rs"));
+    assert!(capabilities.contains(&resolved_capability.as_str()));
+    assert!(capabilities.contains(&branch_capability.as_str()));
+    assert!(capabilities.contains(&"git.cwd_branch:main"));
 }
 
 #[test]

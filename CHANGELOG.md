@@ -52,6 +52,13 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Gommage now writes the canonical Codex `features.hooks` flag while treating
   legacy `features.codex_hooks` configs as migration-compatible status
   warnings.
+- Hook adapters now strip spoofed `__gommage_*` fields, resolve relative
+  filesystem write paths and common Bash write targets against hook `cwd`, and emit
+  `fs.write.git_branch:<branch>:<path>` capabilities for destination Git
+  worktrees so project policies can gate protected-branch edits.
+- `gommage agent status` now warns when an installed Gommage hook matcher is
+  missing currently mapped tool coverage such as `mcp__.*`, catching older
+  Claude/Codex integrations that would otherwise report healthy.
 - Codex uninstall now leaves hook feature flags enabled when non-Gommage hooks
   remain configured.
 - `docs/agent-platform-research.md` records the recurring Codex / Claude Code

@@ -34,4 +34,5 @@ pub use hardstop::HardStopHit;
 pub use mapper::CapabilityMapper;
 pub use picto::{Picto, PictoConsume, PictoLookup, PictoStatus, PictoStore};
 pub use policy::{Match, Policy, PolicyLayer, Rule, RuleDecision};
+pub use shell::shell_write_targets;
 pub use toolcall::ToolCall;
