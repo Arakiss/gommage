@@ -1,0 +1,5 @@
+{
+  "name": "gh-pr-merge-admin-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 123 --squash --admin --delete-branch" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gh.pr.merge.admin" }
+}
