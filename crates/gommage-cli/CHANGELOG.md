@@ -1,5 +1,22 @@
 # Changelog — gommage-cli
 
+## [0.45.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.44.0-beta.1...gommage-cli-v0.45.0-beta.1) (2026-06-28)
+
+
+### Features
+
+* harden hook write context and matcher coverage ([0952518](https://github.com/Arakiss/gommage/commit/0952518f8b91446d20ae2ff1a6d137da1e348c1d))
+
+
+### Bug fixes
+
+* recognize nested Codex hooks ([9de1299](https://github.com/Arakiss/gommage/commit/9de1299f7d2dee54e42bd99971bc93534c3bdb7f))
+
+
+### Documentation
+
+* clarify rm -rf hard-stop is any-absolute-path in agent-facing context ([#93](https://github.com/Arakiss/gommage/issues/93)) ([809fd07](https://github.com/Arakiss/gommage/commit/809fd078e7782e4e39185163a3624b1c789bd09d))
+
 ## [0.44.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.43.0-beta.1...gommage-cli-v0.44.0-beta.1) (2026-06-12)
 
 
