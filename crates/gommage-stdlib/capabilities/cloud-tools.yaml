@@ -115,6 +115,13 @@
     - "aws.read:<any>"
 
 # --- gh (GitHub CLI) -------------------------------------------------------
+- name: bash-gh-pr-merge-admin
+  tool: Bash
+  match_input:
+    command: "^\\s*gh\\s+pr\\s+merge\\b.*\\s--admin(?:[=\\s]|$)"
+  emit:
+    - "gh.pr.merge.admin:<pr>"
+
 - name: bash-gh-pr-merge
   tool: Bash
   match_input:

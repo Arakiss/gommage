@@ -116,13 +116,20 @@
   reason: "ec2 terminate destroys compute — picto required"
 
 # --- gh (GitHub CLI) ------------------------------------------------------
-- name: gate-gh-pr-merge
+- name: gate-gh-pr-merge-admin
   decision: ask_picto
-  required_scope: "gh.pr.merge"
+  required_scope: "gh.pr.merge.admin"
+  match:
+    any_capability:
+      - "gh.pr.merge.admin:<pr>"
+  reason: "administrative PR merges bypass branch protection — picto required"
+
+- name: allow-gh-pr-merge
+  decision: allow
   match:
     any_capability:
       - "gh.pr.merge:<pr>"
-  reason: "merging a PR is shared-history action"
+  reason: "routine PR merges rely on repository branch protection and required checks"
 
 - name: gate-gh-release-create
   decision: ask_picto

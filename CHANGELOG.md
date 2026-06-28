@@ -284,6 +284,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- Bundled GitHub CLI policy now allows routine `gh pr merge` commands and
+  gates only administrative PR merges (`gh pr merge --admin`) behind the
+  `gh.pr.merge.admin` picto scope, reducing approval noise while preserving the
+  branch-protection bypass gate.
 - **Force-push is now `ask_picto`, not a terminal deny (decision-behavior
   change, breaking).** The bundled `no-force-push` rule was `decision: gommage`
   with a comment promising a break-glass picto, but a `gommage` deny never

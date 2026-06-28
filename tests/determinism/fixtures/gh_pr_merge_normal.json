@@ -1,0 +1,5 @@
+{
+  "name": "gh-pr-merge-normal-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 123 --squash --delete-branch" } },
+  "expected": { "kind": "allow" }
+}
