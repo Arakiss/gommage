@@ -16,6 +16,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
+  CARGO_HTTP_TIMEOUT: 120
+  CARGO_HTTP_MULTIPLEXING: false
   RUST_BACKTRACE: 1
   GOMMAGE_CHECKOUT_REF: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
 
@@ -272,6 +275,18 @@ jobs:
           fetch-depth: 0            # full history so baseline-rev can check out main
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Pre-fetch cargo registry for semver checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if cargo fetch --locked; then
+              exit 0
+            fi
+
+            sleep $((attempt * 10))
+          done
+          cargo fetch --locked
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           package: gommage-core

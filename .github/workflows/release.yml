@@ -96,7 +96,7 @@ jobs:
           git add Cargo.toml
           git commit -m "chore: sync workspace dependency pins"
           git push origin "HEAD:$(git branch --show-current)"
-      - name: Trigger CI for generated release PR
+      - name: Trigger PR-associated CI for generated release PR
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,11 +138,46 @@ jobs:
           fi
 
           if [[ -z "${pr_branch}" ]]; then
-            echo "::warning::Release PR branch could not be resolved; skipping CI dispatch."
+            echo "::warning::Release PR branch could not be resolved; skipping CI trigger."
             exit 0
           fi
 
-          echo "Dispatching ci.yml for release PR branch ${pr_branch}"
+          if [[ -z "${pr_number}" ]]; then
+            echo "::warning::Release PR number could not be resolved; dispatching ci.yml fallback for ${pr_branch}."
+            gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
+            exit 0
+          fi
+
+          pr_head_sha="$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json headRefOid --jq .headRefOid)"
+          pr_run_id=""
+          for attempt in 1 2 3 4 5 6; do
+            pr_run_id="$(
+              gh run list \
+                --repo "${GITHUB_REPOSITORY}" \
+                --workflow ci.yml \
+                --branch "${pr_branch}" \
+                --event pull_request \
+                --json databaseId,headSha \
+                --jq ".[] | select(.headSha == \"${pr_head_sha}\") | .databaseId" \
+                --limit 20 \
+                | head -n 1 \
+                || true
+            )"
+
+            if [[ -n "${pr_run_id}" ]]; then
+              break
+            fi
+
+            sleep $((attempt * 10))
+          done
+
+          if [[ -n "${pr_run_id}" ]]; then
+            echo "Rerunning pull_request ci.yml run ${pr_run_id} for release PR #${pr_number}"
+            gh run rerun "${pr_run_id}" --repo "${GITHUB_REPOSITORY}"
+            exit 0
+          fi
+
+          echo "::warning::No pull_request ci.yml run found for release PR #${pr_number} at ${pr_head_sha}; dispatching workflow_dispatch fallback."
           gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
       - name: Mark prereleases
         if: ${{ steps.release.outputs.releases_created == 'true' }}
