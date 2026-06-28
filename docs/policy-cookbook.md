@@ -31,6 +31,29 @@ Recipes for common policy patterns. Drop any of these into `~/.gommage/policy.d/
 
 Everything outside `${EXPEDITION_ROOT}` will fall through and fail closed.
 
+### Block writes to a protected branch in a specific repo
+
+Hook adapters enrich write-like tools and common Bash write shapes with
+`fs.write.git_branch:<branch>:<resolved-path>` when the destination path is
+inside a Git worktree. Put project-specific branch gates before broad allow
+rules:
+
+```yaml
+- name: block-orvian-protected-branch-writes
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write.git_branch:main:/Users/dolores/Projects/work/orvian/**"
+      - "fs.write.git_branch:dev:/Users/dolores/Projects/work/orvian/**"
+      - "fs.write.git_branch:pre:/Users/dolores/Projects/work/orvian/**"
+  reason: "protected branch writes in Orvian require switching to a task branch first"
+```
+
+This works for direct `Write` / `Edit` tools, parsed `apply_patch` file paths,
+and the stdlib Bash write shapes (`tee`, `cp` / `install`, `sed -i`, `dd of=`,
+`>` / `>>`). It is scoped to the destination repo path and branch captured at
+hook time; audit replay uses the stored capability instead of reading Git again.
+
 ### Protect user credentials
 
 ```yaml

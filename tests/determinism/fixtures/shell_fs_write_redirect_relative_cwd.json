@@ -1,0 +1,12 @@
+{
+  "name": "shell-redirect-relative-hook-path-resolves-inside-expedition-root",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "cat > src/lib.rs <<EOF\nx\nEOF",
+      "__gommage_cwd": "/tmp/proj"
+    }
+  },
+  "expected": { "kind": "allow" },
+  "expedition_root": "/tmp/proj"
+}

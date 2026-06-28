@@ -7,8 +7,10 @@
 //! *shape* (compound commands, `env`/`sudo` prefixes, command substitution,
 //! `bash -c` wrappers, absolute-path heads, …).
 //!
-//! Everything here is `pub(crate)`: it is an internal contract between the
-//! mapper and the hardstop scanner, not a public API.
+//! Most helpers here are `pub(crate)`: they are an internal contract between
+//! the mapper and the hardstop scanner. `shell_write_targets` is the narrow
+//! public adapter surface used by host integrations to add policy context before
+//! evaluation.
 //!
 //! Design notes:
 //!   - Parsing is intentionally *approximate but conservative*. It is not a full
@@ -19,6 +21,141 @@
 //!     single segment `[echo, git push]`, so `git push` is data, not a verb.
 //!   - When parsing is uncertain, the surrounding policy fails closed — these
 //!     helpers only ever *add* candidates to scan, they never suppress one.
+
+/// Extract best-effort filesystem write targets from a shell command.
+///
+/// This is the host-adapter companion to the stdlib Bash mapper. It deliberately
+/// recognizes the same write shapes the mapper surfaces as `fs.write:*`: `tee`,
+/// `cp` / `install` destinations, `sed -i` targets, `dd of=...`, and output
+/// redirects. The result is used by hook adapters to attach destination Git
+/// context before evaluation; it is not part of the evaluator and it never
+/// suppresses the raw command capability.
+pub fn shell_write_targets(command: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for segment in shell_segments(command) {
+        let Some(real) = command_words(&segment) else {
+            continue;
+        };
+        if real.is_empty() {
+            continue;
+        }
+        let head = head_basename(&real[0]);
+        match head {
+            "tee" => {
+                if let Some(path) = first_non_flag_arg(&real[1..]) {
+                    push_target(path.to_string(), &mut out, &mut seen);
+                }
+            }
+            "cp" | "install" => {
+                if let Some(path) = last_non_flag_arg(&real[1..]) {
+                    push_target(path.to_string(), &mut out, &mut seen);
+                }
+            }
+            "sed" => {
+                if let Some(path) = sed_in_place_target(&real[1..]) {
+                    push_target(path.to_string(), &mut out, &mut seen);
+                }
+            }
+            "dd" => {
+                for word in &real[1..] {
+                    if let Some(path) = word.strip_prefix("of=")
+                        && !path.is_empty()
+                    {
+                        push_target(path.to_string(), &mut out, &mut seen);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for target in redirect_targets(command) {
+        push_target(target, &mut out, &mut seen);
+    }
+
+    out
+}
+
+fn first_non_flag_arg(args: &[String]) -> Option<&str> {
+    args.iter()
+        .find(|arg| !arg.starts_with('-'))
+        .map(String::as_str)
+}
+
+fn last_non_flag_arg(args: &[String]) -> Option<&str> {
+    args.iter()
+        .rev()
+        .find(|arg| !arg.starts_with('-'))
+        .map(String::as_str)
+}
+
+fn sed_in_place_target(args: &[String]) -> Option<&str> {
+    let mut in_place = false;
+    let mut script_from_option = false;
+    let mut index = 0;
+
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if arg == "--" {
+            index += 1;
+            break;
+        }
+        if is_sed_in_place_option(arg) {
+            in_place = true;
+            index += 1;
+            if matches!(arg, "-i" | "--in-place")
+                && args
+                    .get(index)
+                    .is_some_and(|next| next.is_empty() || next.starts_with('.'))
+                && args.get(index + 2).is_some()
+            {
+                index += 1;
+            }
+            continue;
+        }
+        if matches!(arg, "-e" | "-f") {
+            script_from_option = true;
+            index += 2;
+            continue;
+        }
+        if (arg.starts_with("-e") || arg.starts_with("-f")) && arg.len() > 2 {
+            script_from_option = true;
+            index += 1;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        break;
+    }
+
+    if !in_place {
+        return None;
+    }
+
+    if script_from_option {
+        return args.get(index).map(String::as_str);
+    }
+
+    args.get(index + 1).map(String::as_str)
+}
+
+fn is_sed_in_place_option(arg: &str) -> bool {
+    arg == "-i" || arg.starts_with("-i.") || arg == "--in-place" || arg.starts_with("--in-place=")
+}
+
+fn push_target(
+    target: String,
+    out: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    if !target.is_empty() && seen.insert(target.clone()) {
+        out.push(target);
+    }
+}
 
 /// Split a command string into shell segments, where each segment is the list
 /// of whitespace-separated words of one simple command.
@@ -289,6 +426,54 @@ fn is_assignment(word: &str) -> bool {
         .next()
         .is_some_and(|ch| ch == '_' || ch.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod write_target_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_redirect_and_heredoc_write_targets() {
+        assert_eq!(
+            shell_write_targets("cat > src/lib.rs <<EOF\nx\nEOF"),
+            vec!["src/lib.rs"]
+        );
+        assert_eq!(
+            shell_write_targets("printf x >> ./notes.txt"),
+            vec!["./notes.txt"]
+        );
+    }
+
+    #[test]
+    fn extracts_write_verb_targets() {
+        assert_eq!(shell_write_targets("tee src/lib.rs"), vec!["src/lib.rs"]);
+        assert_eq!(
+            shell_write_targets("cp src/lib.rs dist/lib.rs"),
+            vec!["dist/lib.rs"]
+        );
+        assert_eq!(
+            shell_write_targets("sed -i 's/a/b/' src/lib.rs"),
+            vec!["src/lib.rs"]
+        );
+        assert_eq!(
+            shell_write_targets("sed -i.bak -e s/a/b/ src/lib.rs"),
+            vec!["src/lib.rs"]
+        );
+        assert_eq!(
+            shell_write_targets("sed -i .bak s/a/b/ src/lib.rs"),
+            vec!["src/lib.rs"]
+        );
+        assert_eq!(
+            shell_write_targets("sed -i '' s/a/b/ src/lib.rs"),
+            vec!["src/lib.rs"]
+        );
+        assert_eq!(shell_write_targets("dd if=a of=out.img"), vec!["out.img"]);
+    }
+
+    #[test]
+    fn ignores_quoted_redirect_data() {
+        assert!(shell_write_targets("echo '> src/lib.rs'").is_empty());
+    }
 }
 
 /// Given the argument words *after* a `bash`/`sh`/`zsh` head, return the payload

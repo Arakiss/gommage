@@ -10,6 +10,13 @@
   emit:
     - "proc.exec:${input.command}"
 
+- name: bash-hook-cwd-branch
+  tool: Bash
+  match_input:
+    __gommage_cwd_git_branch: ".+"
+  emit:
+    - "git.cwd_branch:${input.__gommage_cwd_git_branch}"
+
 # --- Git --------------------------------------------------------------------
 # The `ref` capture excludes shell redirection/control metacharacters
 # (`< > & | ;`) so a trailing `2>&1` / `&` / `>log` can never land in the
@@ -223,15 +230,15 @@
 #
 # These are best-effort single-path extractors: they capture the first non-flag
 # argument (read verbs, tee) or the obvious destination/redirect target (cp,
-# install, dd of=, > / >>). Flag-heavy, multi-path, or here-doc forms may not
-# fully parse — fail-closed evaluation remains the backstop, and proc.exec for
-# the whole command is always emitted regardless.
+# install, sed -i, dd of=, > / >>). Flag-heavy, multi-path, or here-doc forms
+# may not fully parse — fail-closed evaluation remains the backstop, and
+# proc.exec for the whole command is always emitted regardless.
 
 # Read verbs: first non-flag argument is treated as the read path.
 - name: bash-fs-read-verb
   tool: Bash
   match_input:
-    command: "^\\s*(?:cat|head|tail|less|od|xxd|base64|strings|file)(?:\\s+-\\S+)*\\s+(?P<rpath>[^-\\s][^\\s]*)"
+    command: "^\\s*(?:cat|head|tail|less|od|xxd|base64|strings|file)(?:\\s+-\\S+)*\\s+(?P<rpath>[^-\\s<>&|;][^\\s<>&|;]*)"
   emit:
     - "fs.read:${rpath}"
 
@@ -243,6 +250,14 @@
   emit:
     - "fs.write:${wpath}"
 
+- name: bash-fs-write-tee-cwd
+  tool: Bash
+  match_input:
+    __gommage_cwd: "^(?P<cwd>.+)$"
+    command: "^\\s*tee(?:\\s+-\\S+)*\\s+(?P<wpath>[^-/~\\s>&|;][^\\s>&|;]*)"
+  emit:
+    - "fs.write:${cwd}/${wpath}"
+
 # cp / install: best-effort two-argument `<src> <dest>` form; dest is the write.
 - name: bash-fs-write-cp
   tool: Bash
@@ -250,6 +265,31 @@
     command: "^\\s*(?:cp|install)\\s+(?:-\\S+\\s+)*[^-\\s]\\S*\\s+(?P<wpath>[^-\\s][^\\s]*)"
   emit:
     - "fs.write:${wpath}"
+
+- name: bash-fs-write-cp-cwd
+  tool: Bash
+  match_input:
+    __gommage_cwd: "^(?P<cwd>.+)$"
+    command: "^\\s*(?:cp|install)\\s+(?:-\\S+\\s+)*[^-\\s]\\S*\\s+(?P<wpath>[^-/~\\s>&|;][^\\s>&|;]*)"
+  emit:
+    - "fs.write:${cwd}/${wpath}"
+
+# sed -i edits the target file in place. Capture the common one-script,
+# one-target form and the `-e`/`-f` script option form.
+- name: bash-fs-write-sed-in-place
+  tool: Bash
+  match_input:
+    command: "^\\s*sed\\s+(?:-\\S+\\s+)*(?:-i(?:\\.[^\\s]+)?|--in-place(?:=[^\\s]+)?)(?:\\s+\\.[^\\s]+)?(?:\\s+-\\S+)*\\s+\\S+\\s+(?P<wpath>[^-\\s][^\\s]*)"
+  emit:
+    - "fs.write:${wpath}"
+
+- name: bash-fs-write-sed-in-place-cwd
+  tool: Bash
+  match_input:
+    __gommage_cwd: "^(?P<cwd>.+)$"
+    command: "^\\s*sed\\s+(?:-\\S+\\s+)*(?:-i(?:\\.[^\\s]+)?|--in-place(?:=[^\\s]+)?)(?:\\s+\\.[^\\s]+)?(?:\\s+-\\S+)*\\s+\\S+\\s+(?P<wpath>[^-/~\\s>&|;][^\\s>&|;]*)"
+  emit:
+    - "fs.write:${cwd}/${wpath}"
 
 # dd of=PATH writes PATH.
 - name: bash-fs-write-dd
@@ -259,6 +299,14 @@
   emit:
     - "fs.write:${wpath}"
 
+- name: bash-fs-write-dd-cwd
+  tool: Bash
+  match_input:
+    __gommage_cwd: "^(?P<cwd>.+)$"
+    command: "\\bof=(?P<wpath>[^/~\\s>&|;][^\\s>&|;]*)"
+  emit:
+    - "fs.write:${cwd}/${wpath}"
+
 # Redirection targets: `> PATH` and `>> PATH` (with or without a space).
 - name: bash-fs-write-redirect
   tool: Bash
@@ -266,6 +314,14 @@
     command: ">>?\\s*(?P<wpath>[^\\s>&|][^\\s>&|]*)"
   emit:
     - "fs.write:${wpath}"
+
+- name: bash-fs-write-redirect-cwd
+  tool: Bash
+  match_input:
+    __gommage_cwd: "^(?P<cwd>.+)$"
+    command: ">>?\\s*(?P<wpath>[^-/~\\s>&|][^\\s>&|]*)"
+  emit:
+    - "fs.write:${cwd}/${wpath}"
 
 # --- Raw device writes (host destruction) -----------------------------------
 #

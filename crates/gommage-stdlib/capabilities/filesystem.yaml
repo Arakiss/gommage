@@ -9,25 +9,140 @@
   emit:
     - "fs.read:${input.file_path}"
 
+- name: fs-read-resolved
+  tool: Read
+  match_input:
+    __gommage_file_path: ".+"
+  emit:
+    - "fs.read:${input.__gommage_file_path}"
+
 - name: fs-write
   tool: Write
   emit:
     - "fs.write:${input.file_path}"
+
+- name: fs-write-resolved
+  tool: Write
+  match_input:
+    __gommage_file_path: ".+"
+  emit:
+    - "fs.write:${input.__gommage_file_path}"
 
 - name: fs-edit
   tool: Edit
   emit:
     - "fs.write:${input.file_path}"
 
+- name: fs-edit-resolved
+  tool: Edit
+  match_input:
+    __gommage_file_path: ".+"
+  emit:
+    - "fs.write:${input.__gommage_file_path}"
+
 - name: fs-multi-edit
   tool: MultiEdit
   emit:
     - "fs.write:${input.file_path}"
 
+- name: fs-multi-edit-resolved
+  tool: MultiEdit
+  match_input:
+    __gommage_file_path: ".+"
+  emit:
+    - "fs.write:${input.__gommage_file_path}"
+
 - name: fs-notebook-edit
   tool: NotebookEdit
   emit:
     - "fs.write:${input.notebook_path}"
+
+- name: fs-notebook-edit-resolved
+  tool: NotebookEdit
+  match_input:
+    __gommage_notebook_path: ".+"
+  emit:
+    - "fs.write:${input.__gommage_notebook_path}"
+
+- name: fs-write-git-branch-0
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_0: ".+", __gommage_git_write_branch_0: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_0}:${input.__gommage_git_write_path_0}"]
+
+- name: fs-write-git-branch-1
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_1: ".+", __gommage_git_write_branch_1: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_1}:${input.__gommage_git_write_path_1}"]
+
+- name: fs-write-git-branch-2
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_2: ".+", __gommage_git_write_branch_2: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_2}:${input.__gommage_git_write_path_2}"]
+
+- name: fs-write-git-branch-3
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_3: ".+", __gommage_git_write_branch_3: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_3}:${input.__gommage_git_write_path_3}"]
+
+- name: fs-write-git-branch-4
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_4: ".+", __gommage_git_write_branch_4: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_4}:${input.__gommage_git_write_path_4}"]
+
+- name: fs-write-git-branch-5
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_5: ".+", __gommage_git_write_branch_5: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_5}:${input.__gommage_git_write_path_5}"]
+
+- name: fs-write-git-branch-6
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_6: ".+", __gommage_git_write_branch_6: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_6}:${input.__gommage_git_write_path_6}"]
+
+- name: fs-write-git-branch-7
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_7: ".+", __gommage_git_write_branch_7: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_7}:${input.__gommage_git_write_path_7}"]
+
+- name: fs-write-git-branch-8
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_8: ".+", __gommage_git_write_branch_8: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_8}:${input.__gommage_git_write_path_8}"]
+
+- name: fs-write-git-branch-9
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_9: ".+", __gommage_git_write_branch_9: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_9}:${input.__gommage_git_write_path_9}"]
+
+- name: fs-write-git-branch-10
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_10: ".+", __gommage_git_write_branch_10: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_10}:${input.__gommage_git_write_path_10}"]
+
+- name: fs-write-git-branch-11
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_11: ".+", __gommage_git_write_branch_11: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_11}:${input.__gommage_git_write_path_11}"]
+
+- name: fs-write-git-branch-12
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_12: ".+", __gommage_git_write_branch_12: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_12}:${input.__gommage_git_write_path_12}"]
+
+- name: fs-write-git-branch-13
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_13: ".+", __gommage_git_write_branch_13: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_13}:${input.__gommage_git_write_path_13}"]
+
+- name: fs-write-git-branch-14
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_14: ".+", __gommage_git_write_branch_14: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_14}:${input.__gommage_git_write_path_14}"]
+
+- name: fs-write-git-branch-15
+  tool_pattern: "^(?:Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch)$"
+  match_input: { __gommage_git_write_path_15: ".+", __gommage_git_write_branch_15: ".+" }
+  emit: ["fs.write.git_branch:${input.__gommage_git_write_branch_15}:${input.__gommage_git_write_path_15}"]
 
 - name: codex-apply-patch-path-0
   tool: apply_patch
