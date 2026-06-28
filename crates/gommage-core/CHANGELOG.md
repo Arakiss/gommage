@@ -3,6 +3,18 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.14.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.13.2-alpha.1...gommage-core-v0.14.0-alpha.1) (2026-06-28)
+
+
+### Features
+
+* harden hook write context and matcher coverage ([0952518](https://github.com/Arakiss/gommage/commit/0952518f8b91446d20ae2ff1a6d137da1e348c1d))
+
+
+### Bug fixes
+
+* **shell:** honor backslash escapes in command_substitutions ([#95](https://github.com/Arakiss/gommage/issues/95)) ([90b27d0](https://github.com/Arakiss/gommage/commit/90b27d03fe5ccdb245520fbf101e9756a7d5552e))
+
 ## [0.13.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.13.1-alpha.1...gommage-core-v0.13.2-alpha.1) (2026-06-12)
 
 

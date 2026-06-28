@@ -1,5 +1,12 @@
 # Changelog — gommage-mcp
 
+## [0.9.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.8.5-alpha.1...gommage-mcp-v0.9.0-alpha.1) (2026-06-28)
+
+
+### Features
+
+* harden hook write context and matcher coverage ([0952518](https://github.com/Arakiss/gommage/commit/0952518f8b91446d20ae2ff1a6d137da1e348c1d))
+
 ## [0.8.5-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.8.4-alpha.1...gommage-mcp-v0.8.5-alpha.1) (2026-06-12)
 
 
