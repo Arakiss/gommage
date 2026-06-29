@@ -96,7 +96,7 @@ jobs:
           git add Cargo.toml
           git commit -m "chore: sync workspace dependency pins"
           git push origin "HEAD:$(git branch --show-current)"
-      - name: Trigger PR-associated CI for generated release PR
+      - name: Trigger PR-associated checks for generated release PR
         if: ${{ steps.release.outputs.prs_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -127,7 +127,7 @@ jobs:
           )"
 
           if [[ -z "${pr_info}" ]]; then
-            echo "No release PR metadata emitted; skipping CI dispatch."
+            echo "No release PR metadata emitted; skipping check dispatch."
             exit 0
           fi
 
@@ -138,47 +138,60 @@ jobs:
           fi
 
           if [[ -z "${pr_branch}" ]]; then
-            echo "::warning::Release PR branch could not be resolved; skipping CI trigger."
+            echo "::warning::Release PR branch could not be resolved; skipping check trigger."
             exit 0
           fi
 
+          workflows=(ci.yml audit.yml)
+
           if [[ -z "${pr_number}" ]]; then
-            echo "::warning::Release PR number could not be resolved; dispatching ci.yml fallback for ${pr_branch}."
-            gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
+            echo "::warning::Release PR number could not be resolved; dispatching workflow fallbacks for ${pr_branch}."
+            for workflow in "${workflows[@]}"; do
+              gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
+            done
             exit 0
           fi
 
           pr_head_sha="$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json headRefOid --jq .headRefOid)"
-          pr_run_id=""
-          for attempt in 1 2 3 4 5 6; do
-            pr_run_id="$(
-              gh run list \
-                --repo "${GITHUB_REPOSITORY}" \
-                --workflow ci.yml \
-                --branch "${pr_branch}" \
-                --event pull_request \
-                --json databaseId,headSha \
-                --jq ".[] | select(.headSha == \"${pr_head_sha}\") | .databaseId" \
-                --limit 20 \
-                | head -n 1 \
-                || true
-            )"
+
+          trigger_pr_workflow() {
+            local workflow="$1"
+            local pr_run_id=""
+
+            for attempt in 1 2 3 4 5 6; do
+              pr_run_id="$(
+                gh run list \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --workflow "${workflow}" \
+                  --branch "${pr_branch}" \
+                  --event pull_request \
+                  --json databaseId,headSha \
+                  --jq ".[] | select(.headSha == \"${pr_head_sha}\") | .databaseId" \
+                  --limit 20 \
+                  | head -n 1 \
+                  || true
+              )"
+
+              if [[ -n "${pr_run_id}" ]]; then
+                break
+              fi
+
+              sleep $((attempt * 10))
+            done
 
             if [[ -n "${pr_run_id}" ]]; then
-              break
+              echo "Rerunning pull_request ${workflow} run ${pr_run_id} for release PR #${pr_number}"
+              gh run rerun "${pr_run_id}" --repo "${GITHUB_REPOSITORY}"
+              return
             fi
 
-            sleep $((attempt * 10))
+            echo "::warning::No pull_request ${workflow} run found for release PR #${pr_number} at ${pr_head_sha}; dispatching workflow_dispatch fallback."
+            gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
+          }
+
+          for workflow in "${workflows[@]}"; do
+            trigger_pr_workflow "${workflow}"
           done
-
-          if [[ -n "${pr_run_id}" ]]; then
-            echo "Rerunning pull_request ci.yml run ${pr_run_id} for release PR #${pr_number}"
-            gh run rerun "${pr_run_id}" --repo "${GITHUB_REPOSITORY}"
-            exit 0
-          fi
-
-          echo "::warning::No pull_request ci.yml run found for release PR #${pr_number} at ${pr_head_sha}; dispatching workflow_dispatch fallback."
-          gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
       - name: Mark prereleases
         if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
@@ -274,10 +287,10 @@ jobs:
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             asset: gommage-aarch64-linux
-          - os: macos-latest
+          - os: macos-15
             target: x86_64-apple-darwin
             asset: gommage-x86_64-darwin
-          - os: macos-latest
+          - os: macos-15
             target: aarch64-apple-darwin
             asset: gommage-aarch64-darwin
     steps:
@@ -353,6 +366,13 @@ jobs:
             --certificate-identity "${SIGNER_IDENTITY}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
       - name: Attest artifact provenance
+        id: attest-artifact-primary
+        continue-on-error: true
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/${{ matrix.asset }}.tar.gz
+      - name: Retry artifact provenance attestation
+        if: ${{ steps.attest-artifact-primary.outcome == 'failure' }}
         uses: actions/attest@v4
         with:
           subject-path: dist/${{ matrix.asset }}.tar.gz
@@ -419,6 +439,13 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
       - name: Attest SBOM provenance
+        id: attest-sbom-primary
+        continue-on-error: true
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
+      - name: Retry SBOM provenance attestation
+        if: ${{ steps.attest-sbom-primary.outcome == 'failure' }}
         uses: actions/attest@v4
         with:
           subject-path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
