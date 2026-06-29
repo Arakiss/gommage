@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.10.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.9.0-alpha.1...gommage-stdlib-v0.10.0-alpha.1) (2026-06-28)
+
+
+### Features
+
+* **stdlib:** allow routine gh pr merges ([#101](https://github.com/Arakiss/gommage/issues/101)) ([e71967b](https://github.com/Arakiss/gommage/commit/e71967b006a9bb6627eb248f3de52ae96858239b))
+
 ## [0.9.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.8.1-alpha.1...gommage-stdlib-v0.9.0-alpha.1) (2026-06-28)
 
 
