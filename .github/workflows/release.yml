@@ -38,7 +38,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify internal workspace dependency pins
         run: sh scripts/sync-workspace-internal-deps.sh --check
@@ -281,7 +281,7 @@ jobs:
             target: aarch64-apple-darwin
             asset: gommage-aarch64-darwin
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # When workflow_dispatch-triggered, check out the tag provided via input.
           ref: ${{ github.event.inputs.tag || github.ref }}
@@ -381,7 +381,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Resolve and validate release tag

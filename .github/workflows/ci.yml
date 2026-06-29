@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: dtolnay/rust-toolchain@stable
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: dtolnay/rust-toolchain@stable
@@ -59,7 +59,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: dtolnay/rust-toolchain@stable
@@ -94,7 +94,7 @@ jobs:
       LC_ALL: ${{ matrix.locale }}
       LANG:   ${{ matrix.locale }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: dtolnay/rust-toolchain@stable
@@ -149,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: dtolnay/rust-toolchain@stable
@@ -184,7 +184,7 @@ jobs:
     timeout-minutes: 10
     if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: dtolnay/rust-toolchain@stable
@@ -223,7 +223,7 @@ jobs:
             agent: codex
             daemon_manager: launchd
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: dtolnay/rust-toolchain@stable
@@ -256,7 +256,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -269,7 +269,7 @@ jobs:
     # Only run on PRs against main — baseline is the target branch tip.
     if: ${{ github.event_name == 'pull_request' || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
           fetch-depth: 0            # full history so baseline-rev can check out main
@@ -305,7 +305,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ (github.event_name == 'pull_request' || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--'))) && github.event.pull_request.user.login != 'dependabot[bot]' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
           fetch-depth: 0

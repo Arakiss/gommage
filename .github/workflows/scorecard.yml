@@ -47,7 +47,7 @@ jobs:
       statuses: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Do not persist the checkout token into the runner git config —
           # later steps should not inherit push capability.
