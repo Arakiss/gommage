@@ -11,6 +11,12 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped determinism-critical dependency pins for `regex`, `rusqlite`,
+  `time`, and `uuid`; this class of change requires a green determinism suite
+  before merge.
+
 ### Added
 
 - `gommage daemon reload` reloads policy and capability mappers in the running

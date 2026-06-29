@@ -1,5 +1,14 @@
 # Changelog — gommage-cli
 
+## [0.45.2-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.45.1-beta.1...gommage-cli-v0.45.2-beta.1) (2026-06-29)
+
+
+### Bug fixes
+
+* **cli:** ignore stale update cache after upgrade ([#104](https://github.com/Arakiss/gommage/issues/104)) ([78a86f2](https://github.com/Arakiss/gommage/commit/78a86f228ec37b82514d8ef4a41286fee1eccaaa))
+
+## [0.45.1-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.45.0-beta.1...gommage-cli-v0.45.1-beta.1) (2026-06-28)
+
 ## [0.45.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.44.0-beta.1...gommage-cli-v0.45.0-beta.1) (2026-06-28)
 
 
