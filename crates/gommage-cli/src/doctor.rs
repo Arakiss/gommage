@@ -272,7 +272,22 @@ pub(crate) fn build_doctor_report(layout: &HomeLayout) -> DoctorReport {
 /// upgrade is a `Warn` (informational), not a `Fail`, so it never flips the
 /// doctor/verify exit code.
 fn push_update_check(report: &mut DoctorReport, layout: &HomeLayout) {
+    let running_version = env!("CARGO_PKG_VERSION");
     match update_cache::read_cache(&update_cache::cache_path(layout)) {
+        Some(cache) if cache.current_version != running_version => {
+            report.push(
+                "update",
+                DoctorStatus::Ok,
+                "update check stale for current binary — run `gommage update`",
+                Some(serde_json::json!({
+                    "cached_current_version": cache.current_version,
+                    "running_version": running_version,
+                    "latest_tag": cache.latest_tag,
+                    "latest_version": cache.latest_version,
+                    "checked_at": cache.checked_at.to_string(),
+                })),
+            );
+        }
         Some(cache) if cache.status == UpdateStatus::UpgradeAvailable => {
             report.push(
                 "update",
@@ -420,16 +435,25 @@ mod tests {
             .expect("doctor report must contain an `update` check")
     }
 
-    fn write_update_cache(layout: &HomeLayout, status: UpdateStatus) {
+    fn write_update_cache_with_versions(
+        layout: &HomeLayout,
+        status: UpdateStatus,
+        current_version: &str,
+        latest_version: &str,
+    ) {
         let cache = UpdateCheckCache {
             checked_at: OffsetDateTime::now_utc(),
-            current_version: "0.39.0-beta.1".to_string(),
-            latest_tag: "gommage-cli-v0.40.0-beta.1".to_string(),
-            latest_version: "0.40.0-beta.1".to_string(),
+            current_version: current_version.to_string(),
+            latest_tag: format!("gommage-cli-v{latest_version}"),
+            latest_version: latest_version.to_string(),
             status,
         };
         let bytes = serde_json::to_vec_pretty(&cache).unwrap();
         std::fs::write(&layout.update_check, bytes).unwrap();
+    }
+
+    fn write_update_cache(layout: &HomeLayout, status: UpdateStatus) {
+        write_update_cache_with_versions(layout, status, env!("CARGO_PKG_VERSION"), "999.0.0");
     }
 
     #[test]
@@ -451,12 +475,35 @@ mod tests {
         let td = tempdir().unwrap();
         let layout = HomeLayout::at(td.path());
         layout.ensure().unwrap();
-        write_update_cache(&layout, UpdateStatus::UpToDate);
+        write_update_cache_with_versions(
+            &layout,
+            UpdateStatus::UpToDate,
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_VERSION"),
+        );
 
         let report = build_doctor_report(&layout);
         let check = find_update_check(&report);
         assert_eq!(check.status, DoctorStatus::Ok);
         assert_eq!(check.message, "latest");
+    }
+
+    #[test]
+    fn doctor_ignores_upgrade_available_cache_for_previous_binary() {
+        let td = tempdir().unwrap();
+        let layout = HomeLayout::at(td.path());
+        layout.ensure().unwrap();
+        write_update_cache_with_versions(
+            &layout,
+            UpdateStatus::UpgradeAvailable,
+            "0.39.0-beta.1",
+            env!("CARGO_PKG_VERSION"),
+        );
+
+        let report = build_doctor_report(&layout);
+        let check = find_update_check(&report);
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert!(check.message.contains("stale"));
     }
 
     #[test]
