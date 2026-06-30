@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.47.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.46.0-beta.1...gommage-cli-v0.47.0-beta.1) (2026-06-30)
+
+
+### Features
+
+* **release:** prepare crates.io publishing ([9426ff4](https://github.com/Arakiss/gommage/commit/9426ff4656fa55a65cc5fc4f5f4d53667518acd5))
+
 ## [0.46.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.45.2-beta.1...gommage-cli-v0.46.0-beta.1) (2026-06-30)
 
 

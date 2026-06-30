@@ -1,6 +1,6 @@
 [package]
 name = "gommage-audit"
-version = "0.6.7-alpha.1"
+version = "0.7.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
