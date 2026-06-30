@@ -3,7 +3,7 @@
   "crates/gommage-stdlib": "0.11.0-alpha.1",
   "crates/gommage-core": "0.15.0-alpha.1",
   "crates/gommage-audit": "0.7.0-alpha.1",
-  "crates/gommage-cli": "0.47.0-beta.1",
+  "crates/gommage-cli": "0.47.1-beta.1",
   "crates/gommage-daemon": "0.8.0-alpha.1",
   "crates/gommage-mcp": "0.10.0-alpha.1"
 }

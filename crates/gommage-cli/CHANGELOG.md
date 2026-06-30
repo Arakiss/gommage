@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.47.1-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.47.0-beta.1...gommage-cli-v0.47.1-beta.1) (2026-06-30)
+
+
+### Bug fixes
+
+* **cli:** resolve publish script workspace versions ([6583a3d](https://github.com/Arakiss/gommage/commit/6583a3dbfff80b51678bb2bc7f7a4d653477ad83))
+
 ## [0.47.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.46.0-beta.1...gommage-cli-v0.47.0-beta.1) (2026-06-30)
 
 
