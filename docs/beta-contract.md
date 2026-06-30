@@ -54,7 +54,7 @@ Beta does not claim:
   hooks do not emit; the current default Codex surface is Bash, `apply_patch`,
   and Codex MCP tool names when those hook events reach Gommage;
 - production security certification;
-- crates.io installation unless the publish gate has passed.
+- crates.io installation unless first publication has claimed the package names.
 
 ## Recommended Trial Path
 

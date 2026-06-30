@@ -449,3 +449,58 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
+
+  publish-crates:
+    name: publish crates.io
+    if: >
+      vars.GOMMAGE_RELEASE_HOLD != 'true'
+      && vars.GOMMAGE_CRATES_IO_PUBLISH == 'true'
+      && (
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gommage-cli-v'))
+        || github.event_name == 'workflow_dispatch'
+      )
+    needs: release-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      CARGO_NET_RETRY: 10
+      CARGO_HTTP_TIMEOUT: 120
+      CARGO_HTTP_MULTIPLEXING: false
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UPLOAD_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Resolve and validate release tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            upload_tag="${{ github.event.inputs.tag }}"
+          else
+            upload_tag="${GITHUB_REF#refs/tags/}"
+          fi
+          expected_ref="refs/tags/${upload_tag}"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "::error::crates.io publishing is tied to ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
+            exit 1
+          fi
+          echo "UPLOAD_TAG=${upload_tag}" >> "$GITHUB_ENV"
+      - name: Verify crates.io token
+        shell: bash
+        run: |
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            echo "::error::CARGO_REGISTRY_TOKEN is required when GOMMAGE_CRATES_IO_PUBLISH=true."
+            exit 1
+          fi
+      - name: Verify release assets before registry publish
+        run: sh scripts/check-release-assets.sh --tag "$UPLOAD_TAG" --require-sbom
+      - name: Verify crates.io publish readiness
+        run: sh scripts/check-crates-publish-readiness.sh
+      - name: Publish crates in dependency order
+        run: sh scripts/publish-crates.sh --execute

@@ -170,6 +170,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Verify internal workspace dependency pins
         run: sh scripts/sync-workspace-internal-deps.sh --check
+      - name: Verify crates.io publish readiness
+        run: sh scripts/check-crates-publish-readiness.sh
       - name: Verify living docs avoid pinned release drift
         run: sh scripts/check-doc-release-refs.sh
       - name: Verify local-only agent files are not tracked

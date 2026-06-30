@@ -229,7 +229,8 @@ Features:
   - Static WASM or JSON playground for mapping, evaluation, explain traces, and
     fixture generation without sending data to a server.
 - crates.io publishing
-  - Publish crates in dependency order after the package gates are green.
+  - Publish crates in dependency order with the local helper or the gated
+    release workflow after package and release-evidence gates are green.
 - Homebrew tap and AUR package
   - Keep the signed GitHub Release installer as the source of truth, but make
     native package-manager installs available for common operator paths.
@@ -252,7 +253,8 @@ Exit criteria:
 - Package-manager installs verify the same signed release artifacts or document
   their trust boundary clearly.
 - Policy packs cannot install without version and provenance evidence.
-- `cargo install gommage-cli` is supported only after the publish gate passes.
+- `cargo install gommage-cli` is supported only after first publication claims
+  the crates.io package names.
 
 ## Recommended execution order
 

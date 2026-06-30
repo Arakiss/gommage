@@ -20,6 +20,7 @@ fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
+user_agent="${GOMMAGE_CRATES_IO_USER_AGENT:-gommage-publish-readiness/0.1 (+https://github.com/Arakiss/gommage)}"
 
 crates="
 gommage-stdlib
@@ -35,7 +36,7 @@ failures=0
 echo "== crates.io registry status =="
 for crate in $crates; do
   status="$(
-    curl -sS -o "$tmp_dir/$crate.crates.json" \
+    curl -sS -A "$user_agent" -o "$tmp_dir/$crate.crates.json" \
       -w "%{http_code}" \
       "https://crates.io/api/v1/crates/$crate" \
       2>"$tmp_dir/$crate.curl.err" || true
@@ -76,8 +77,14 @@ run_package_gate() {
   fi
 
   if grep -q "no matching package named .*gommage-" "$log_file"; then
-    echo "blocked $crate: unpublished internal dependency"
-    grep -A3 "no matching package named" "$log_file" | sed 's/^/  /'
+    missing_dep="$(sed -n 's/.*no matching package named `\([^`]*\)`.*/\1/p' "$log_file" | head -n 1)"
+    if [ -z "$missing_dep" ]; then
+      missing_dep="an internal dependency"
+    fi
+    echo "pending $crate: publish $missing_dep first"
+    if [ "${GOMMAGE_CRATES_READINESS_VERBOSE:-0}" = "1" ]; then
+      grep -A3 "no matching package named" "$log_file" | sed 's/^/  /'
+    fi
     return
   fi
 

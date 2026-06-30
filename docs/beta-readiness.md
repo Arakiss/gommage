@@ -94,8 +94,8 @@ These can remain open for beta if they are clearly documented:
   boundaries and must stay documented.
 - Cursor remains evaluation-only because its hook timing differs from Claude
   Code and Codex.
-- crates.io may remain unpublished while GitHub Releases are the supported
-  install path.
+- crates.io installation remains gated until first publication claims the
+  package names; GitHub Releases remain the supported binary install path.
 - Signed remote approval callbacks and native ntfy sending can stay on the
   v1.x roadmap as long as the generic webhook payload, Slack/Discord payload
   shapes, local approval commands, and TUI approval confirmation are verified.
