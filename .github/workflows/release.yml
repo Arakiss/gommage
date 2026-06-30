@@ -225,7 +225,12 @@ jobs:
               fi
 
               if [[ "${pr_run_conclusion}" == "action_required" ]]; then
-                echo "::warning::pull_request ${workflow} run ${pr_run_id} requires manual approval; dispatching workflow_dispatch fallback for ${pr_branch}."
+                echo "::warning::pull_request ${workflow} run ${pr_run_id} requires manual approval; rerunning it so branch protection sees PR-associated checks."
+                if gh run rerun "${pr_run_id}" --repo "${GITHUB_REPOSITORY}"; then
+                  return
+                fi
+
+                echo "::warning::Rerun failed for pull_request ${workflow} run ${pr_run_id}; dispatching workflow_dispatch fallback for ${pr_branch}."
                 gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
                 return
               fi
