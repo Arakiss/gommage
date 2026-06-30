@@ -152,35 +152,87 @@ jobs:
             exit 0
           fi
 
-          pr_head_sha="$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json headRefOid --jq .headRefOid)"
+          resolve_branch_head_sha() {
+            local branch_head=""
+
+            for attempt in 1 2 3 4 5 6; do
+              branch_head="$(
+                git ls-remote --heads origin "${pr_branch}" \
+                  | awk '{ print $1 }' \
+                  | head -n 1
+              )"
+
+              if [[ -n "${branch_head}" ]]; then
+                echo "${branch_head}"
+                return
+              fi
+
+              sleep $((attempt * 5))
+            done
+
+            return 1
+          }
+
+          if ! pr_head_sha="$(resolve_branch_head_sha)"; then
+            echo "::warning::Release PR branch head could not be resolved; dispatching workflow fallbacks for ${pr_branch}."
+            for workflow in "${workflows[@]}"; do
+              gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
+            done
+            exit 0
+          fi
+
+          echo "Release PR #${pr_number} branch ${pr_branch} is at ${pr_head_sha}."
 
           trigger_pr_workflow() {
             local workflow="$1"
+            local pr_run_info=""
             local pr_run_id=""
+            local pr_run_status=""
+            local pr_run_conclusion=""
 
             for attempt in 1 2 3 4 5 6; do
-              pr_run_id="$(
+              pr_run_info="$(
                 gh run list \
                   --repo "${GITHUB_REPOSITORY}" \
                   --workflow "${workflow}" \
                   --branch "${pr_branch}" \
                   --event pull_request \
-                  --json databaseId,headSha \
-                  --jq ".[] | select(.headSha == \"${pr_head_sha}\") | .databaseId" \
+                  --json databaseId,headSha,status,conclusion \
+                  --jq ".[] | select(.headSha == \"${pr_head_sha}\") | [.databaseId, .status, (.conclusion // \"\")] | @tsv" \
                   --limit 20 \
                   | head -n 1 \
                   || true
               )"
 
-              if [[ -n "${pr_run_id}" ]]; then
+              if [[ -n "${pr_run_info}" ]]; then
                 break
               fi
 
               sleep $((attempt * 10))
             done
 
+            if [[ -n "${pr_run_info}" ]]; then
+              IFS=$'\t' read -r pr_run_id pr_run_status pr_run_conclusion <<< "${pr_run_info}"
+
+              if [[ "${pr_run_status}" != "completed" ]]; then
+                echo "pull_request ${workflow} run ${pr_run_id} is already ${pr_run_status} for release PR #${pr_number} at ${pr_head_sha}."
+                return
+              fi
+
+              if [[ "${pr_run_conclusion}" == "success" ]]; then
+                echo "pull_request ${workflow} run ${pr_run_id} already passed for release PR #${pr_number} at ${pr_head_sha}."
+                return
+              fi
+
+              if [[ "${pr_run_conclusion}" == "action_required" ]]; then
+                echo "::warning::pull_request ${workflow} run ${pr_run_id} requires manual approval; dispatching workflow_dispatch fallback for ${pr_branch}."
+                gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
+                return
+              fi
+            fi
+
             if [[ -n "${pr_run_id}" ]]; then
-              echo "Rerunning pull_request ${workflow} run ${pr_run_id} for release PR #${pr_number}"
+              echo "Rerunning pull_request ${workflow} run ${pr_run_id} for release PR #${pr_number} at ${pr_head_sha}."
               gh run rerun "${pr_run_id}" --repo "${GITHUB_REPOSITORY}"
               return
             fi
