@@ -102,6 +102,17 @@
     - "pkg.cargo:publish"
     - "net.out:crates.io"
 
+# The local helper wraps real `cargo publish` calls. Treat its execute mode as
+# the same irreversible registry mutation so operators cannot bypass the cargo
+# publish gate by moving the verb into a shell script.
+- name: bash-gommage-publish-crates-script
+  tool: Bash
+  match_input:
+    command: "^\\s*(?:(?:sh|bash)\\s+)?(?:\\./)?scripts/publish-crates\\.sh\\b[^#;|&]*\\s--execute\\b"
+  emit:
+    - "pkg.cargo:publish"
+    - "net.out:crates.io"
+
 # Python publish: `twine upload`, `python -m twine upload`, `pip ... upload`.
 - name: bash-python-publish
   tool: Bash

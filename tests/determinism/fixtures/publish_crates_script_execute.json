@@ -1,0 +1,5 @@
+{
+  "name": "publish crates helper execute is gated like cargo publish",
+  "call": { "tool": "Bash", "input": { "command": "sh scripts/publish-crates.sh --execute" } },
+  "expected": { "kind": "ask_picto", "required_scope": "pkg.cargo:publish" }
+}

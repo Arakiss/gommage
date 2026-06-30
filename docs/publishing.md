@@ -72,28 +72,31 @@ to `main`. This keeps old binary tags installable while the alpha skill evolves.
 
 ## crates.io status
 
-As of May 7, 2026, the `gommage-*` crates are not published on crates.io.
-crates.io publishing itself does not require paid billing, but it does require
-a crates.io account, an API token, and an explicit maintainer decision to claim
-the package names. The manifests intentionally keep `publish = false` until the
-publish pipeline is ready. This prevents accidental partial publication while
-the API, CLI, and policy stdlib are still changing quickly.
+As of June 30, 2026, the `gommage-*` crate names are still unclaimed on
+crates.io, but the repository is prepared for first publication:
 
-Credential blocker: no crates.io token is configured or assumed in the
-repository. First publication requires the maintainer to create/confirm the
-crates.io account, claim the package names in the order below, and only then
-flip `publish = false` in the corresponding manifests.
+- package manifests are publishable;
+- local publication is routed through `scripts/publish-crates.sh`;
+- CI checks crates.io readiness on every PR/push;
+- the release workflow can publish crates after signed binary release evidence
+  is complete.
+
+Publishing remains an explicit registry mutation. Locally,
+`scripts/publish-crates.sh --execute` is mapped to `pkg.cargo:publish` and
+requires the same Gommage approval as `cargo publish`. In CI, crates.io publish
+is off unless the repository variable `GOMMAGE_CRATES_IO_PUBLISH=true` is set
+and the `CARGO_REGISTRY_TOKEN` secret is present.
 
 Current evidence:
 
 | Package | crates.io API | Local package gate |
 |---|---:|---|
 | `gommage-stdlib` | `404` | Passes `cargo package -p gommage-stdlib --allow-dirty`. |
-| `gommage-core` | `404` | Blocked as expected until `gommage-stdlib` exists on crates.io. |
-| `gommage-audit` | `404` | Blocked as expected until `gommage-core` exists on crates.io. |
-| `gommage-cli` | `404` | Blocked as expected until `gommage-audit` exists on crates.io. |
-| `gommage-daemon` | `404` | Blocked as expected until `gommage-audit` exists on crates.io. |
-| `gommage-mcp` | `404` | Blocked as expected until `gommage-audit` exists on crates.io. |
+| `gommage-core` | `404` | Pending until `gommage-stdlib` exists on crates.io. |
+| `gommage-audit` | `404` | Pending until `gommage-core` exists on crates.io. |
+| `gommage-cli` | `404` | Pending until `gommage-audit` exists on crates.io. |
+| `gommage-daemon` | `404` | Pending until `gommage-audit` exists on crates.io. |
+| `gommage-mcp` | `404` | Pending until `gommage-audit` exists on crates.io. |
 
 Refresh the evidence with:
 
@@ -105,11 +108,26 @@ The script treats `404` and `200` registry responses as valid status evidence.
 It fails only on unexpected registry errors, an unexpected `cargo package`
 failure, or a broken `gommage-stdlib` package gate.
 
+Use the local publisher in check mode before any registry mutation:
+
+```sh
+sh scripts/publish-crates.sh --check
+```
+
+The real local publish command is intentionally separate:
+
+```sh
+sh scripts/publish-crates.sh --execute
+```
+
+The command publishes in dependency order, skips exact versions that already
+exist on crates.io, and waits for each published crate version to become visible
+before moving to dependents.
+
 ## Intended publish order
 
-When publishing opens, publish crates in dependency order. `gommage-stdlib`
-must go first because the determinism test suite uses the packaged stdlib as a
-dev-dependency:
+Publish crates in dependency order. `gommage-stdlib` must go first because the
+determinism test suite uses the packaged stdlib as a dev-dependency:
 
 1. `gommage-stdlib`
 2. `gommage-core`
@@ -171,7 +189,7 @@ carry an exact `version = "=<crate version>"` requirement next to its local
 `path`. This keeps release-please version bumps from creating tags whose binary
 builds cannot resolve the workspace.
 
-Publishing readiness is a manual/network gate:
+Publishing readiness is a CI and local network gate:
 
 ```sh
 sh scripts/check-crates-publish-readiness.sh
@@ -207,10 +225,10 @@ gommage release verify --require-sbom --require-provenance
 sh scripts/verify-release.sh --require-sbom --require-provenance
 ```
 
-## Gates before flipping `publish = false`
+## First-publish bootstrap
 
-First-publish gates are sequential. Before `gommage-stdlib` exists on
-crates.io, package commands for crates that depend on it will fail with "no
+First-publish gates are sequential. Before `gommage-stdlib` exists on crates.io,
+verified package commands for crates that depend on it will fail with "no
 matching package named `gommage-stdlib` found". That is expected. Package and
 publish `gommage-stdlib` first, then run the remaining gates:
 
@@ -227,6 +245,27 @@ cargo package -p gommage-cli
 cargo package -p gommage-daemon
 cargo package -p gommage-mcp
 ```
+
+The helper automates that ordering:
+
+```sh
+sh scripts/publish-crates.sh --execute
+```
+
+For CI publication after a release, configure:
+
+```sh
+gh secret set CARGO_REGISTRY_TOKEN
+gh variable set GOMMAGE_CRATES_IO_PUBLISH --body true
+```
+
+The release workflow publishes crates only after:
+
+1. the `gommage-cli-v*` binary release is created;
+2. all platform archives, checksums, and Sigstore bundles are uploaded;
+3. the CycloneDX SBOM is uploaded and attested;
+4. `scripts/check-release-assets.sh --require-sbom` passes;
+5. `scripts/check-crates-publish-readiness.sh` passes.
 
 `gommage-stdlib` owns the packaged policy/capability YAML that `gommage-cli`
 embeds at compile time. The repository-root `policies/` and `capabilities/`
@@ -247,7 +286,8 @@ The target state is:
 - GitHub Releases should expose the product stream only. Release automation may
   still bump and tag internal crates in the release PR, but non-CLI workspace
   components skip GitHub Release publication.
-- crates.io provides `cargo install gommage-cli` for Rust-native users once the
-  package gates above pass.
+- crates.io provides `cargo install gommage-cli` for Rust-native users after
+  first publication claims the package names.
 - Release automation publishes crates only after the binary release, SBOM,
-  Sigstore, and GitHub artifact attestation checks are green.
+  Sigstore, and GitHub artifact attestation checks are green, and only when the
+  explicit CI publish variable is enabled.

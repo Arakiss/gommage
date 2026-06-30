@@ -368,9 +368,10 @@ cargo install --path crates/gommage-daemon --force
 cargo install --path crates/gommage-mcp --force
 ```
 
-`cargo install gommage-cli` is **not supported yet**: the crates are not on
-crates.io while the project is pre-1.0 and the publish gate remains closed. See
-[`docs/publishing.md`](docs/publishing.md) for the current publish gate.
+`cargo install gommage-cli` is supported only after the crates.io publish gate
+has passed and the `gommage-cli` package exists on crates.io. See
+[`docs/publishing.md`](docs/publishing.md) for the current publish status and
+release workflow.
 
 ## Update And Upgrade
 
