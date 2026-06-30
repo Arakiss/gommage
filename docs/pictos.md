@@ -32,8 +32,10 @@ gommage approval approve <approval-id> --ttl 10m --uses 1
 ```
 
 Approval mints an exact-scope picto for the request's `required_scope`; the next
-matching tool call consumes that picto and writes `picto_consumed`. A human can
-deny instead:
+matching tool call consumes that picto and writes `picto_consumed`. The default
+approval output is a plain operator summary; add `--json` for the stable agent
+contract with request, scope, picto, TTL, uses, and `next_action` fields. A
+human can deny instead:
 
 ```sh
 gommage approval deny <approval-id> --reason "not enough context"

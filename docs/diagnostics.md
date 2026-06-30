@@ -213,9 +213,12 @@ historical approved or denied requests. JSON list output keeps the nested
 `required_scope` fields for simple `jq` queries.
 
 Approving a request mints an exact-scope picto and writes signed
-`picto_created` plus `approval_resolved` events. Denying a request writes a
-signed `approval_resolved` event with `status: denied`. Webhook delivery uses
-bounded retries; exhausted failures are written to
+`picto_created` plus `approval_resolved` events. Human approval output is a
+plain, scannable summary; `approval approve <id> --json` keeps the stable action
+report with `status`, `request_id`, `scope`, `picto_id`, nested `picto` details,
+and `next_action` for agents. Denying a request writes a signed
+`approval_resolved` event with `status: denied`. Webhook delivery uses bounded
+retries; exhausted failures are written to
 `~/.gommage/approval-webhook-dlq.jsonl`, exposed through `approval dlq`, and
 signed in audit as `approval_webhook_failed` plus
 `approval_webhook_dead_lettered`. Dry-run JSON includes the provider-shaped

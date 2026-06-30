@@ -568,6 +568,7 @@ Stable automation contracts:
 | `tui --snapshot --view metrics` | Human local metrics summary for daemon reachability, active pictos, decisions, approvals, webhook DLQ, and audit anomalies. |
 | `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
+| `approval approve <id> --json` | Resolve a request and emit the minted exact-scope picto, TTL, uses, scope, and next action for agents. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
 | `approval evidence <id> --redact` | Export request state, relevant signed audit lines, verification summary, and next commands. |
 | `approval dlq --json` | Inspect dead-lettered approval webhook deliveries after bounded retries are exhausted. |

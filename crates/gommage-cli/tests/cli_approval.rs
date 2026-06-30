@@ -126,12 +126,65 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
         approved.get("status").and_then(|value| value.as_str()),
         Some("approved")
     );
+    assert_eq!(
+        approved
+            .get("schema_version")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        approved.get("kind").and_then(|value| value.as_str()),
+        Some("approval_action")
+    );
+    assert_eq!(
+        approved.get("tool").and_then(|value| value.as_str()),
+        Some("mcp__db__write_row")
+    );
+    assert_eq!(
+        approved.get("scope").and_then(|value| value.as_str()),
+        Some("mcp.write")
+    );
+    assert_eq!(
+        approved.get("next_action").and_then(|value| value.as_str()),
+        Some("retry_blocked_call")
+    );
     assert!(
         approved
             .get("picto_id")
             .and_then(|value| value.as_str())
             .unwrap()
             .starts_with("picto_")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/kind")
+            .and_then(|value| value.as_str()),
+        Some("exact_scope")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/scope")
+            .and_then(|value| value.as_str()),
+        Some("mcp.write")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/max_uses")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/uses_remaining")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert!(
+        approved
+            .pointer("/picto/expires_at")
+            .and_then(|value| value.as_str())
+            .unwrap()
+            .contains('T')
     );
 
     let allowed = run_mcp(&home, payload);
@@ -146,6 +199,72 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
     assert!(audit.contains(r#""type":"approval_requested""#));
     assert!(audit.contains(r#""type":"approval_resolved""#));
     assert!(audit.contains(r#""type":"picto_consumed""#));
+}
+
+#[test]
+fn approval_human_output_is_scannable_for_operators() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+
+    let list = gommage(&home).args(["approval", "list"]).output().unwrap();
+    assert!(
+        list.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list.stderr)
+    );
+    let list_stdout = String::from_utf8(list.stdout).unwrap();
+    assert!(list_stdout.contains("Approval inbox"));
+    assert!(list_stdout.contains("filter:   pending"));
+    assert!(list_stdout.contains("requests: 1"));
+    assert!(list_stdout.contains("  scope:  mcp.write"));
+    assert!(list_stdout.contains("  next:   gommage approval show apr_"));
+
+    let output = gommage(&home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    let approvals: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let request_id = approvals[0]["request"]["id"].as_str().unwrap();
+
+    let show = gommage(&home)
+        .args(["approval", "show", request_id])
+        .output()
+        .unwrap();
+    assert!(
+        show.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show.stderr)
+    );
+    let show_stdout = String::from_utf8(show.stdout).unwrap();
+    assert!(show_stdout.contains("Approval request"));
+    assert!(show_stdout.contains("status:  pending"));
+    assert!(show_stdout.contains("Capabilities"));
+    assert!(show_stdout.contains("- mcp.write"));
+    assert!(show_stdout.contains("approve: gommage approval approve apr_"));
+
+    let approve = gommage(&home)
+        .args([
+            "approval", "approve", request_id, "--ttl", "10m", "--uses", "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        approve.status.success(),
+        "{}",
+        String::from_utf8_lossy(&approve.stderr)
+    );
+    let approve_stdout = String::from_utf8(approve.stdout).unwrap();
+    assert!(approve_stdout.contains("Approval granted"));
+    assert!(approve_stdout.contains("status:  approved"));
+    assert!(approve_stdout.contains("scope:   mcp.write"));
+    assert!(approve_stdout.contains("Picto minted"));
+    assert!(approve_stdout.contains("kind:    exact-scope"));
+    assert!(approve_stdout.contains("next:    retry the blocked tool call"));
 }
 
 #[test]

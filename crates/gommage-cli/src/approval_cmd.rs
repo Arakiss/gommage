@@ -15,6 +15,7 @@ use crate::approval_workflow::{
     WebhookProvider, WebhookTemplateProvider, approval_evidence, approval_replay,
     approval_template, webhook_payload,
 };
+use crate::gestral::{UiTone, color_enabled, paint};
 
 #[derive(Debug, Clone, Subcommand)]
 pub(crate) enum ApprovalCmd {
@@ -147,15 +148,42 @@ impl ApprovalStatusArg {
             ApprovalStatusArg::Denied => Some(ApprovalStatus::Denied),
         }
     }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            ApprovalStatusArg::All => "all",
+            ApprovalStatusArg::Pending => "pending",
+            ApprovalStatusArg::Approved => "approved",
+            ApprovalStatusArg::Denied => "denied",
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ApprovalActionReport {
+    pub(crate) schema_version: u8,
+    pub(crate) kind: String,
     pub(crate) status: String,
     pub(crate) request_id: String,
+    pub(crate) tool: String,
+    pub(crate) scope: String,
+    pub(crate) reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) picto_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) picto: Option<ApprovalPictoReport>,
+    pub(crate) next_action: String,
     pub(crate) message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ApprovalPictoReport {
+    pub(crate) kind: String,
+    pub(crate) id: String,
+    pub(crate) scope: String,
+    pub(crate) max_uses: u32,
+    pub(crate) uses_remaining: u32,
+    pub(crate) expires_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -312,12 +340,10 @@ fn approval_list(layout: HomeLayout, json: bool, status: ApprovalStatusArg) -> R
         return Ok(ExitCode::SUCCESS);
     }
     if states.is_empty() {
-        println!("no approval requests");
+        print_empty_inbox(status);
         return Ok(ExitCode::SUCCESS);
     }
-    for state in states {
-        print_state_line(&state);
-    }
+    print_inbox(&states, status);
     Ok(ExitCode::SUCCESS)
 }
 
@@ -402,13 +428,32 @@ pub(crate) fn approve_request(
         picto_id: resolution.picto_id.clone(),
     })?;
 
+    let picto_id = picto.id.clone();
+    let picto_scope = picto.scope.clone();
+    let picto_expires_at = format_timestamp(picto.ttl_expires_at);
+    let picto_max_uses = picto.max_uses;
+    let uses_remaining = picto.max_uses.saturating_sub(picto.uses);
     Ok(ApprovalActionReport {
+        schema_version: 1,
+        kind: "approval_action".to_string(),
         status: "approved".to_string(),
         request_id: id.to_string(),
-        picto_id: Some(picto.id),
+        tool: state.request.tool,
+        scope: picto_scope.clone(),
+        reason: approval_reason,
+        picto_id: Some(picto_id.clone()),
+        picto: Some(ApprovalPictoReport {
+            kind: "exact_scope".to_string(),
+            id: picto_id,
+            scope: picto_scope.clone(),
+            max_uses: picto_max_uses,
+            uses_remaining,
+            expires_at: picto_expires_at,
+        }),
+        next_action: "retry_blocked_call".to_string(),
         message: format!(
             "approved {id}; minted exact-scope picto for {}",
-            picto.scope
+            picto_scope
         ),
     })
 }
@@ -425,6 +470,9 @@ pub(crate) fn deny_request(
 ) -> Result<ApprovalActionReport> {
     layout.ensure()?;
     let store = ApprovalStore::open(&layout.approvals_log);
+    let state = store
+        .get(id)?
+        .with_context(|| format!("approval request {id:?} not found"))?;
     let deny_reason = if reason.trim().is_empty() {
         format!("denied request {id}")
     } else {
@@ -440,9 +488,16 @@ pub(crate) fn deny_request(
         picto_id: None,
     })?;
     Ok(ApprovalActionReport {
+        schema_version: 1,
+        kind: "approval_action".to_string(),
         status: "denied".to_string(),
         request_id: id.to_string(),
+        tool: state.request.tool,
+        scope: state.request.required_scope,
+        reason: deny_reason,
         picto_id: None,
+        picto: None,
+        next_action: "none".to_string(),
         message: format!("denied {id}"),
     })
 }
@@ -654,43 +709,150 @@ fn print_action(json: bool, report: ApprovalActionReport) -> Result<ExitCode> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("{}", report.message);
+        print_action_human(&report);
     }
     Ok(ExitCode::SUCCESS)
 }
 
-fn print_state_line(state: &ApprovalState) {
+fn print_action_human(report: &ApprovalActionReport) {
+    let colors = color_enabled();
+    let title = match report.status.as_str() {
+        "approved" => "Approval granted",
+        "denied" => "Approval denied",
+        _ => "Approval resolved",
+    };
     println!(
-        "{} [{}] tool={} scope={} input={} reason={}",
-        state.request.id,
-        state.status.as_str(),
-        state.request.tool,
-        state.request.required_scope,
-        state.request.input_hash,
-        state.request.reason
+        "{}",
+        paint(title, action_tone(&report.status), true, colors)
     );
+    println!("request: {}", report.request_id);
+    println!(
+        "status:  {}",
+        paint(&report.status, action_tone(&report.status), true, colors)
+    );
+    println!("tool:    {}", report.tool);
+    println!("scope:   {}", report.scope);
+    println!("reason:  {}", report.reason);
+
+    if let Some(picto) = &report.picto {
+        println!();
+        println!("{}", paint("Picto minted", UiTone::Gold, true, colors));
+        println!("id:      {}", picto.id);
+        println!("kind:    {}", picto.kind.replace('_', "-"));
+        println!(
+            "uses:    {}/{} remaining",
+            picto.uses_remaining, picto.max_uses
+        );
+        println!("expires: {}", picto.expires_at);
+    }
+
+    println!();
+    match report.next_action.as_str() {
+        "retry_blocked_call" => {
+            println!("next:    retry the blocked tool call; the picto matches this exact scope")
+        }
+        "none" => println!("next:    no picto minted"),
+        other => println!("next:    {other}"),
+    }
+}
+
+fn print_empty_inbox(status: ApprovalStatusArg) {
+    let colors = color_enabled();
+    println!("{}", paint("Approval inbox", UiTone::Teal, true, colors));
+    println!("filter:   {}", status.as_str());
+    println!("requests: 0");
+    if matches!(status, ApprovalStatusArg::Pending) {
+        println!("next:     use --status all to inspect approval history");
+    }
+}
+
+fn print_inbox(states: &[ApprovalState], status: ApprovalStatusArg) {
+    let colors = color_enabled();
+    println!("{}", paint("Approval inbox", UiTone::Teal, true, colors));
+    println!("filter:   {}", status.as_str());
+    println!("requests: {}", states.len());
+    for state in states {
+        println!();
+        print_state_summary(state, colors);
+    }
+}
+
+fn print_state_summary(state: &ApprovalState, colors: bool) {
+    println!("{}", paint(&state.request.id, UiTone::Teal, true, colors));
+    println!(
+        "  status: {}",
+        paint(
+            state.status.as_str(),
+            approval_status_tone(state.status),
+            true,
+            colors
+        )
+    );
+    println!("  tool:   {}", state.request.tool);
+    println!("  scope:  {}", state.request.required_scope);
+    println!("  input:  {}", state.request.input_hash);
+    println!("  reason: {}", state.request.reason);
+    if state.status == ApprovalStatus::Pending {
+        println!("  next:   gommage approval show {}", state.request.id);
+    }
 }
 
 fn print_state_detail(state: &ApprovalState) {
-    println!("approval {}", state.request.id);
-    println!("  status:  {}", state.status.as_str());
-    println!("  tool:    {}", state.request.tool);
-    println!("  input:   {}", state.request.input_hash);
-    println!("  scope:   {}", state.request.required_scope);
-    println!("  reason:  {}", state.request.reason);
-    println!("  policy:  {}", state.request.policy_version);
+    let colors = color_enabled();
+    println!("{}", paint("Approval request", UiTone::Teal, true, colors));
+    println!("id:      {}", state.request.id);
+    println!(
+        "status:  {}",
+        paint(
+            state.status.as_str(),
+            approval_status_tone(state.status),
+            true,
+            colors
+        )
+    );
+    println!("created: {}", format_timestamp(state.request.created_at));
+    println!("tool:    {}", state.request.tool);
+    println!("scope:   {}", state.request.required_scope);
+    println!("input:   {}", state.request.input_hash);
+    println!("reason:  {}", state.request.reason);
+    println!("policy:  {}", state.request.policy_version);
     if let Some(rule) = &state.request.matched_rule {
-        println!("  rule:    {} ({}:{})", rule.name, rule.file, rule.index);
+        println!("rule:    {} ({}:{})", rule.name, rule.file, rule.index);
+    }
+    if !state.request.capabilities.is_empty() {
+        println!();
+        println!("{}", paint("Capabilities", UiTone::Gold, true, colors));
+        for capability in &state.request.capabilities {
+            println!("- {}", capability.as_str());
+        }
     }
     if state.status == ApprovalStatus::Pending {
+        println!();
+        println!("{}", paint("Next", UiTone::Gold, true, colors));
         println!(
-            "  approve: gommage approval approve {} --ttl 10m --uses 1",
+            "approve: gommage approval approve {} --ttl 10m --uses 1",
             state.request.id
         );
         println!(
-            "  deny:    gommage approval deny {} --reason <reason>",
+            "deny:    gommage approval deny {} --reason <reason>",
             state.request.id
         );
+    }
+}
+
+fn action_tone(status: &str) -> UiTone {
+    match status {
+        "approved" => UiTone::Green,
+        "denied" => UiTone::Red,
+        _ => UiTone::Muted,
+    }
+}
+
+fn approval_status_tone(status: ApprovalStatus) -> UiTone {
+    match status {
+        ApprovalStatus::Pending => UiTone::Gold,
+        ApprovalStatus::Approved => UiTone::Green,
+        ApprovalStatus::Denied => UiTone::Red,
     }
 }
 
