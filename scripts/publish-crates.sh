@@ -5,7 +5,11 @@ mode="check"
 allow_dirty="false"
 wait_attempts="${GOMMAGE_CRATES_IO_WAIT_ATTEMPTS:-30}"
 wait_seconds="${GOMMAGE_CRATES_IO_WAIT_SECONDS:-10}"
+publish_attempts="${GOMMAGE_CRATES_IO_PUBLISH_ATTEMPTS:-3}"
+publish_retry_padding_seconds="${GOMMAGE_CRATES_IO_RETRY_PADDING_SECONDS:-15}"
+publish_retry_max_sleep_seconds="${GOMMAGE_CRATES_IO_RETRY_MAX_SLEEP_SECONDS:-600}"
 user_agent="${GOMMAGE_CRATES_IO_USER_AGENT:-gommage-crates-publish/0.1 (+https://github.com/Arakiss/gommage)}"
+retry_after_log=""
 
 usage() {
   cat <<'USAGE'
@@ -42,6 +46,15 @@ while [ "$#" -gt 0 ]; do
     --execute)
       mode="execute"
       shift
+      ;;
+    --internal-retry-after-delay)
+      mode="retry-delay"
+      retry_after_log="${2:-}"
+      if [ -z "$retry_after_log" ]; then
+        echo "publish-crates: --internal-retry-after-delay requires a log file" >&2
+        exit 2
+      fi
+      shift 2
       ;;
     --allow-dirty)
       allow_dirty="true"
@@ -153,6 +166,103 @@ wait_for_version() {
   exit 1
 }
 
+retry_after_epoch() {
+  retry_after="$1"
+
+  epoch="$(date -u -d "$retry_after" +%s 2>/dev/null || true)"
+  if [ -n "$epoch" ]; then
+    printf '%s\n' "$epoch"
+    return 0
+  fi
+
+  epoch="$(date -u -j -f "%a, %d %b %Y %H:%M:%S %Z" "$retry_after" +%s 2>/dev/null || true)"
+  if [ -n "$epoch" ]; then
+    printf '%s\n' "$epoch"
+    return 0
+  fi
+
+  return 1
+}
+
+current_epoch() {
+  if [ -n "${GOMMAGE_CRATES_IO_TEST_NOW_EPOCH:-}" ]; then
+    printf '%s\n' "$GOMMAGE_CRATES_IO_TEST_NOW_EPOCH"
+    return 0
+  fi
+
+  date -u +%s
+}
+
+retry_delay_from_log() {
+  log_file="$1"
+  retry_after="$(
+    sed -n 's/.*try again after \(.* GMT\).*/\1/p' "$log_file" \
+      | tail -n 1
+  )"
+
+  if [ -z "$retry_after" ]; then
+    return 1
+  fi
+
+  if ! retry_epoch="$(retry_after_epoch "$retry_after")"; then
+    return 1
+  fi
+
+  now_epoch="$(current_epoch)"
+  delay=$((retry_epoch - now_epoch + publish_retry_padding_seconds))
+
+  if [ "$delay" -lt 1 ]; then
+    delay=1
+  fi
+
+  if [ "$delay" -gt "$publish_retry_max_sleep_seconds" ]; then
+    echo "publish-crates: crates.io retry delay too long: ${delay}s" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$delay"
+}
+
+publish_package() {
+  package="$1"
+  version="$2"
+  attempt=1
+
+  while [ "$attempt" -le "$publish_attempts" ]; do
+    log_file="${TMPDIR:-/tmp}/gommage-publish-$package-$version-$$-$attempt.log"
+
+    # shellcheck disable=SC2086
+    cargo publish -p "$package" $dirty_arg >"$log_file" 2>&1
+    status="$?"
+    cat "$log_file"
+
+    if [ "$status" -eq 0 ]; then
+      rm -f "$log_file"
+      return 0
+    fi
+
+    if grep -q "Too Many Requests" "$log_file" \
+      && [ "$attempt" -lt "$publish_attempts" ] \
+      && delay="$(retry_delay_from_log "$log_file")"; then
+      echo "publish-crates: crates.io rate limit for $package $version; retrying in ${delay}s (attempt $attempt/$publish_attempts)"
+      rm -f "$log_file"
+      sleep "$delay"
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    rm -f "$log_file"
+    return "$status"
+  done
+
+  return 1
+}
+
+if [ "$mode" = "retry-delay" ]; then
+  retry_delay_from_log "$retry_after_log"
+  exit 0
+fi
+
 echo "== crates.io publish =="
 for package in $publish_order; do
   version="$(version_for "$package")"
@@ -175,8 +285,7 @@ for package in $publish_order; do
   cargo package -p "$package" $dirty_arg
 
   echo "publish $package $version"
-  # shellcheck disable=SC2086
-  cargo publish -p "$package" $dirty_arg
+  publish_package "$package" "$version"
 
   wait_for_version "$package" "$version"
 done
