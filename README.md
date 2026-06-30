@@ -155,6 +155,11 @@ stack. That framing matters: the project is useful because it composes with
 native agent controls and OS confinement instead of pretending a hook is a
 sandbox.
 
+The design boundary is expanded in
+[Reference monitors for coding agents](https://www.petruarakiss.com/blog/reference-monitors-for-coding-agents):
+why a coding-agent harness needs a small, always-on decision point for tool
+calls instead of transcript-only permissions.
+
 ## Why
 
 Agent-native permission layers are valuable, but they are usually difficult to
