@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.47.2-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.47.1-beta.1...gommage-cli-v0.47.2-beta.1) (2026-06-30)
+
+
+### Bug fixes
+
+* **release:** retry crates.io publish rate limits ([7f5a48e](https://github.com/Arakiss/gommage/commit/7f5a48e0e81aa9ee130904e1959d064a71e4f688))
+
 ## [0.47.1-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.47.0-beta.1...gommage-cli-v0.47.1-beta.1) (2026-06-30)
 
 
