@@ -286,8 +286,10 @@ jobs:
   semver-checks:
     name: cargo-semver-checks (gommage-core)
     runs-on: ubuntu-latest
-    # Only run on PRs against main — baseline is the target branch tip.
-    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
+    # Only run on PR-like refs against main — baseline is the target branch tip.
+    # Release-please PRs created with GITHUB_TOKEN need the workflow_dispatch
+    # fallback because their synchronize events do not start trusted PR jobs.
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--')) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -318,18 +320,54 @@ jobs:
           #
           # Use the fully-qualified remote ref so the rev resolves without
           # needing a local branch (fetch-depth: 0 only brings remotes).
-          baseline-rev: origin/${{ github.base_ref }}
+          baseline-rev: origin/${{ github.base_ref || 'main' }}
 
   commitlint:
     name: commitlint
     runs-on: ubuntu-latest
-    if: ${{ (github.event_name == 'pull_request' || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--'))) && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]') || (github.event_name == 'pull_request_target' && github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--')) }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
           fetch-depth: 0
       - uses: wagoid/commitlint-github-action@v6
+        if: ${{ github.event_name != 'workflow_dispatch' }}
         with:
           configFile: .commitlintrc.yaml
           failOnWarnings: true
+      - name: Validate release dispatch commit headers
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin main
+          subjects="$(git log --format=%s origin/main..HEAD)"
+          if [[ -z "${subjects}" ]]; then
+            echo "::error::No commits found between origin/main and ${GITHUB_SHA}."
+            exit 1
+          fi
+
+          allowed_types='feat|fix|chore|docs|refactor|perf|test|build|ci|revert|security'
+          allowed_scopes='core|audit|stdlib|cli|daemon|mcp|policies|capabilities|hardstop|picto|runtime|docs|ci|deps|release|security|determinism'
+          pattern="^(${allowed_types})(\\((${allowed_scopes})\\))?!?: [^ ].{0,}$"
+
+          while IFS= read -r subject; do
+            [[ -n "${subject}" ]] || continue
+
+            if (( ${#subject} > 72 )); then
+              echo "::error::Commit header exceeds 72 characters: ${subject}"
+              exit 1
+            fi
+
+            if [[ ! "${subject}" =~ ${pattern} ]]; then
+              echo "::error::Commit header is not conventional: ${subject}"
+              exit 1
+            fi
+
+            if [[ "${subject}" == *. ]]; then
+              echo "::error::Commit header must not end with a period: ${subject}"
+              exit 1
+            fi
+          done <<< "${subjects}"
