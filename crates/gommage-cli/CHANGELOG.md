@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.46.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.45.2-beta.1...gommage-cli-v0.46.0-beta.1) (2026-06-30)
+
+
+### Features
+
+* **cli:** improve approval output ([08b1dc7](https://github.com/Arakiss/gommage/commit/08b1dc7874a2a19782bcb7145e0a5f0ddd4f5bf3))
+
 ## [0.45.2-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.45.1-beta.1...gommage-cli-v0.45.2-beta.1) (2026-06-29)
 
 
