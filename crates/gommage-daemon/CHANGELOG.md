@@ -1,5 +1,12 @@
 # Changelog — gommage-daemon
 
+## [0.8.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.7.2-alpha.1...gommage-daemon-v0.8.0-alpha.1) (2026-06-30)
+
+
+### Features
+
+* **release:** prepare crates.io publishing ([9426ff4](https://github.com/Arakiss/gommage/commit/9426ff4656fa55a65cc5fc4f5f4d53667518acd5))
+
 ## [0.7.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.7.1-alpha.1...gommage-daemon-v0.7.2-alpha.1) (2026-06-28)
 
 ## [0.7.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.7.0-alpha.1...gommage-daemon-v0.7.1-alpha.1) (2026-06-28)
