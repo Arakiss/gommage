@@ -9,7 +9,7 @@ user_agent="${GOMMAGE_CRATES_IO_USER_AGENT:-gommage-crates-publish/0.1 (+https:/
 
 usage() {
   cat <<'USAGE'
-Usage: sh scripts/publish-crates.sh [--check|--execute] [--allow-dirty]
+Usage: sh scripts/publish-crates.sh [--check|--print-versions|--execute] [--allow-dirty]
 
 Publish the Gommage workspace crates to crates.io in dependency order.
 
@@ -18,6 +18,8 @@ without mutating the registry.
 
 --execute      run real cargo publish commands, skipping crate versions that
                already exist on crates.io
+--print-versions
+               print the local workspace crate versions in publish order
 --allow-dirty  pass --allow-dirty to cargo package/publish; intended only for
                local bootstrap work, never for CI
 -h, --help     show this help
@@ -31,6 +33,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --check | --dry-run)
       mode="check"
+      shift
+      ;;
+    --print-versions)
+      mode="versions"
       shift
       ;;
     --execute)
@@ -67,27 +73,58 @@ for required in cargo curl; do
   fi
 done
 
-if [ "$mode" = "check" ]; then
-  sh scripts/check-crates-publish-readiness.sh
-  exit 0
-fi
-
 if [ "$allow_dirty" = "true" ]; then
   dirty_arg="--allow-dirty"
 else
   dirty_arg=""
 fi
 
+publish_order="
+gommage-stdlib
+gommage-core
+gommage-audit
+gommage-cli
+gommage-daemon
+gommage-mcp
+"
+
 version_for() {
   package="$1"
   pkgid="$(cargo pkgid -p "$package")"
-  version="${pkgid##*@}"
-  if [ "$version" = "$pkgid" ]; then
+  case "$pkgid" in
+    *@*)
+      version="${pkgid##*@}"
+      ;;
+    *#*)
+      version="${pkgid##*#}"
+      ;;
+    *)
+      version=""
+      ;;
+  esac
+
+  if [ -z "$version" ] || [ "$version" = "$pkgid" ]; then
     echo "publish-crates: could not resolve version for $package from cargo pkgid" >&2
     exit 2
   fi
   printf '%s\n' "$version"
 }
+
+if [ "$mode" = "check" ]; then
+  sh scripts/check-crates-publish-readiness.sh
+  for package in $publish_order; do
+    version_for "$package" >/dev/null
+  done
+  exit 0
+fi
+
+if [ "$mode" = "versions" ]; then
+  echo "== local crate versions =="
+  for package in $publish_order; do
+    printf '%s %s\n' "$package" "$(version_for "$package")"
+  done
+  exit 0
+fi
 
 version_status() {
   package="$1"
@@ -115,15 +152,6 @@ wait_for_version() {
   echo "publish-crates: timed out waiting for $package $version on crates.io" >&2
   exit 1
 }
-
-publish_order="
-gommage-stdlib
-gommage-core
-gommage-audit
-gommage-cli
-gommage-daemon
-gommage-mcp
-"
 
 echo "== crates.io publish =="
 for package in $publish_order; do
