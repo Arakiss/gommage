@@ -276,6 +276,75 @@ fn agent_uninstall_codex_keeps_feature_flag_when_other_hooks_remain() {
 }
 
 #[test]
+fn agent_uninstall_codex_removes_nested_gommage_hook() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(hooks.parent().unwrap()).unwrap();
+    fs::write(
+        &hooks,
+        r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/tmp/protect-files.sh" }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "gommage-mcp" }
+        ]
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\n",
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["agent", "uninstall", "codex"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("removed 1 Gommage hook group"));
+    assert!(stdout.contains("other Codex hooks remain"));
+    assert!(
+        fs::read_to_string(&config)
+            .unwrap()
+            .contains("hooks = true")
+    );
+    let hooks_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&hooks).unwrap()).unwrap();
+    let pre_tool_use = hooks_json
+        .pointer("/hooks/PreToolUse")
+        .and_then(|value| value.as_array())
+        .unwrap();
+    assert_eq!(pre_tool_use.len(), 1);
+    assert!(hook_group_contains_command(
+        &pre_tool_use[0],
+        "/tmp/protect-files.sh"
+    ));
+}
+
+#[test]
 fn repair_agent_claude_replaces_legacy_gommage_hook() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
@@ -384,6 +453,79 @@ fn repair_agent_codex_dry_run_does_not_mutate_legacy_hook() {
             .unwrap()
             .contains("codex_hooks = false")
     );
+}
+
+#[test]
+fn repair_agent_codex_preserves_nested_hooks_object() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(hooks.parent().unwrap()).unwrap();
+    fs::write(
+        &hooks,
+        r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/tmp/protect-files.sh" }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "GOMMAGE_BYPASS=1 gommage mcp" }
+        ]
+      }
+    ]
+  }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &config,
+        "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\n",
+    )
+    .unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["repair", "agent", "codex"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let hooks_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&hooks).unwrap()).unwrap();
+    assert!(hooks_json.pointer("/PreToolUse").is_none());
+    let pre_tool_use = hooks_json
+        .pointer("/hooks/PreToolUse")
+        .and_then(|value| value.as_array())
+        .unwrap();
+    assert_eq!(pre_tool_use.len(), 2);
+    assert!(
+        pre_tool_use
+            .iter()
+            .any(|entry| hook_group_contains_command(entry, "/tmp/protect-files.sh"))
+    );
+    assert!(
+        !serde_json::to_string(pre_tool_use)
+            .unwrap()
+            .contains("GOMMAGE_BYPASS=1 gommage mcp")
+    );
+    assert!(pre_tool_use.iter().any(|entry| {
+        entry.get("matcher").and_then(|value| value.as_str())
+            == Some("^Bash$|^apply_patch$|^mcp__.*$")
+            && hook_group_contains_command(entry, "gommage-mcp")
+    }));
 }
 
 #[test]

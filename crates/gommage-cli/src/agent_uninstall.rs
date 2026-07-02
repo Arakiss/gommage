@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    agent::AgentKind,
+    agent::{AgentKind, codex_pre_tool_use_pointer},
     codex_config::disable_existing_codex_hooks_features,
     util::{env_path_or_home, read_json_object, read_toml_document, write_json, write_text},
 };
@@ -103,10 +103,17 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
     let mut codex_hook_groups_remain_after_removal = false;
     if hooks_path.exists() {
         let mut hooks = read_json_object(&hooks_path)?;
-        let removed = remove_json_hook_groups(&mut hooks, "/PreToolUse", "gommage");
+        let primary_pointer = codex_pre_tool_use_pointer(&hooks);
+        let secondary_pointer = if primary_pointer == "/hooks/PreToolUse" {
+            "/PreToolUse"
+        } else {
+            "/hooks/PreToolUse"
+        };
+        let removed = remove_json_hook_groups(&mut hooks, primary_pointer, "gommage")
+            + remove_json_hook_groups(&mut hooks, secondary_pointer, "gommage");
         if removed > 0 {
             removed_codex_hook = true;
-            codex_hook_groups_remain_after_removal = json_has_hook_groups(&hooks);
+            codex_hook_groups_remain_after_removal = json_has_codex_hook_groups(&hooks);
             write_json(&hooks_path, &hooks, dry_run)?;
             if dry_run {
                 println!(
@@ -169,11 +176,11 @@ fn remove_json_hook_groups(root: &mut serde_json::Value, pointer: &str, needle: 
     before - entries.len()
 }
 
-fn json_has_hook_groups(root: &serde_json::Value) -> bool {
-    root.as_object().is_some_and(|object| {
-        object
-            .values()
-            .any(|value| value.as_array().is_some_and(|entries| !entries.is_empty()))
+fn json_has_codex_hook_groups(root: &serde_json::Value) -> bool {
+    ["/hooks/PreToolUse", "/PreToolUse"].iter().any(|pointer| {
+        root.pointer(pointer)
+            .and_then(|value| value.as_array())
+            .is_some_and(|entries| !entries.is_empty())
     })
 }
 

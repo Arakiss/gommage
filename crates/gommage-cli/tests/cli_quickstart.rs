@@ -745,6 +745,69 @@ fn quickstart_dry_run_json_reports_codex_hook_coexistence() {
 }
 
 #[test]
+fn quickstart_dry_run_json_reports_nested_codex_hook_coexistence() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let hooks = temp.path().join("codex").join("hooks.json");
+    let config = temp.path().join("codex").join("config.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let original_hooks = r#"{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch",
+        "hooks": [
+          { "type": "command", "command": "~/.codex/hooks/patch-audit.sh" }
+        ]
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "GOMMAGE_BYPASS=1 gommage mcp" }
+        ]
+      }
+    ]
+  }
+}
+"#;
+    fs::write(&hooks, original_hooks).unwrap();
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CODEX_HOOKS", &hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &config)
+        .args(["quickstart", "--agent", "codex", "--dry-run", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/existing_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/preserved_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        report
+            .pointer("/agent_integrations/0/hook/removed_gommage_hook_group_count")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(fs::read_to_string(&hooks).unwrap(), original_hooks);
+    assert!(!config.exists());
+}
+
+#[test]
 fn quickstart_dry_run_explain_prints_harness_guidance() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

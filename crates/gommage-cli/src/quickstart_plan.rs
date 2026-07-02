@@ -6,8 +6,8 @@ use std::path::Path;
 
 use crate::{
     agent::{
-        AgentKind, CODEX_GOMMAGE_MATCHER, claude_gommage_matcher, native_permission_rules,
-        translate_claude_native_rules, translate_claude_permission_allow,
+        AgentKind, CODEX_GOMMAGE_MATCHER, claude_gommage_matcher, codex_pre_tool_use_pointer,
+        native_permission_rules, translate_claude_native_rules, translate_claude_permission_allow,
         translate_claude_permission_deny,
     },
     daemon::{DaemonDryRunPlan, ServiceManager, daemon_dry_run_plan, resolve_service_manager},
@@ -392,6 +392,7 @@ fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
     let hooks_path = env_path_or_home("GOMMAGE_CODEX_HOOKS", &[".codex", "hooks.json"]);
     let config_path = env_path_or_home("GOMMAGE_CODEX_CONFIG", &[".codex", "config.toml"]);
     let hooks = read_json_object(&hooks_path)?;
+    let hook_pointer = codex_pre_tool_use_pointer(&hooks);
     Ok(AgentPlan {
         agent: AgentKind::Codex,
         config_paths: vec![path_display(&hooks_path), path_display(&config_path)],
@@ -399,7 +400,7 @@ fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
             CODEX_GOMMAGE_MATCHER.to_string(),
             "gommage-mcp",
             &hooks,
-            "/PreToolUse",
+            hook_pointer,
             replace_hooks,
         )?,
         native_permissions: NativePermissionPlan {

@@ -12,6 +12,22 @@ use std::{path::Path, process::ExitCode};
 
 pub(crate) const CODEX_GOMMAGE_MATCHER: &str = "^Bash$|^apply_patch$|^mcp__.*$";
 
+pub(crate) fn codex_pre_tool_use_path(root: &serde_json::Value) -> &'static [&'static str] {
+    if root.pointer("/hooks/PreToolUse").is_some() {
+        &["hooks", "PreToolUse"]
+    } else {
+        &["PreToolUse"]
+    }
+}
+
+pub(crate) fn codex_pre_tool_use_pointer(root: &serde_json::Value) -> &'static str {
+    if root.pointer("/hooks/PreToolUse").is_some() {
+        "/hooks/PreToolUse"
+    } else {
+        "/PreToolUse"
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentKind {
@@ -290,7 +306,8 @@ fn install_codex(
             }
         ]
     });
-    install_json_hook_group(&mut hooks, &["PreToolUse"], group, replace_hooks, "codex")?;
+    let hook_path = codex_pre_tool_use_path(&hooks);
+    install_json_hook_group(&mut hooks, hook_path, group, replace_hooks, "codex")?;
     write_json(hooks_path, &hooks, dry_run)?;
     println!(
         "ok codex: PreToolUse hook installed at {}",
