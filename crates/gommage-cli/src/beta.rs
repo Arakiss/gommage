@@ -315,6 +315,7 @@ fn beta_status_from_doctor(status: DoctorStatus) -> BetaStatus {
 fn beta_status_from_smoke(status: SmokeStatus) -> BetaStatus {
     match status {
         SmokeStatus::Pass => BetaStatus::Pass,
+        SmokeStatus::Warn => BetaStatus::Warn,
         SmokeStatus::Fail => BetaStatus::Fail,
     }
 }

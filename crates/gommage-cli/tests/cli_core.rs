@@ -607,3 +607,88 @@ fn smoke_json_reports_semantic_passes() {
                 == Some("allow")
     }));
 }
+
+#[test]
+fn smoke_json_warns_for_local_policy_relaxations() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    fs::write(
+        home.join("policy.d")
+            .join("14-operator-allow-agent-tools.yaml"),
+        r#"- name: operator-allow-web-fetch
+  decision: allow
+  match:
+    any_capability:
+      - "net.fetch:*"
+  reason: "operator opts into frictionless WebFetch"
+
+- name: operator-allow-mcp
+  decision: allow
+  match:
+    any_capability:
+      - "mcp.write:*"
+      - "mcp.call:*"
+  reason: "operator opts into frictionless MCP"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join("policy.d").join("19-operator-main-push.yaml"),
+        r#"- name: operator-allow-main-push
+  decision: allow
+  match:
+    any_capability:
+      - "git.push:refs/heads/main"
+  reason: "operator opts into routine main pushes"
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home).args(["smoke", "--json"]).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report.get("status").and_then(|value| value.as_str()),
+        Some("warn")
+    );
+    assert_eq!(
+        report
+            .pointer("/summary/warnings")
+            .and_then(|value| value.as_u64()),
+        Some(3)
+    );
+    assert_eq!(
+        report
+            .pointer("/summary/failed")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    let checks = report
+        .get("checks")
+        .and_then(|value| value.as_array())
+        .unwrap();
+    for name in ["ask_main_push", "ask_web_fetch", "ask_mcp_write"] {
+        assert!(checks.iter().any(|check| {
+            check.get("name").and_then(|value| value.as_str()) == Some(name)
+                && check.get("status").and_then(|value| value.as_str()) == Some("warn")
+                && check
+                    .get("warning")
+                    .and_then(|value| value.as_str())
+                    .is_some()
+        }));
+    }
+}

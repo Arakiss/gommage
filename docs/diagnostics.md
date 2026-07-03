@@ -61,7 +61,15 @@ with existing hooks, inspect `agent_integrations[].hook.strategy`,
 strategy is `append_preserving_unrelated`; `replace_all_existing` appears only
 when `--replace-hooks` is passed.
 
-`gommage smoke` is the semantic health check. It runs built-in tool-call fixtures against the active capability mappers and policy set without writing audit entries or consuming pictos. Use `gommage smoke --json` after installing policies or changing policy packs.
+`gommage smoke` is the semantic health check. It runs built-in tool-call
+fixtures against the active capability mappers and policy set without writing
+audit entries or consuming pictos. Use `gommage smoke --json` after installing
+policies or changing policy packs. The built-in fixtures are anchored to the
+stdlib safety model, but an operator may deliberately relax selected friction
+gates in local policy. In that case, `smoke` reports `warn`, exits zero, and
+prints the matched local allow rule instead of treating the installation as
+broken. Hard-stops, fail-closed behavior, force-push gating, and other
+non-relaxable checks still fail if their expected decision changes.
 
 `gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
 
@@ -103,7 +111,7 @@ current; otherwise they fall back to the signed audit log.
 | Status | Exit code | Meaning |
 |---|---:|---|
 | `pass` | 0 | Doctor has no warnings, smoke passed, and every requested policy fixture passed. |
-| `warn` | 0 | No hard failure, but doctor reported an operational warning such as a missing first audit log or daemon socket. |
+| `warn` | 0 | No hard failure, but doctor reported an operational warning such as a missing first audit log or daemon socket, or smoke found an explicit local policy relaxation for a selected friction gate. |
 | `fail` | 1 | Doctor failed, smoke failed, or at least one requested policy fixture failed. |
 
 Run the aggregated gate with:

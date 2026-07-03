@@ -55,6 +55,7 @@ impl VerifyStatus {
     fn from_smoke(status: SmokeStatus) -> Self {
         match status {
             SmokeStatus::Pass => Self::Pass,
+            SmokeStatus::Warn => Self::Warn,
             SmokeStatus::Fail => Self::Fail,
         }
     }

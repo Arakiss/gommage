@@ -354,6 +354,7 @@ fn from_doctor_status(status: DoctorStatus) -> UiStatus {
 fn from_smoke_status(status: SmokeStatus) -> UiStatus {
     match status {
         SmokeStatus::Pass => UiStatus::Ok,
+        SmokeStatus::Warn => UiStatus::Warn,
         SmokeStatus::Fail => UiStatus::Fail,
     }
 }

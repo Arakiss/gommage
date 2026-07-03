@@ -22,6 +22,7 @@ pub(crate) fn cmd_smoke(layout: HomeLayout, json: bool) -> Result<ExitCode> {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SmokeStatus {
     Pass,
+    Warn,
     Fail,
 }
 
@@ -29,6 +30,7 @@ impl SmokeStatus {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Pass => "pass",
+            Self::Warn => "warn",
             Self::Fail => "fail",
         }
     }
@@ -46,7 +48,7 @@ pub(crate) struct SmokeReport {
 
 impl SmokeReport {
     fn exit_code(&self) -> ExitCode {
-        if self.summary.failed == 0 {
+        if self.status != SmokeStatus::Fail {
             ExitCode::SUCCESS
         } else {
             ExitCode::from(1)
@@ -57,6 +59,7 @@ impl SmokeReport {
 #[derive(Debug, Default, Serialize)]
 pub(crate) struct SmokeSummary {
     pub(crate) passed: usize,
+    pub(crate) warnings: usize,
     pub(crate) failed: usize,
 }
 
@@ -72,6 +75,8 @@ struct SmokeCheck {
     input_hash: String,
     capabilities: Vec<Capability>,
     matched_rule: Option<MatchedRule>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    warning: Option<String>,
 }
 
 struct SmokeFixture {
@@ -79,6 +84,7 @@ struct SmokeFixture {
     description: &'static str,
     call: ToolCall,
     expectation: SmokeExpectation,
+    allow_local_relaxation: bool,
 }
 
 enum SmokeExpectation {
@@ -114,6 +120,20 @@ impl SmokeExpectation {
             _ => false,
         }
     }
+
+    fn local_relaxation_warning(
+        &self,
+        decision: &Decision,
+        matched_rule: Option<&MatchedRule>,
+    ) -> Option<String> {
+        match (self, decision, matched_rule) {
+            (Self::AskPicto { scope }, Decision::Allow, Some(rule)) => Some(format!(
+                "local policy relaxed the stdlib gate for {scope} via rule {} ({}:{})",
+                rule.name, rule.file, rule.index
+            )),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) fn build_smoke_report(layout: &HomeLayout) -> Result<SmokeReport> {
@@ -130,9 +150,19 @@ pub(crate) fn build_smoke_report(layout: &HomeLayout) -> Result<SmokeReport> {
     for fixture in smoke_fixtures() {
         let capabilities = mapper.map(&fixture.call);
         let eval = evaluate(&capabilities, &policy);
+        let warning = if fixture.allow_local_relaxation {
+            fixture
+                .expectation
+                .local_relaxation_warning(&eval.decision, eval.matched_rule.as_ref())
+        } else {
+            None
+        };
         let status = if fixture.expectation.matches(&eval.decision) {
             summary.passed += 1;
             SmokeStatus::Pass
+        } else if warning.is_some() {
+            summary.warnings += 1;
+            SmokeStatus::Warn
         } else {
             summary.failed += 1;
             SmokeStatus::Fail
@@ -149,14 +179,17 @@ pub(crate) fn build_smoke_report(layout: &HomeLayout) -> Result<SmokeReport> {
             input_hash: fixture.call.input_hash(),
             capabilities: eval.capabilities,
             matched_rule: eval.matched_rule,
+            warning,
         });
     }
 
     Ok(SmokeReport {
-        status: if summary.failed == 0 {
-            SmokeStatus::Pass
-        } else {
+        status: if summary.failed > 0 {
             SmokeStatus::Fail
+        } else if summary.warnings > 0 {
+            SmokeStatus::Warn
+        } else {
+            SmokeStatus::Pass
         },
         home: path_display(&layout.root),
         policy_version: policy.version_hash,
@@ -175,6 +208,7 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             expectation: SmokeExpectation::Gommage {
                 hard_stop: Some(true),
             },
+            allow_local_relaxation: false,
         },
         SmokeFixture {
             name: "fail_closed_unmapped_tool",
@@ -186,12 +220,14 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             expectation: SmokeExpectation::Gommage {
                 hard_stop: Some(false),
             },
+            allow_local_relaxation: false,
         },
         SmokeFixture {
             name: "allow_feature_push",
             description: "feature-style branch pushes are allowed by stdlib policy",
             call: bash_call("git push origin chore/test-branch"),
             expectation: SmokeExpectation::Allow,
+            allow_local_relaxation: false,
         },
         SmokeFixture {
             name: "ask_main_push",
@@ -200,6 +236,7 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             expectation: SmokeExpectation::AskPicto {
                 scope: "git.push:main",
             },
+            allow_local_relaxation: true,
         },
         SmokeFixture {
             name: "gate_force_push",
@@ -208,6 +245,7 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             expectation: SmokeExpectation::AskPicto {
                 scope: "git.push.force",
             },
+            allow_local_relaxation: false,
         },
         SmokeFixture {
             name: "ask_web_fetch",
@@ -217,6 +255,7 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
                 input: serde_json::json!({ "url": "https://example.com/docs" }),
             },
             expectation: SmokeExpectation::AskPicto { scope: "net.fetch" },
+            allow_local_relaxation: true,
         },
         SmokeFixture {
             name: "ask_mcp_write",
@@ -226,6 +265,7 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
                 input: serde_json::json!({ "title": "smoke" }),
             },
             expectation: SmokeExpectation::AskPicto { scope: "mcp.write" },
+            allow_local_relaxation: true,
         },
         SmokeFixture {
             name: "deny_unparsed_apply_patch",
@@ -237,6 +277,7 @@ fn smoke_fixtures() -> Vec<SmokeFixture> {
             expectation: SmokeExpectation::Gommage {
                 hard_stop: Some(false),
             },
+            allow_local_relaxation: false,
         },
     ]
 }
@@ -250,10 +291,17 @@ fn print_smoke_report(report: &SmokeReport) {
             check.expected,
             decision_summary(&check.actual)
         );
+        if let Some(warning) = &check.warning {
+            println!("  warning: {warning}");
+        }
     }
     println!(
-        "summary: {} passed, {} failed ({}; {} mapper rules)",
-        report.summary.passed, report.summary.failed, report.policy_version, report.mapper_rules
+        "summary: {} passed, {} warnings, {} failed ({}; {} mapper rules)",
+        report.summary.passed,
+        report.summary.warnings,
+        report.summary.failed,
+        report.policy_version,
+        report.mapper_rules
     );
 }
 
