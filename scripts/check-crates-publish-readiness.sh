@@ -76,14 +76,17 @@ run_package_gate() {
     fi
   fi
 
-  if grep -q "no matching package named .*gommage-" "$log_file"; then
+  if grep -Eq "no matching package named .*gommage-|failed to select a version for the requirement \`gommage-" "$log_file"; then
     missing_dep="$(sed -n 's/.*no matching package named `\([^`]*\)`.*/\1/p' "$log_file" | head -n 1)"
+    if [ -z "$missing_dep" ]; then
+      missing_dep="$(sed -n 's/.*failed to select a version for the requirement `\([^ =`]*\).*/\1/p' "$log_file" | head -n 1)"
+    fi
     if [ -z "$missing_dep" ]; then
       missing_dep="an internal dependency"
     fi
     echo "pending $crate: publish $missing_dep first"
     if [ "${GOMMAGE_CRATES_READINESS_VERBOSE:-0}" = "1" ]; then
-      grep -A3 "no matching package named" "$log_file" | sed 's/^/  /'
+      grep -E -A4 "no matching package named|failed to select a version for the requirement" "$log_file" | sed 's/^/  /'
     fi
     return
   fi
