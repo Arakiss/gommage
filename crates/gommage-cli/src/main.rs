@@ -282,6 +282,9 @@ enum Cmd {
         /// Report format for --explain. Defaults to JSON for automation compatibility.
         #[arg(long, value_enum, requires = "explain")]
         format: Option<AuditExplainFormat>,
+        /// Emit the --explain report as JSON. Equivalent to --format json.
+        #[arg(long, requires = "explain")]
+        json: bool,
     },
 
     /// Replay historical audit decisions against a candidate policy directory.
@@ -656,7 +659,11 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             }
         }
         Cmd::Explain { id, json, trace } => return cmd_explain(layout, &id, json, trace),
-        Cmd::AuditVerify { explain, format } => return cmd_audit_verify(layout, explain, format),
+        Cmd::AuditVerify {
+            explain,
+            format,
+            json,
+        } => return cmd_audit_verify(layout, explain, format, json),
         Cmd::Replay(options) => return cmd_replay(options),
         Cmd::Decide { pretty, hook } => {
             let call = read_tool_call_from_stdin(hook)?;

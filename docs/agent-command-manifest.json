@@ -487,7 +487,7 @@
       "id": "audit_verify_explain",
       "purpose": "Verify signed audit logs with automation JSON.",
       "stdin_mode": "none",
-      "argv": ["audit-verify", "--explain"]
+      "argv": ["audit-verify", "--explain", "--json"]
     },
     {
       "id": "state_rebuild_json",

@@ -531,6 +531,20 @@ fn audit_verify_explain_human_prints_forensic_summary() {
             .and_then(|value| value.as_u64()),
         Some(0)
     );
+
+    let output = gommage(&home)
+        .args(["audit-verify", "--explain", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(report.get("policy_versions").is_some());
+    assert_eq!(
+        report
+            .get("bypass_activations")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
 }
 
 #[test]
@@ -546,4 +560,28 @@ fn audit_verify_format_requires_explain() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("--explain"));
+
+    let output = gommage(&home)
+        .args(["audit-verify", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--explain"));
+}
+
+#[test]
+fn audit_verify_json_rejects_human_format() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+
+    let output = gommage(&home)
+        .args(["audit-verify", "--explain", "--json", "--format", "human"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--json cannot be combined with --format human"));
 }

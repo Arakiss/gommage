@@ -578,7 +578,7 @@ Stable automation contracts:
 | `policy diff --from <dir> --to <dir> --against <file> --json` | Compare two policy directories against the same historical audit decisions. |
 | `policy suggest --audit <file> --json` | Generate advisory candidate rules and fixture drafts for audit decisions not covered by the active policy. |
 | `explain <audit-id> --trace --json` | Audit-entry trace over current policy rule order, active decision, shadowed matches, and fixture-authoring hints. |
-| `audit-verify --explain` | Signed audit verification JSON for automation. |
+| `audit-verify --explain --json` | Signed audit verification JSON for automation. |
 | `state rebuild --json` | Rebuild the local `state.sqlite` read-model from the signed `audit.log` ledger. |
 | `state verify --json` | Check whether `state.sqlite` matches the current audit ledger. |
 | `state stats --json` | Read fast local counters from `state.sqlite`; use `state rebuild` when stale. |
@@ -589,7 +589,7 @@ Stable automation contracts:
 | `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval approve <id> --json` | Resolve a request and emit the minted exact-scope picto, TTL, uses, scope, and next action for agents. |
-| `approval deny-stale --older-than 24h --json` | Dry-run stale pending approval cleanup; add `--apply` to append denied resolutions. |
+| `approval deny-stale --older-than 24h --json` | Dry-run stale pending approval cleanup with complete request detail; add `--apply` to append denied resolutions. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
 | `approval evidence <id> --redact` | Export request state, relevant signed audit lines, verification summary, and next commands. |
 | `approval dlq --json` | Inspect dead-lettered approval webhook deliveries after bounded retries are exhausted. |
@@ -609,7 +609,9 @@ Human presentation output is intentionally not part of the automation contract.
 Agents may suggest `gommage tui --snapshot` or bounded `gommage tui --watch
 --watch-ticks <n>` for human issue reports, but should continue to parse
 `--json` commands. Use `gommage audit-verify --explain --format human` only for
-manual forensic review.
+manual forensic review. Human `approval deny-stale --apply` output is summarized
+by default; use `--show-all` or `--verbose` only when a person needs every
+matched request printed in the terminal.
 
 ## Quickstart
 
@@ -724,6 +726,7 @@ gommage approval approve <approval-id> --ttl 10m --uses 1
 gommage approval deny <approval-id> --reason "not enough context"
 gommage approval deny-stale --older-than 24h --json
 gommage approval deny-stale --older-than 24h --apply --reason "stale request"
+gommage approval deny-stale --older-than 24h --apply --show-all --reason "stale request"
 
 # Or notify humans through generic, Slack, or Discord webhook payloads.
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json

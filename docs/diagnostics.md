@@ -73,8 +73,8 @@ non-relaxable checks still fail if their expected decision changes.
 
 `gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
 
-`gommage audit-verify --explain` is the signed audit forensic report. The
-default format is JSON for agent and CI automation. Use
+`gommage audit-verify --explain --json` is the signed audit forensic report.
+`gommage audit-verify --explain` keeps the same JSON output for compatibility. Use
 `gommage audit-verify --explain --format human` when a person needs a compact
 status, verified-entry count, key fingerprint, bypass counters,
 policy-version list, expedition list, and anomaly list.
@@ -166,6 +166,7 @@ Audit verification has its own forensic JSON contract:
 
 ```sh
 gommage audit-verify --explain
+gommage audit-verify --explain --json
 gommage audit-verify --explain --format human
 ```
 
@@ -223,6 +224,7 @@ gommage approval approve <approval-id> --ttl 10m --uses 1
 gommage approval deny <approval-id> --reason "not enough context"
 gommage approval deny-stale --older-than 24h --json
 gommage approval deny-stale --older-than 24h --apply --reason "stale request"
+gommage approval deny-stale --older-than 24h --apply --show-all --reason "stale request"
 gommage approval dlq --json
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
@@ -241,7 +243,9 @@ historical approved or denied requests. JSON list output keeps the nested
 `required_scope` fields for simple `jq` queries.
 `approval deny-stale --older-than 24h --json` reports old pending requests
 without mutating state; add `--apply` to append signed denied resolutions and
-clear the pending queue while preserving history.
+clear the pending queue while preserving history. Human output prints a summary
+plus the first matched requests by default; use `--show-all` or `--verbose` for
+full terminal detail. JSON output always includes every processed request.
 
 Approving a request mints an exact-scope picto and writes signed
 `picto_created` plus `approval_resolved` events. Human approval output is a

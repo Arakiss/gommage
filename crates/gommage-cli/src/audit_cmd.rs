@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use gommage_audit::{
     Anomaly, AuditEntry, AuditEventEntry, VerifyReport as AuditVerifyReport, verify_log,
@@ -22,12 +22,22 @@ pub(crate) fn cmd_audit_verify(
     layout: HomeLayout,
     explain: bool,
     format: Option<AuditExplainFormat>,
+    json: bool,
 ) -> Result<ExitCode> {
+    if json && matches!(format, Some(AuditExplainFormat::Human)) {
+        bail!("--json cannot be combined with --format human");
+    }
+
     let vk = layout.load_verifying_key()?;
     if explain {
         let report =
             gommage_audit::explain_log(&layout.audit_log, &vk).context("explaining audit log")?;
-        match format.unwrap_or(AuditExplainFormat::Json) {
+        let format = if json {
+            AuditExplainFormat::Json
+        } else {
+            format.unwrap_or(AuditExplainFormat::Json)
+        };
+        match format {
             AuditExplainFormat::Json => {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }

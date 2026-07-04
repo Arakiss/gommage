@@ -81,6 +81,9 @@ pub(crate) enum ApprovalCmd {
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
+        /// Print every matched request in human output. JSON output is always complete.
+        #[arg(long, visible_alias = "verbose")]
+        show_all: bool,
     },
     /// POST pending approval request payloads to a webhook URL.
     Webhook {
@@ -353,6 +356,8 @@ struct ApprovalDenyStaleItem {
     scope: String,
 }
 
+const DENY_STALE_HUMAN_DEFAULT_LIMIT: usize = 20;
+
 impl ApprovalCallbackReport {
     fn exit_code(&self) -> ExitCode {
         if matches!(
@@ -434,7 +439,8 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
             limit,
             reason,
             json,
-        } => approval_deny_stale(layout, older_than, apply, limit, &reason, json),
+            show_all,
+        } => approval_deny_stale(layout, older_than, apply, limit, &reason, json, show_all),
         ApprovalCmd::Webhook {
             url,
             provider,
@@ -782,6 +788,7 @@ fn approval_deny_stale(
     limit: Option<usize>,
     reason: &str,
     json: bool,
+    show_all: bool,
 ) -> Result<ExitCode> {
     let store = ApprovalStore::open(&layout.approvals_log);
     let now = OffsetDateTime::now_utc();
@@ -846,7 +853,7 @@ fn approval_deny_stale(
         });
     }
 
-    print_deny_stale_report(json, &report)?;
+    print_deny_stale_report(json, &report, show_all)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -1142,7 +1149,11 @@ fn print_callback_report(json: bool, report: ApprovalCallbackReport) -> Result<E
     Ok(exit_code)
 }
 
-fn print_deny_stale_report(json: bool, report: &ApprovalDenyStaleReport) -> Result<()> {
+fn print_deny_stale_report(
+    json: bool,
+    report: &ApprovalDenyStaleReport,
+    show_all: bool,
+) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(report)?);
         return Ok(());
@@ -1160,13 +1171,24 @@ fn print_deny_stale_report(json: bool, report: &ApprovalDenyStaleReport) -> Resu
     println!("older:  {} seconds", report.older_than_seconds);
     println!("matched: {}", report.matched);
     println!("denied:  {}", report.denied);
-    for request in &report.requests {
+    let shown = if show_all {
+        report.requests.len()
+    } else {
+        report.requests.len().min(DENY_STALE_HUMAN_DEFAULT_LIMIT)
+    };
+    for request in report.requests.iter().take(shown) {
         println!();
         println!("{}", paint(&request.id, UiTone::Gold, true, colors));
         println!("  status: {}", request.status);
         println!("  age:    {} seconds", request.age_seconds);
         println!("  tool:   {}", request.tool);
         println!("  scope:  {}", request.scope);
+    }
+    let hidden = report.requests.len().saturating_sub(shown);
+    if hidden > 0 {
+        println!();
+        println!("omitted: {hidden} request(s)");
+        println!("detail:  rerun with --show-all for every request, or --json for full data");
     }
     if !report.apply && report.matched > 0 {
         println!();

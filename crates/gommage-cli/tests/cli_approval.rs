@@ -16,6 +16,23 @@ fn setup_home(home: &std::path::Path) {
     );
 }
 
+fn write_stale_approvals(home: &std::path::Path, count: usize) {
+    let approvals_log = home.join("approvals.jsonl");
+    let mut lines = String::new();
+    for index in 0..count {
+        let created_at = time::OffsetDateTime::now_utc()
+            - time::Duration::hours(25)
+            - time::Duration::minutes(index as i64);
+        lines.push_str(&format!(
+            "{{\"type\":\"requested\",\"request\":{{\"id\":\"apr_stale_{index:02}\",\"created_at\":\"{}\",\"tool\":\"Bash\",\"input_hash\":\"sha256:stale-{index:02}\",\"required_scope\":\"git.push:main\",\"reason\":\"stale request\",\"capabilities\":[],\"matched_rule\":null,\"policy_version\":\"sha256:p\"}}}}\n",
+            created_at
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap()
+        ));
+    }
+    fs::write(approvals_log, lines).unwrap();
+}
+
 fn run_mcp(home: &std::path::Path, payload: &[u8]) -> serde_json::Value {
     let mut child = gommage(home)
         .arg("mcp")
@@ -504,6 +521,78 @@ fn approval_deny_stale_is_dry_run_until_apply() {
         old["resolution"]["reason"].as_str(),
         Some("test stale cleanup")
     );
+}
+
+#[test]
+fn approval_deny_stale_human_output_is_capped_unless_show_all() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    write_stale_approvals(&home, 25);
+
+    let capped = gommage(&home)
+        .args(["approval", "deny-stale", "--older-than", "24h", "--apply"])
+        .output()
+        .unwrap();
+    assert!(
+        capped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&capped.stderr)
+    );
+    let stdout = String::from_utf8(capped.stdout).unwrap();
+    assert!(stdout.contains("matched: 25"));
+    assert!(stdout.contains("denied:  25"));
+    assert!(stdout.contains("apr_stale_24"));
+    assert!(stdout.contains("apr_stale_05"));
+    assert!(!stdout.contains("apr_stale_04"));
+    assert!(!stdout.contains("apr_stale_00"));
+    assert!(stdout.contains("omitted: 5 request(s)"));
+    assert!(stdout.contains("--show-all"));
+    assert!(stdout.contains("--json"));
+
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    write_stale_approvals(&home, 25);
+    let show_all = gommage(&home)
+        .args([
+            "approval",
+            "deny-stale",
+            "--older-than",
+            "24h",
+            "--apply",
+            "--show-all",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        show_all.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_all.stderr)
+    );
+    let stdout = String::from_utf8(show_all.stdout).unwrap();
+    assert!(stdout.contains("apr_stale_24"));
+    assert!(stdout.contains("apr_stale_00"));
+    assert!(!stdout.contains("omitted:"));
+
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    write_stale_approvals(&home, 25);
+    let verbose = gommage(&home)
+        .args(["approval", "deny-stale", "--older-than", "24h", "--verbose"])
+        .output()
+        .unwrap();
+    assert!(
+        verbose.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verbose.stderr)
+    );
+    let stdout = String::from_utf8(verbose.stdout).unwrap();
+    assert!(stdout.contains("apr_stale_24"));
+    assert!(stdout.contains("apr_stale_00"));
+    assert!(!stdout.contains("omitted:"));
+    assert!(stdout.contains("next:    rerun with --apply"));
 }
 
 #[test]
