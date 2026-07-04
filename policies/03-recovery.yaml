@@ -25,17 +25,17 @@
   decision: allow
   match:
     any_capability:
-      - "proc.exec:*/gommage --help*"
-      - "proc.exec:*/gommage -h*"
-      - "proc.exec:*/gommage --version*"
-      - "proc.exec:*/gommage -V*"
-      - "proc.exec:*/gommage init*"
-      - "proc.exec:*/gommage verify*"
-      - "proc.exec:*/gommage doctor*"
-      - "proc.exec:*/gommage smoke*"
-      - "proc.exec:*/gommage policy check*"
-      - "proc.exec:*/gommage agent status*"
-      - "proc.exec:*/gommage daemon status*"
+      - "proc.exec:**/gommage --help*"
+      - "proc.exec:**/gommage -h*"
+      - "proc.exec:**/gommage --version*"
+      - "proc.exec:**/gommage -V*"
+      - "proc.exec:**/gommage init*"
+      - "proc.exec:**/gommage verify*"
+      - "proc.exec:**/gommage doctor*"
+      - "proc.exec:**/gommage smoke*"
+      - "proc.exec:**/gommage policy check*"
+      - "proc.exec:**/gommage agent status*"
+      - "proc.exec:**/gommage daemon status*"
   reason: "absolute Gommage binary paths are valid recovery commands"
 
 - name: allow-basic-shell-inspection

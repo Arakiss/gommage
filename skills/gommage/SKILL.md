@@ -121,9 +121,17 @@ Use `gommage verify --json --policy-test <file>` when the repository provides
 its own policy fixtures. Treat `status: "fail"` as a policy regression until
 the policy or capability mapper change is reviewed.
 
-## Source Checkout
+## Source Builds And Checkout
 
-When working inside this repository, source install is acceptable:
+For Rust-native source builds from crates.io:
+
+```sh
+cargo install gommage-cli --locked
+cargo install gommage-daemon --locked
+cargo install gommage-mcp --locked
+```
+
+When working inside this repository, path installs are acceptable:
 
 ```sh
 cargo install --path crates/gommage-cli --force
@@ -131,11 +139,10 @@ cargo install --path crates/gommage-daemon --force
 cargo install --path crates/gommage-mcp --force
 ```
 
-Do not recommend `cargo install gommage-cli` yet. As of May 7, 2026, the
-`gommage-*` crates are not published on crates.io and the manifests
-intentionally keep `publish = false`. The bundled stdlib is packaged in
-`gommage-stdlib`, but the full publish gate still needs to pass before
-crates.io becomes a supported install path.
+GitHub Releases remain the recommended end-user install path because they
+provide signed, checksum-verified, prebuilt binaries and install all runtime
+binaries together. crates.io is supported for users who intentionally want
+Cargo to build from source.
 
 ## Agent Notes
 
@@ -152,7 +159,7 @@ crates.io becomes a supported install path.
   one-use picto allow, hard-stop deny, signed audit verification,
   `state.sqlite` rebuild/verify/stats, policy fixtures, beta check, and a TUI
   snapshot without mutating the operator's real agent config.
-- Agent automation should prefer `gommage harness diagnose --json`, `gommage harness explain --json`, `gommage harness write-context --dry-run`, `gommage quickstart --dry-run --json`, `gommage quickstart --dry-run --explain`, `gommage beta check --json`, `gommage beta check --json --policy-test <file>`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage posture --json`, `gommage session doctor --json`, `gommage managed status --json`, `gommage run codex --dry-run --json -- <task>`, `gommage project init --dry-run --json`, `gommage report bundle --redact --output <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage approval list --json`, `gommage approval list --status all --json`, `gommage approval show <id> --json`, `gommage approval replay <id> --json`, `gommage approval evidence <id> --redact`, `gommage approval webhook --dry-run --json`, `gommage approval callback --body <file> --signature <sig> --timestamp <ts> --signing-secret <secret> --dry-run --json`, `gommage approval template --provider <provider> --json`, `gommage stats --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage sandbox advise --json`, `gommage state rebuild --json`, `gommage state verify --json`, `gommage state stats --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage policy layers --json`, `gommage policy lint --strict --json`, `gommage replay --audit <file> --policy <dir> --json`, `gommage policy diff --from <dir> --to <dir> --against <file> --json`, `gommage policy suggest --audit <file> --json`, `gommage explain <audit-id> --trace --json`, `gommage repair agent <agent> --dry-run`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. `state.sqlite` is a rebuildable read-model only; never treat it as permission authority over `audit.log`, policies, or pictos. `approval list` defaults to pending; use `--status all` for history. `approval webhook --dry-run --json` exposes shaped request bodies in `requests[].payload`; signed dry-runs also expose `requests[].body`, `requests[].signature`, and a request-bound `requests[].payload.callback.nonce`. `approval callback` verifies the HMAC signature, timestamp freshness, pending request state, and nonce before applying an approve/deny action. `sandbox advise` is advisory only and is not OS confinement. Use `gommage tui --snapshot`, especially `gommage tui --snapshot --view onboarding` for first-minute operator guidance and `gommage tui --snapshot --view metrics` for a human-readable local health summary, bounded `gommage tui --watch --watch-ticks <n>`, or bounded `gommage tui --stream --stream-ticks <n>` only when a human-readable operator report is useful; do not parse TUI output as a stable contract. Stream/snapshot output includes daemon reachability, active pictos, local counters, webhook DLQ count, and audit anomaly count when available. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot`, `gommage logo`, or interactive `gommage tui`; they are presentation-only. Interactive `gommage tui --view approvals` may adjust TTL/use-count and approve/deny after y/n confirmation, so agents should not drive it programmatically.
+- Agent automation should prefer `gommage harness diagnose --json`, `gommage harness explain --json`, `gommage harness write-context --dry-run`, `gommage quickstart --dry-run --json`, `gommage quickstart --dry-run --explain`, `gommage beta check --json`, `gommage beta check --json --policy-test <file>`, `gommage verify --json`, `gommage verify --json --policy-test <file>`, `gommage posture --json`, `gommage session doctor --json`, `gommage managed status --json`, `gommage run codex --dry-run --json -- <task>`, `gommage project init --dry-run --json`, `gommage report bundle --redact --output <file>`, `gommage doctor --json`, `gommage agent status claude --json`, `gommage agent status codex --json`, `gommage approval list --json`, `gommage approval list --status all --json`, `gommage approval deny-stale --older-than 24h --json`, `gommage approval show <id> --json`, `gommage approval replay <id> --json`, `gommage approval evidence <id> --redact`, `gommage approval webhook --dry-run --json`, `gommage approval callback --body <file> --signature <sig> --timestamp <ts> --signing-secret <secret> --dry-run --json`, `gommage approval template --provider <provider> --json`, `gommage stats --json`, `gommage map --json`, `gommage map --json --hook`, `gommage smoke --json`, `gommage sandbox advise --json`, `gommage state rebuild --json`, `gommage state verify --json`, `gommage state stats --json`, `gommage policy schema`, `gommage policy test <file> --json`, `gommage policy check`, `gommage policy layers --json`, `gommage policy lint --strict --json`, `gommage replay --audit <file> --policy <dir> --json`, `gommage policy diff --from <dir> --to <dir> --against <file> --json`, `gommage policy suggest --audit <file> --json`, `gommage explain <audit-id> --trace --json`, `gommage repair agent <agent> --dry-run`, `gommage agent uninstall <agent> --dry-run`, `gommage uninstall --all --dry-run`, and `gommage audit-verify --explain` JSON. `state.sqlite` is a rebuildable read-model only; never treat it as permission authority over `audit.log`, policies, or pictos. `approval list` defaults to pending; use `--status all` for history. `approval deny-stale --older-than 24h --json` is a dry-run by default; use `--apply` only when deliberately appending denied resolutions for stale pending requests. `approval webhook --dry-run --json` exposes shaped request bodies in `requests[].payload`; signed dry-runs also expose `requests[].body`, `requests[].signature`, and a request-bound `requests[].payload.callback.nonce`. `approval callback` verifies the HMAC signature, timestamp freshness, pending request state, and nonce before applying an approve/deny action. `sandbox advise` is advisory only and is not OS confinement. Use `gommage tui --snapshot`, especially `gommage tui --snapshot --view onboarding` for first-minute operator guidance and `gommage tui --snapshot --view metrics` for a human-readable local health summary, bounded `gommage tui --watch --watch-ticks <n>`, or bounded `gommage tui --stream --stream-ticks <n>` only when a human-readable operator report is useful; do not parse TUI output as a stable contract. Stream/snapshot output includes daemon reachability, active pictos, local counters, webhook DLQ count, and audit anomaly count when available. Use `gommage audit-verify --explain --format human` only for manual forensic review. Do not parse `gommage mascot`, `gommage logo`, or interactive `gommage tui`; they are presentation-only. Interactive `gommage tui --view approvals` may adjust TTL/use-count and approve/deny after y/n confirmation, so agents should not drive it programmatically.
 - Existing host setups: quickstart preserves unrelated host hooks by default.
   Use `--replace-hooks` only when the operator intentionally wants Gommage to
   own the whole `PreToolUse` surface. Existing hooks can coexist, but the first
@@ -226,6 +233,7 @@ gommage grant --scope "git.push:main" --uses 1 --ttl 10m --reason "<reason>"
 gommage stats --json
 gommage approval list --json
 gommage approval list --status all --json
+gommage approval deny-stale --older-than 24h --json
 gommage approval replay <approval-id> --json
 gommage approval evidence <approval-id> --redact
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json
@@ -256,9 +264,11 @@ Current beta distribution:
 - Use `gommage release verify --all-assets --json --require-sbom --require-provenance` for full beta/RC release evidence. For current-platform checks, use `gommage release verify --json --require-sbom --require-provenance`; from a checkout, `sh scripts/verify-release.sh --json --require-sbom --require-provenance` provides the shell fallback.
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.
-- crates.io is not the supported install path yet.
+- crates.io is supported for Rust-native source builds; GitHub Releases remain
+  the signed binary install path.
 
-Before claiming crates.io support, check `docs/publishing.md` and require the package gates there to pass.
+Before claiming a newly published version, check `docs/publishing.md` and
+require the package gates there to pass.
 
 ## References
 

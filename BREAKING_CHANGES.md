@@ -34,12 +34,12 @@ reaches 1.0:
 gommage-core = "=0.x.y"
 ```
 
-The crates are not published to crates.io yet (see
-[`docs/publishing.md`](docs/publishing.md)); this guidance applies to any
-git-pinned or path consumer today and to crates.io consumers once publishing
-opens. Operators who consume only the installed binaries and YAML policy should
-read the release notes on every minor bump and re-run their policy regression
-fixtures (`gommage policy test`) and `gommage smoke` before trusting an upgrade.
+The crates are published on crates.io (see
+[`docs/publishing.md`](docs/publishing.md)). Exact pinning still applies until
+1.0 because minor pre-1.0 releases may change policy semantics. Operators who
+consume only the installed binaries and YAML policy should read the release
+notes on every minor bump and re-run their policy regression fixtures
+(`gommage policy test`) and `gommage smoke` before trusting an upgrade.
 
 ## How versions are decided
 

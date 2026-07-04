@@ -73,14 +73,29 @@ to `main`. This keeps old binary tags installable while the alpha skill evolves.
 
 ## crates.io status
 
-As of June 30, 2026, the `gommage-*` crate names are still unclaimed on
-crates.io, but the repository is prepared for first publication:
+As of July 4, 2026, the public `gommage-*` crates are published on crates.io:
 
-- package manifests are publishable;
-- local publication is routed through `scripts/publish-crates.sh`;
-- CI checks crates.io readiness on every PR/push;
-- the release workflow can publish crates after signed binary release evidence
-  is complete.
+| Package | crates.io version | Local package gate |
+|---|---:|---|
+| `gommage-stdlib` | `0.12.0-alpha.1` | Passes `cargo package -p gommage-stdlib --allow-dirty`. |
+| `gommage-core` | `0.16.0-alpha.1` | Prepared by `cargo package --no-verify` after published internal deps resolve. |
+| `gommage-audit` | `0.7.1-alpha.1` | Prepared by `cargo package --no-verify` after published internal deps resolve. |
+| `gommage-cli` | `0.48.0-beta.1` | Prepared by `cargo package --no-verify`; installs the `gommage` binary. |
+| `gommage-daemon` | `0.8.1-alpha.1` | Prepared by `cargo package --no-verify`; installs `gommage-daemon`. |
+| `gommage-mcp` | `0.10.1-alpha.1` | Prepared by `cargo package --no-verify`; installs `gommage-mcp`. |
+
+The supported Rust-native source-build install path is:
+
+```sh
+cargo install gommage-cli --locked
+cargo install gommage-daemon --locked
+cargo install gommage-mcp --locked
+```
+
+GitHub Releases remain the recommended end-user install path because they
+provide signed, checksum-verified, prebuilt binaries and install all three
+runtime binaries together. crates.io is for users who intentionally want Cargo
+to build from source.
 
 Publishing remains an explicit registry mutation. Locally,
 `scripts/publish-crates.sh --execute` is mapped to `pkg.cargo:publish` and
@@ -88,26 +103,16 @@ requires the same Gommage approval as `cargo publish`. In CI, crates.io publish
 is off unless the repository variable `GOMMAGE_CRATES_IO_PUBLISH=true` is set
 and the `CARGO_REGISTRY_TOKEN` secret is present.
 
-Current evidence:
-
-| Package | crates.io API | Local package gate |
-|---|---:|---|
-| `gommage-stdlib` | `404` | Passes `cargo package -p gommage-stdlib --allow-dirty`. |
-| `gommage-core` | `404` | Pending until `gommage-stdlib` exists on crates.io. |
-| `gommage-audit` | `404` | Pending until `gommage-core` exists on crates.io. |
-| `gommage-cli` | `404` | Pending until `gommage-audit` exists on crates.io. |
-| `gommage-daemon` | `404` | Pending until `gommage-audit` exists on crates.io. |
-| `gommage-mcp` | `404` | Pending until `gommage-audit` exists on crates.io. |
-
 Refresh the evidence with:
 
 ```sh
 sh scripts/check-crates-publish-readiness.sh
 ```
 
-The script treats `404` and `200` registry responses as valid status evidence.
-It fails only on unexpected registry errors, an unexpected `cargo package`
-failure, or a broken `gommage-stdlib` package gate.
+The script treats `200` registry responses as published and `404` responses as
+unpublished status evidence for future package names. It fails only on
+unexpected registry errors, an unexpected `cargo package` failure, or a broken
+`gommage-stdlib` package gate.
 
 Use the local publisher in check mode before any registry mutation:
 
@@ -287,8 +292,9 @@ The target state is:
 - GitHub Releases should expose the product stream only. Release automation may
   still bump and tag internal crates in the release PR, but non-CLI workspace
   components skip GitHub Release publication.
-- crates.io provides `cargo install gommage-cli` for Rust-native users after
-  first publication claims the package names.
+- crates.io provides `cargo install gommage-cli`, `cargo install
+  gommage-daemon`, and `cargo install gommage-mcp` for Rust-native users who
+  prefer source builds.
 - Release automation publishes crates only after the binary release, SBOM,
   Sigstore, and GitHub artifact attestation checks are green, and only when the
   explicit CI publish variable is enabled.

@@ -67,6 +67,13 @@ pub(crate) struct DaemonDryRunPlan {
     pub(crate) stop_commands: Vec<Vec<String>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DaemonReloadOutcome {
+    Reloaded(String),
+    Unavailable(String),
+    Failed(String),
+}
+
 pub(crate) fn cmd_daemon(sub: DaemonCmd, layout: HomeLayout) -> Result<ExitCode> {
     match sub {
         DaemonCmd::Install {
@@ -93,6 +100,23 @@ pub(crate) fn cmd_daemon(sub: DaemonCmd, layout: HomeLayout) -> Result<ExitCode>
 /// capability mappers from disk (the `{"op":"reload"}` IPC the daemon already
 /// serves). Exits non-zero with a clear message if no daemon is listening.
 fn daemon_reload(layout: &HomeLayout) -> Result<ExitCode> {
+    match request_daemon_reload(layout)? {
+        DaemonReloadOutcome::Reloaded(detail) => {
+            println!("ok daemon: {detail}");
+            Ok(ExitCode::SUCCESS)
+        }
+        DaemonReloadOutcome::Unavailable(message) => {
+            eprintln!("{message}");
+            Ok(ExitCode::from(1))
+        }
+        DaemonReloadOutcome::Failed(error) => {
+            eprintln!("daemon reload failed: {error}");
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
+pub(crate) fn request_daemon_reload(layout: &HomeLayout) -> Result<DaemonReloadOutcome> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
 
@@ -100,11 +124,10 @@ fn daemon_reload(layout: &HomeLayout) -> Result<ExitCode> {
     let mut stream = match UnixStream::connect(socket) {
         Ok(stream) => stream,
         Err(error) => {
-            eprintln!(
+            return Ok(DaemonReloadOutcome::Unavailable(format!(
                 "no daemon listening on {} ({error}). Is it running? `gommage daemon status`",
                 socket.display()
-            );
-            return Ok(ExitCode::from(1));
+            )));
         }
     };
     stream.write_all(b"{\"op\":\"reload\"}\n")?;
@@ -118,15 +141,13 @@ fn daemon_reload(layout: &HomeLayout) -> Result<ExitCode> {
             .get("result")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("policy reloaded");
-        println!("ok daemon: {detail}");
-        Ok(ExitCode::SUCCESS)
+        Ok(DaemonReloadOutcome::Reloaded(detail.to_string()))
     } else {
         let error = resp
             .get("error")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("daemon returned an error");
-        eprintln!("daemon reload failed: {error}");
-        Ok(ExitCode::from(1))
+        Ok(DaemonReloadOutcome::Failed(error.to_string()))
     }
 }
 

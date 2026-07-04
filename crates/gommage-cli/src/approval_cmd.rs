@@ -62,6 +62,26 @@ pub(crate) enum ApprovalCmd {
         #[arg(long)]
         json: bool,
     },
+    /// Deny pending approval requests older than a duration.
+    DenyStale {
+        /// Only include requests older than this duration (s, m, h, d).
+        #[arg(long, default_value = "24h", value_parser = parse_positive_duration_seconds)]
+        older_than: i64,
+        /// Apply the deny resolutions. Without this flag the command is a dry-run.
+        #[arg(long)]
+        apply: bool,
+        /// Maximum stale requests to process.
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(
+            long,
+            default_value = "stale approval request closed by operator sweep"
+        )]
+        reason: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// POST pending approval request payloads to a webhook URL.
     Webhook {
         #[arg(long, env = "GOMMAGE_APPROVAL_WEBHOOK_URL")]
@@ -312,6 +332,27 @@ struct ApprovalCallbackReport {
     outcome: Option<ApprovalActionReport>,
 }
 
+#[derive(Debug, Serialize)]
+struct ApprovalDenyStaleReport {
+    schema_version: u8,
+    kind: &'static str,
+    apply: bool,
+    older_than_seconds: i64,
+    matched: usize,
+    denied: usize,
+    requests: Vec<ApprovalDenyStaleItem>,
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalDenyStaleItem {
+    id: String,
+    status: &'static str,
+    created_at: String,
+    age_seconds: u64,
+    tool: String,
+    scope: String,
+}
+
 impl ApprovalCallbackReport {
     fn exit_code(&self) -> ExitCode {
         if matches!(
@@ -387,6 +428,13 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
             json,
         } => approval_approve(layout, &id, uses, ttl, &reason, json),
         ApprovalCmd::Deny { id, reason, json } => approval_deny(layout, &id, &reason, json),
+        ApprovalCmd::DenyStale {
+            older_than,
+            apply,
+            limit,
+            reason,
+            json,
+        } => approval_deny_stale(layout, older_than, apply, limit, &reason, json),
         ApprovalCmd::Webhook {
             url,
             provider,
@@ -727,6 +775,89 @@ fn approval_deny(layout: HomeLayout, id: &str, reason: &str, json: bool) -> Resu
     print_action(json, report)
 }
 
+fn approval_deny_stale(
+    layout: HomeLayout,
+    older_than: i64,
+    apply: bool,
+    limit: Option<usize>,
+    reason: &str,
+    json: bool,
+) -> Result<ExitCode> {
+    let store = ApprovalStore::open(&layout.approvals_log);
+    let now = OffsetDateTime::now_utc();
+    let mut stale = store
+        .pending()?
+        .into_iter()
+        .filter_map(|state| approval_age_seconds(&state, now).map(|age| (state, age)))
+        .filter(|(_, age)| *age >= older_than as u64)
+        .collect::<Vec<_>>();
+    stale.sort_by_key(|(state, _)| state.request.created_at);
+    if let Some(limit) = limit {
+        stale.truncate(limit);
+    }
+
+    let mut report = ApprovalDenyStaleReport {
+        schema_version: 1,
+        kind: "approval_deny_stale",
+        apply,
+        older_than_seconds: older_than,
+        matched: stale.len(),
+        denied: 0,
+        requests: Vec::with_capacity(stale.len()),
+    };
+
+    let mut audit = if apply && !stale.is_empty() {
+        layout.ensure()?;
+        Some(AuditWriter::open(&layout.audit_log, layout.load_key()?)?)
+    } else {
+        None
+    };
+
+    let deny_reason = if reason.trim().is_empty() {
+        "stale approval request closed by operator sweep"
+    } else {
+        reason
+    };
+
+    for (state, age_seconds) in stale {
+        let status = if apply {
+            let resolution =
+                store.resolve(&state.request.id, ApprovalStatus::Denied, deny_reason, None)?;
+            if let Some(writer) = audit.as_mut() {
+                writer.append_event(AuditEvent::ApprovalResolved {
+                    id: resolution.request_id.clone(),
+                    status: resolution.status.as_str().to_string(),
+                    reason: resolution.reason.clone(),
+                    picto_id: None,
+                })?;
+            }
+            report.denied += 1;
+            "denied"
+        } else {
+            "dry_run"
+        };
+        report.requests.push(ApprovalDenyStaleItem {
+            id: state.request.id,
+            status,
+            created_at: format_timestamp(state.request.created_at),
+            age_seconds,
+            tool: state.request.tool,
+            scope: state.request.required_scope,
+        });
+    }
+
+    print_deny_stale_report(json, &report)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn approval_age_seconds(state: &ApprovalState, now: OffsetDateTime) -> Option<u64> {
+    let duration = now - state.request.created_at;
+    if duration.is_negative() {
+        return None;
+    }
+    Some(duration.whole_seconds() as u64)
+}
+
 pub(crate) fn deny_request(
     layout: &HomeLayout,
     id: &str,
@@ -1011,6 +1142,39 @@ fn print_callback_report(json: bool, report: ApprovalCallbackReport) -> Result<E
     Ok(exit_code)
 }
 
+fn print_deny_stale_report(json: bool, report: &ApprovalDenyStaleReport) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+
+    let colors = color_enabled();
+    println!(
+        "{}",
+        paint("Stale approval sweep", UiTone::Teal, true, colors)
+    );
+    println!(
+        "mode:    {}",
+        if report.apply { "apply" } else { "dry-run" }
+    );
+    println!("older:  {} seconds", report.older_than_seconds);
+    println!("matched: {}", report.matched);
+    println!("denied:  {}", report.denied);
+    for request in &report.requests {
+        println!();
+        println!("{}", paint(&request.id, UiTone::Gold, true, colors));
+        println!("  status: {}", request.status);
+        println!("  age:    {} seconds", request.age_seconds);
+        println!("  tool:   {}", request.tool);
+        println!("  scope:  {}", request.scope);
+    }
+    if !report.apply && report.matched > 0 {
+        println!();
+        println!("next:    rerun with --apply to append denied resolutions");
+    }
+    Ok(())
+}
+
 fn print_action_human(report: &ApprovalActionReport) {
     let colors = color_enabled();
     let title = match report.status.as_str() {
@@ -1170,9 +1334,17 @@ fn signature_audit_summary(
 }
 
 fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
+    let seconds = parse_positive_duration_seconds(raw)?;
+    if !(1..=86_400).contains(&seconds) {
+        return Err("ttl must be between 1 second and 24 hours".to_string());
+    }
+    Ok(seconds)
+}
+
+fn parse_positive_duration_seconds(raw: &str) -> std::result::Result<i64, String> {
     let raw = raw.trim();
     if raw.is_empty() {
-        return Err("ttl cannot be empty".to_string());
+        return Err("duration cannot be empty".to_string());
     }
     let (number, multiplier) = match raw.chars().last().unwrap() {
         's' | 'S' => (&raw[..raw.len() - 1], 1),
@@ -1182,18 +1354,18 @@ fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
         c if c.is_ascii_digit() => (raw, 1),
         other => {
             return Err(format!(
-                "unsupported ttl suffix {other:?}; use s, m, h, or d"
+                "unsupported duration suffix {other:?}; use s, m, h, or d"
             ));
         }
     };
     let value: i64 = number
         .parse()
-        .map_err(|_| "ttl must start with a positive integer".to_string())?;
+        .map_err(|_| "duration must start with a positive integer".to_string())?;
     let seconds = value
         .checked_mul(multiplier)
-        .ok_or_else(|| "ttl is too large".to_string())?;
-    if !(1..=86_400).contains(&seconds) {
-        return Err("ttl must be between 1 second and 24 hours".to_string());
+        .ok_or_else(|| "duration is too large".to_string())?;
+    if seconds < 1 {
+        return Err("duration must be at least 1 second".to_string());
     }
     Ok(seconds)
 }

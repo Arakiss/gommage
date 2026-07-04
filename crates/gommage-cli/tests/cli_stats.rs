@@ -54,6 +54,8 @@ not json
     assert_eq!(report["hygiene"]["malformed_records"].as_u64(), Some(1));
     assert_eq!(report["hygiene"]["null_tool_records"].as_u64(), Some(1));
     assert_eq!(report["hygiene"]["null_decision_records"].as_u64(), Some(1));
+    assert_eq!(report["approvals"]["pending"].as_u64(), Some(0));
+    assert_eq!(report["approvals"]["stale_pending"].as_u64(), Some(0));
 
     let main_rule = report["asks_by_rule"]
         .as_array()
@@ -78,5 +80,20 @@ not json
     assert!(candidates.iter().any(|candidate| {
         candidate["rule"].as_str() == Some("gate-main-push")
             && candidate["kind"].as_str() == Some("candidate_allow")
+    }));
+
+    let watchlist = report["watchlist"].as_array().unwrap();
+    assert!(watchlist.iter().any(|item| {
+        item["kind"].as_str() == Some("audit_hygiene")
+            && item["severity"].as_str() == Some("action")
+    }));
+    assert!(watchlist.iter().any(|item| {
+        item["kind"].as_str() == Some("deny_loop") && item["severity"].as_str() == Some("review")
+    }));
+    assert!(watchlist.iter().any(|item| {
+        item["kind"].as_str() == Some("candidate_allow")
+            && item["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("gate-main-push"))
     }));
 }

@@ -365,16 +365,22 @@ curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
   | GOMMAGE_GITHUB_TOKEN="$(gh auth token)" sh
 
-# From source (today)
+# From crates.io for Rust-native source builds.
+cargo install gommage-cli --locked
+cargo install gommage-daemon --locked
+cargo install gommage-mcp --locked
+
+# From a checkout.
 cargo install --path crates/gommage-cli --force
 cargo install --path crates/gommage-daemon --force
 cargo install --path crates/gommage-mcp --force
 ```
 
-`cargo install gommage-cli` is supported only after the crates.io publish gate
-has passed and the `gommage-cli` package exists on crates.io. See
-[`docs/publishing.md`](docs/publishing.md) for the current publish status and
-release workflow.
+The GitHub Release installer remains the recommended end-user path because it
+installs all three binaries from signed, checksum-verified artifacts. The
+crates.io packages are published for Rust-native users who prefer source builds
+through `cargo install`; see [`docs/publishing.md`](docs/publishing.md) for the
+current package status and release workflow.
 
 ## Update And Upgrade
 
@@ -563,7 +569,7 @@ Stable automation contracts:
 | `repair agent <agent> --dry-run` | Inspect legacy/broken Gommage hook repair before mutating host config. |
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
 | `smoke --json` | Built-in semantic post-install checks. |
-| `stats --json` | Audit, approval, friction, and deny-loop telemetry from local logs. |
+| `stats --json` | Audit, approval, friction, deny-loop, and watchlist telemetry from local logs. |
 | `sandbox advise --json` | Advisory native sandbox bridge guidance for Codex, bwrap, macOS Seatbelt, and AppArmor. This is not enforcement. |
 | `policy test --json` | Project-owned policy regression fixtures. |
 | `policy layers --json` | Active policy layer order, per-layer rule counts, and effective policy version hash. |
@@ -583,6 +589,7 @@ Stable automation contracts:
 | `approval list --json` | Pending out-of-band approval requests. Use `--status all` for history. |
 | `approval show <id> --json` | One approval request, including scope, reason, rule, and input hash. |
 | `approval approve <id> --json` | Resolve a request and emit the minted exact-scope picto, TTL, uses, scope, and next action for agents. |
+| `approval deny-stale --older-than 24h --json` | Dry-run stale pending approval cleanup; add `--apply` to append denied resolutions. |
 | `approval replay <id> --json` | Compare a stored approval request against the current policy. |
 | `approval evidence <id> --redact` | Export request state, relevant signed audit lines, verification summary, and next commands. |
 | `approval dlq --json` | Inspect dead-lettered approval webhook deliveries after bounded retries are exhausted. |
@@ -678,6 +685,10 @@ gommage agent install codex
 # Compare this host's active policy posture against the bundled strict stdlib.
 gommage posture --json
 
+# Restore bundled strict policy files and remove known local allow layers.
+# This writes adjacent backups before deleting local relaxation files.
+gommage policy init --stdlib --force --remove-local-relaxations
+
 # Inspect live/nested agent sessions and default homes.
 gommage session doctor --json
 
@@ -710,6 +721,9 @@ gommage approval show <approval-id>
 gommage approval replay <approval-id>
 gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
+gommage approval deny <approval-id> --reason "not enough context"
+gommage approval deny-stale --older-than 24h --json
+gommage approval deny-stale --older-than 24h --apply --reason "stale request"
 
 # Or notify humans through generic, Slack, or Discord webhook payloads.
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run --json
@@ -972,7 +986,7 @@ GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooco
 - Optional legacy stdio MCP gateway mode in `gommage-mcp --gateway`, gating
   `tools/call` requests before forwarding allowed calls to an upstream server
 - Advisory sandbox bridge output through `gommage sandbox advise`
-- Packaged `gommage-stdlib` crate assets for future crates.io support
+- Published crates.io packages for Rust-native source installs
 - Sigstore-signed binary release artifacts, `gommage release verify`,
   CycloneDX SBOM generation, and GitHub artifact provenance attestations
 - Determinism-critical deps pinned with `=x.y.z`, root workspace internal pins auto-synchronized for release PRs, `cargo-deny` + `cargo-semver-checks` + conventional-commits in CI, release-please for automated versioning
@@ -981,7 +995,7 @@ GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooco
 - Dry-run quickstart planning, redacted support bundles, and a host E2E smoke
   matrix for beta-grade operator safety
 - Policy suggestions for the policy-authoring loop
-- crates.io publishing for Rust-native `cargo install gommage-cli`
+- Package-manager distribution beyond GitHub Releases and crates.io
 - Rego policies via `regorus`
 - Broader Codex coverage for incomplete shell interception and any future
   hook-exposed tool families once Gommage has payload captures, mapper

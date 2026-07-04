@@ -13,6 +13,10 @@ use std::{
 };
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 
+const HIGH_FRICTION_WINDOW_ASKS: usize = 10;
+const LARGE_PENDING_APPROVAL_BACKLOG: usize = 25;
+const STALE_PENDING_APPROVAL_HOURS: i64 = 24;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StatsOptions {
     pub(crate) json: bool,
@@ -32,6 +36,7 @@ struct StatsReport {
     asks_by_rule: Vec<RuleStats>,
     deny_loops: Vec<DenyLoop>,
     reclassification_candidates: Vec<ReclassificationCandidate>,
+    watchlist: Vec<WatchItem>,
     hygiene: HygieneReport,
 }
 
@@ -56,10 +61,13 @@ struct ApprovalTotals {
     pending: usize,
     approved: usize,
     denied: usize,
+    stale_pending: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     approval_rate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     avg_time_to_resolution_seconds: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oldest_pending_age_seconds: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
@@ -100,6 +108,15 @@ struct ReclassificationCandidate {
     file: String,
     kind: &'static str,
     reason: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WatchItem {
+    severity: &'static str,
+    kind: &'static str,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -165,7 +182,7 @@ fn build_stats_report(layout: &HomeLayout, window_days: u32) -> StatsReport {
         &mut deny_loops,
     );
 
-    let approvals = add_approval_stats(&layout.approvals_log, &mut rules);
+    let approvals = add_approval_stats(&layout.approvals_log, generated_at, &mut rules);
 
     let mut asks_by_rule = rules
         .into_values()
@@ -191,6 +208,14 @@ fn build_stats_report(layout: &HomeLayout, window_days: u32) -> StatsReport {
     });
 
     let reclassification_candidates = candidate_rules(&asks_by_rule);
+    let watchlist = build_watchlist(
+        &layout.audit_log.display().to_string(),
+        &totals,
+        &approvals,
+        &asks_by_rule,
+        &deny_loops,
+        &reclassification_candidates,
+    );
     let hygiene = HygieneReport {
         schema_versions,
         malformed_records: totals.malformed_records,
@@ -210,6 +235,7 @@ fn build_stats_report(layout: &HomeLayout, window_days: u32) -> StatsReport {
         asks_by_rule,
         deny_loops,
         reclassification_candidates,
+        watchlist,
         hygiene,
     }
 }
@@ -303,6 +329,7 @@ fn add_audit_stats(
 
 fn add_approval_stats(
     approvals_log: &Path,
+    now: OffsetDateTime,
     rules: &mut BTreeMap<String, RuleStatsBuilder>,
 ) -> ApprovalTotals {
     let mut totals = ApprovalTotals::default();
@@ -319,7 +346,19 @@ fn add_approval_stats(
     for state in states {
         totals.total += 1;
         match state.status {
-            ApprovalStatus::Pending => totals.pending += 1,
+            ApprovalStatus::Pending => {
+                totals.pending += 1;
+                if let Some(age_seconds) = pending_age_seconds(&state, now) {
+                    totals.oldest_pending_age_seconds = Some(
+                        totals
+                            .oldest_pending_age_seconds
+                            .map_or(age_seconds, |current| current.max(age_seconds)),
+                    );
+                    if age_seconds >= (STALE_PENDING_APPROVAL_HOURS * 60 * 60) as u64 {
+                        totals.stale_pending += 1;
+                    }
+                }
+            }
             ApprovalStatus::Approved => totals.approved += 1,
             ApprovalStatus::Denied => totals.denied += 1,
         }
@@ -344,6 +383,17 @@ fn add_approval_stats(
     totals.approval_rate = rate(totals.approved, resolved);
     totals.avg_time_to_resolution_seconds = average(resolution_seconds_total, resolution_count);
     totals
+}
+
+fn pending_age_seconds(state: &ApprovalState, now: OffsetDateTime) -> Option<u64> {
+    if state.status != ApprovalStatus::Pending {
+        return None;
+    }
+    let duration = now - state.request.created_at;
+    if duration.is_negative() {
+        return None;
+    }
+    Some(duration.whole_seconds() as u64)
 }
 
 fn count_deny_loop(
@@ -397,7 +447,7 @@ fn candidate_rules(rules: &[RuleStats]) -> Vec<ReclassificationCandidate> {
                     rule.approvals_approved
                 ),
             });
-        } else if rule.window_asks >= 10 {
+        } else if rule.window_asks >= HIGH_FRICTION_WINDOW_ASKS {
             candidates.push(ReclassificationCandidate {
                 rule: rule.rule.clone(),
                 file: rule.file.clone(),
@@ -422,6 +472,112 @@ fn candidate_rules(rules: &[RuleStats]) -> Vec<ReclassificationCandidate> {
     candidates
 }
 
+fn build_watchlist(
+    audit_log: &str,
+    totals: &AuditTotals,
+    approvals: &ApprovalTotals,
+    asks_by_rule: &[RuleStats],
+    deny_loops: &[DenyLoop],
+    reclassification_candidates: &[ReclassificationCandidate],
+) -> Vec<WatchItem> {
+    let mut items = Vec::new();
+
+    if totals.malformed_records > 0
+        || totals.null_tool_records > 0
+        || totals.null_decision_records > 0
+        || totals.unknown_decision_records > 0
+    {
+        items.push(WatchItem {
+            severity: "action",
+            kind: "audit_hygiene",
+            message: format!(
+                "audit log contains {} malformed, {} null-tool, {} null-decision, and {} unknown-decision record(s); verify the signed log before trusting derived metrics",
+                totals.malformed_records,
+                totals.null_tool_records,
+                totals.null_decision_records,
+                totals.unknown_decision_records
+            ),
+            command: Some("gommage audit-verify --explain".to_string()),
+        });
+    }
+
+    if approvals.stale_pending > 0 {
+        items.push(WatchItem {
+            severity: "review",
+            kind: "stale_approvals",
+            message: format!(
+                "{} pending approval request(s) are older than {} hours; stale asks should be denied or re-requested so current work is visible",
+                approvals.stale_pending, STALE_PENDING_APPROVAL_HOURS
+            ),
+            command: Some("gommage approval deny-stale --older-than 24h --json".to_string()),
+        });
+    } else if approvals.pending >= LARGE_PENDING_APPROVAL_BACKLOG {
+        items.push(WatchItem {
+            severity: "review",
+            kind: "approval_backlog",
+            message: format!(
+                "{} approval request(s) are pending; clear old requests so real current prompts do not get buried",
+                approvals.pending
+            ),
+            command: Some("gommage approval list --status all --json".to_string()),
+        });
+    }
+
+    if let Some(loop_stats) = deny_loops.iter().find(|loop_stats| loop_stats.hard_stop) {
+        items.push(WatchItem {
+            severity: "action",
+            kind: "hard_stop_loop",
+            message: format!(
+                "hard-stop loop detected for {} via {}; repeated hard-stops usually mean an agent is retrying an operation that cannot be approved",
+                loop_stats.tool, loop_stats.rule
+            ),
+            command: Some("gommage stats --json".to_string()),
+        });
+    } else if let Some(loop_stats) = deny_loops.first() {
+        items.push(WatchItem {
+            severity: "review",
+            kind: "deny_loop",
+            message: format!(
+                "repeated deny loop detected for {} via {}; inspect the command pattern or add safer workflow guidance",
+                loop_stats.tool, loop_stats.rule
+            ),
+            command: Some("gommage stats --json".to_string()),
+        });
+    }
+
+    for candidate in reclassification_candidates {
+        let severity = match candidate.kind {
+            "keep_or_tighten" => "review",
+            "high_friction_review" => "review",
+            "candidate_allow" => "review",
+            _ => "info",
+        };
+        let command = if candidate.kind == "candidate_allow" {
+            Some(format!("gommage policy suggest --audit {audit_log} --json"))
+        } else {
+            Some("gommage stats --json".to_string())
+        };
+        items.push(WatchItem {
+            severity,
+            kind: candidate.kind,
+            message: format!("{}: {}", candidate.rule, candidate.reason),
+            command,
+        });
+    }
+
+    if items.is_empty() && asks_by_rule.is_empty() && deny_loops.is_empty() {
+        items.push(WatchItem {
+            severity: "info",
+            kind: "quiet_window",
+            message: "no ask-picto friction or deny loops were observed in this reporting window"
+                .to_string(),
+            command: None,
+        });
+    }
+
+    items
+}
+
 fn print_human_report(report: &StatsReport) {
     println!("gommage stats ({})", report.generated_at);
     println!(
@@ -437,9 +593,10 @@ fn print_human_report(report: &StatsReport) {
         report.totals.allows, report.totals.asks, report.totals.denies, report.totals.hard_stops
     );
     println!(
-        "approvals: {} total, {} pending, {} approved, {} denied",
+        "approvals: {} total, {} pending ({} stale), {} approved, {} denied",
         report.approvals.total,
         report.approvals.pending,
+        report.approvals.stale_pending,
         report.approvals.approved,
         report.approvals.denied
     );
@@ -478,6 +635,18 @@ fn print_human_report(report: &StatsReport) {
                 "  {} [{}] {}",
                 candidate.rule, candidate.kind, candidate.reason
             );
+        }
+    }
+    if !report.watchlist.is_empty() {
+        println!("watchlist:");
+        for item in &report.watchlist {
+            match &item.command {
+                Some(command) => println!(
+                    "  {} {}: {} ({})",
+                    item.severity, item.kind, item.message, command
+                ),
+                None => println!("  {} {}: {}", item.severity, item.kind, item.message),
+            }
         }
     }
 }

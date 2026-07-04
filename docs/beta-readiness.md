@@ -28,7 +28,8 @@ Beta does not mean:
 - Production security certification.
 - Full sandboxing. Gommage remains a policy decision and audit layer.
 - Support for hosts that do not expose a reliable pre-authorisation hook.
-- crates.io publication unless the publish gates have passed.
+- treating crates.io source builds as a replacement for signed binary release
+  verification.
 
 ## Required evidence
 
@@ -94,8 +95,8 @@ These can remain open for beta if they are clearly documented:
   boundaries and must stay documented.
 - Cursor remains evaluation-only because its hook timing differs from Claude
   Code and Codex.
-- crates.io installation remains gated until first publication claims the
-  package names; GitHub Releases remain the supported binary install path.
+- crates.io source installs do not provide the signed, prebuilt all-binary
+  bundle; GitHub Releases remain the supported binary install path.
 - Signed remote approval callbacks and native ntfy sending can stay on the
   v1.x roadmap as long as the generic webhook payload, Slack/Discord payload
   shapes, local approval commands, and TUI approval confirmation are verified.

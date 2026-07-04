@@ -408,6 +408,105 @@ fn approval_deny_removes_request_from_pending_work() {
 }
 
 #[test]
+fn approval_deny_stale_is_dry_run_until_apply() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let approvals_log = home.join("approvals.jsonl");
+    let old = time::OffsetDateTime::now_utc() - time::Duration::hours(25);
+    let fresh = time::OffsetDateTime::now_utc() - time::Duration::minutes(5);
+    fs::write(
+        &approvals_log,
+        format!(
+            "{{\"type\":\"requested\",\"request\":{{\"id\":\"apr_old\",\"created_at\":\"{}\",\"tool\":\"Bash\",\"input_hash\":\"sha256:old\",\"required_scope\":\"git.push:main\",\"reason\":\"old request\",\"capabilities\":[],\"matched_rule\":null,\"policy_version\":\"sha256:p\"}}}}\n\
+{{\"type\":\"requested\",\"request\":{{\"id\":\"apr_fresh\",\"created_at\":\"{}\",\"tool\":\"Bash\",\"input_hash\":\"sha256:fresh\",\"required_scope\":\"pkg.cargo:install\",\"reason\":\"fresh request\",\"capabilities\":[],\"matched_rule\":null,\"policy_version\":\"sha256:p\"}}}}\n",
+            old.format(&time::format_description::well_known::Rfc3339)
+                .unwrap(),
+            fresh
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap()
+        ),
+    )
+    .unwrap();
+
+    let dry_run = gommage(&home)
+        .args(["approval", "deny-stale", "--older-than", "24h", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    let dry_run_report: serde_json::Value = serde_json::from_slice(&dry_run.stdout).unwrap();
+    assert_eq!(dry_run_report["matched"].as_u64(), Some(1));
+    assert_eq!(dry_run_report["denied"].as_u64(), Some(0));
+    assert_eq!(
+        dry_run_report["requests"][0]["id"].as_str(),
+        Some("apr_old")
+    );
+
+    let pending_after_dry_run = gommage(&home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    let pending: serde_json::Value = serde_json::from_slice(&pending_after_dry_run.stdout).unwrap();
+    assert_eq!(pending.as_array().unwrap().len(), 2);
+
+    let applied = gommage(&home)
+        .args([
+            "approval",
+            "deny-stale",
+            "--older-than",
+            "24h",
+            "--apply",
+            "--reason",
+            "test stale cleanup",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    let applied_report: serde_json::Value = serde_json::from_slice(&applied.stdout).unwrap();
+    assert_eq!(applied_report["matched"].as_u64(), Some(1));
+    assert_eq!(applied_report["denied"].as_u64(), Some(1));
+    assert_eq!(
+        applied_report["requests"][0]["status"].as_str(),
+        Some("denied")
+    );
+
+    let pending_after_apply = gommage(&home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    let pending: serde_json::Value = serde_json::from_slice(&pending_after_apply.stdout).unwrap();
+    assert_eq!(pending.as_array().unwrap().len(), 1);
+    assert_eq!(pending[0]["request"]["id"].as_str(), Some("apr_fresh"));
+
+    let all = gommage(&home)
+        .args(["approval", "list", "--status", "all", "--json"])
+        .output()
+        .unwrap();
+    let all: serde_json::Value = serde_json::from_slice(&all.stdout).unwrap();
+    let old = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|state| state["request"]["id"].as_str() == Some("apr_old"))
+        .unwrap();
+    assert_eq!(old["status"].as_str(), Some("denied"));
+    assert_eq!(
+        old["resolution"]["reason"].as_str(),
+        Some("test stale cleanup")
+    );
+}
+
+#[test]
 fn approval_list_defaults_to_pending_and_exposes_top_level_fields() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

@@ -79,6 +79,24 @@ default format is JSON for agent and CI automation. Use
 status, verified-entry count, key fingerprint, bypass counters,
 policy-version list, expedition list, and anomaly list.
 
+`gommage stats --json` is the session-log review surface. It aggregates signed
+audit records, approvals, ask-picto friction, repeated deny loops, and hygiene
+signals into counters plus an operator `watchlist`. Use it after long agent
+runs to decide whether a rule should stay gated, be narrowed, or get clearer
+workflow guidance. The watchlist is advisory: it must never feed policy
+decisions directly, and any policy change still goes through reviewed YAML,
+fixtures, and `gommage policy lint --strict`.
+
+When an operator wants to return a host to the bundled strict policy after
+local experiments, use
+`gommage policy init --stdlib --force --remove-local-relaxations`. The command
+reinstalls embedded stdlib files and removes known local relaxation layers only
+after writing adjacent `.gommage-bak-*` backups, then asks the running daemon to
+reload policy from disk. If no daemon is listening, it exits successfully and
+prints a warning so scripts can decide whether to start or reload the service.
+Direct edits under `~/.gommage/policy.d` remain harness-internal and may be
+blocked by policy.
+
 `gommage state` manages `~/.gommage/state.sqlite`, a rebuildable SQLite
 read-model for fast local operator queries. It is not a permission authority:
 `audit.log` remains the signed source of truth. Use:
@@ -203,6 +221,8 @@ gommage approval replay <approval-id> --json
 gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 gommage approval deny <approval-id> --reason "not enough context"
+gommage approval deny-stale --older-than 24h --json
+gommage approval deny-stale --older-than 24h --apply --reason "stale request"
 gommage approval dlq --json
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" --dry-run
 gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
@@ -219,6 +239,9 @@ gommage approval template --provider ntfy
 historical approved or denied requests. JSON list output keeps the nested
 `request` object and also exposes top-level `id`, `created_at`, `tool`, and
 `required_scope` fields for simple `jq` queries.
+`approval deny-stale --older-than 24h --json` reports old pending requests
+without mutating state; add `--apply` to append signed denied resolutions and
+clear the pending queue while preserving history.
 
 Approving a request mints an exact-scope picto and writes signed
 `picto_created` plus `approval_resolved` events. Human approval output is a

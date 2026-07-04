@@ -16,18 +16,24 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
+use time::OffsetDateTime;
 
 use crate::{
     audit_replay::{
         AuditDecisionLine, decision_summary as audit_decision_summary, read_audit_decisions,
     },
+    daemon::{DaemonReloadOutcome, request_daemon_reload},
     input::read_tool_call_from_stdin,
     policy_diff::{PolicyDiffOptions, cmd_policy_diff},
     smoke::{SmokeStatus, SmokeSummary},
-    util::path_display,
+    util::{path_display, write_text},
 };
 
 const POLICY_FIXTURE_SCHEMA: &str = include_str!("../schemas/policy-fixture.schema.json");
+const LOCAL_RELAXATION_POLICY_FILES: &[&str] = &[
+    "14-operator-allow-agent-tools.yaml",
+    "19-operator-main-push.yaml",
+];
 
 #[derive(Subcommand)]
 pub(crate) enum PolicyCmd {
@@ -37,6 +43,9 @@ pub(crate) enum PolicyCmd {
         stdlib: bool,
         #[arg(long)]
         force: bool,
+        /// Remove known local allow layers that relax stdlib friction gates.
+        #[arg(long)]
+        remove_local_relaxations: bool,
     },
     /// Parse and compile every policy file under policy.d/.
     Check,
@@ -1254,7 +1263,11 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
         .map(Expedition::policy_env)
         .unwrap_or_else(default_policy_env);
     match sub {
-        PolicyCmd::Init { stdlib, force } => {
+        PolicyCmd::Init {
+            stdlib,
+            force,
+            remove_local_relaxations,
+        } => {
             if !stdlib {
                 anyhow::bail!("policy init currently requires --stdlib");
             }
@@ -1263,6 +1276,11 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
                 "ok stdlib installed: {} policy files, {} capability files",
                 installed.0, installed.1
             );
+            if remove_local_relaxations {
+                let removed = remove_known_local_relaxations(&layout)?;
+                println!("ok local relaxation cleanup: {removed} file(s) removed");
+            }
+            print_daemon_reload_result(request_daemon_reload(&layout)?);
         }
         PolicyCmd::Check => {
             let pol = load_active_policy(&layout, expedition.as_ref(), &env)?;
@@ -1351,6 +1369,63 @@ pub(crate) fn install_stdlib(layout: &HomeLayout, force: bool) -> Result<(usize,
     Ok((policies, capabilities))
 }
 
+fn remove_known_local_relaxations(layout: &HomeLayout) -> Result<usize> {
+    let mut removed = 0usize;
+    for name in LOCAL_RELAXATION_POLICY_FILES {
+        let path = layout.policy_dir.join(name);
+        if !path.exists() {
+            continue;
+        }
+
+        let backup = policy_backup_path(&path);
+        std::fs::copy(&path, &backup).with_context(|| {
+            format!(
+                "backing up local relaxation {} to {}",
+                path.display(),
+                backup.display()
+            )
+        })?;
+        std::fs::remove_file(&path)
+            .with_context(|| format!("removing local relaxation {}", path.display()))?;
+        println!(
+            "ok removed local relaxation: {} -> {}",
+            path.display(),
+            backup.display()
+        );
+        removed += 1;
+    }
+    Ok(removed)
+}
+
+fn policy_backup_path(path: &Path) -> PathBuf {
+    let mut ts = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("policy.yaml");
+    loop {
+        let candidate = path.with_file_name(format!("{file_name}.gommage-bak-{ts}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        ts += 1;
+    }
+}
+
+fn print_daemon_reload_result(outcome: DaemonReloadOutcome) {
+    match outcome {
+        DaemonReloadOutcome::Reloaded(detail) => println!("ok daemon: {detail}"),
+        DaemonReloadOutcome::Unavailable(message) => {
+            println!("warn daemon reload skipped: {message}");
+        }
+        DaemonReloadOutcome::Failed(error) => {
+            println!(
+                "warn daemon reload failed: {error}; run `gommage daemon reload` after fixing it"
+            );
+        }
+    }
+}
+
 fn install_embedded_files(dir: &Path, files: &[StdlibFile], force: bool) -> Result<usize> {
     std::fs::create_dir_all(dir)?;
     let mut installed = 0usize;
@@ -1359,7 +1434,7 @@ fn install_embedded_files(dir: &Path, files: &[StdlibFile], force: bool) -> Resu
         if path.exists() && !force {
             continue;
         }
-        std::fs::write(path, file.contents)?;
+        write_text(&path, file.contents, false)?;
         installed += 1;
     }
     Ok(installed)

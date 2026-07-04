@@ -23,6 +23,18 @@
       "argv": ["policy", "init", "--stdlib"]
     },
     {
+      "id": "policy_init_strict_cleanup",
+      "purpose": "Restore bundled policy files and remove known local allow relaxation layers with backups.",
+      "stdin_mode": "none",
+      "argv": [
+        "policy",
+        "init",
+        "--stdlib",
+        "--force",
+        "--remove-local-relaxations"
+      ]
+    },
+    {
       "id": "hook_decision_json",
       "purpose": "Evaluate one PreToolUse hook payload through the canonical hook adapter.",
       "stdin_mode": "json",
@@ -211,7 +223,7 @@
     },
     {
       "id": "stats_json",
-      "purpose": "Aggregate audit, approval, friction, and deny-loop telemetry.",
+      "purpose": "Aggregate audit, approval, friction, deny-loop, and watchlist telemetry.",
       "stdin_mode": "none",
       "argv": ["stats", "--json"]
     },
@@ -315,6 +327,12 @@
       "purpose": "Inspect pending out-of-band approval requests.",
       "stdin_mode": "none",
       "argv": ["approval", "list", "--json"]
+    },
+    {
+      "id": "approval_deny_stale_dry_run_json",
+      "purpose": "Inspect stale pending approval requests without mutating approval state.",
+      "stdin_mode": "none",
+      "argv": ["approval", "deny-stale", "--older-than", "24h", "--json"]
     },
     {
       "id": "approval_dlq_json",

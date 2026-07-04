@@ -68,17 +68,17 @@
   match:
     any_capability:
       - "proc.exec:gommage quickstart*"
-      - "proc.exec:*/gommage quickstart*"
+      - "proc.exec:**/gommage quickstart*"
       - "proc.exec:gommage policy init --stdlib*"
-      - "proc.exec:*/gommage policy init --stdlib*"
+      - "proc.exec:**/gommage policy init --stdlib*"
       - "proc.exec:gommage agent install*"
-      - "proc.exec:*/gommage agent install*"
+      - "proc.exec:**/gommage agent install*"
       - "proc.exec:gommage daemon install*"
-      - "proc.exec:*/gommage daemon install*"
+      - "proc.exec:**/gommage daemon install*"
       - "proc.exec:gommage repair agent*"
-      - "proc.exec:*/gommage repair agent*"
+      - "proc.exec:**/gommage repair agent*"
       - "proc.exec:gommage upgrade*"
-      - "proc.exec:*/gommage upgrade*"
+      - "proc.exec:**/gommage upgrade*"
   reason: "reconfiguring Gommage hooks, policy, skills, or binaries requires an operator picto"
 
 - name: gate-gommage-disable
@@ -87,11 +87,11 @@
   match:
     any_capability:
       - "proc.exec:gommage daemon uninstall*"
-      - "proc.exec:*/gommage daemon uninstall*"
+      - "proc.exec:**/gommage daemon uninstall*"
       - "proc.exec:gommage agent uninstall*"
-      - "proc.exec:*/gommage agent uninstall*"
+      - "proc.exec:**/gommage agent uninstall*"
       - "proc.exec:gommage uninstall*"
-      - "proc.exec:*/gommage uninstall*"
+      - "proc.exec:**/gommage uninstall*"
       - "proc.exec:systemctl --user stop gommage-daemon.service*"
       - "proc.exec:systemctl --user disable --now gommage-daemon.service*"
       - "proc.exec:launchctl unload *dev.gommage.daemon*"

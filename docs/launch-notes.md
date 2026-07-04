@@ -76,7 +76,8 @@ sh scripts/verify-release.sh --tag <gommage-cli-vX.Y.Z-beta.1> --json --require-
   non-shell/non-MCP tools, or MCP servers that never emit a matched hook event.
 - Do not imply existing hooks are removed automatically.
 - Do not imply `state.sqlite` is a permission source.
-- Do not claim crates.io install support until the publish gate passes.
+- Do not present crates.io as the signed binary install path. It is a
+  Rust-native source-build path; GitHub Releases remain the signed binary path.
 
 ## Release Fields
 
