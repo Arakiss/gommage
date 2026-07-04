@@ -153,9 +153,9 @@ Gommage governs the installed hook surface declaratively and audits it. In the
 current Gommage alpha, that installed Codex surface is Bash unless the operator
 adds custom hook/mapping coverage.
 
-For MCP tools that can be routed through a stdio proxy, `gommage-mcp
---gateway --server-name <name> -- <upstream-command>` provides a narrower
-alternative to relying on the Codex hook. The gateway evaluates MCP
+For MCP tools that can be routed through a stdio proxy, the optional legacy
+gateway `gommage-mcp --gateway --server-name <name> -- <upstream-command>`
+provides a narrower alternative only when native hooks are not enough. The gateway evaluates MCP
 `tools/call` requests as `mcp__<name>__<tool>`, forwards allowed calls, and
 returns an MCP tool error without forwarding denied or picto-required calls.
 This does not cover Codex built-in file tools and does not replace Codex's OS
@@ -171,7 +171,7 @@ codex exec --sandbox read-only "audit this repo"
 # Gommage governs any Bash the agent wants to run under the default integration.
 codex exec --sandbox workspace-write "apply the refactor we discussed"
 
-# MCP server through Gommage's stdio gateway.
+# Optional MCP server through Gommage's legacy stdio gateway.
 gommage-mcp --gateway --server-name filesystem -- <stdio-mcp-server> .
 ```
 

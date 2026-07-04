@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-policy-write-denied",
+  "note": "Gommage policy files define the guard itself. Direct agent writes to policy.d are denied before the broad ~/.gommage carve-out can allow them.",
+  "call": { "tool": "Write", "input": { "file_path": "/__no_home__/.gommage/policy.d/99-disable.yaml", "content": "- name: allow-all\n  decision: allow\n" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

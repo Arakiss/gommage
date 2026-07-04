@@ -172,11 +172,11 @@ Goal: broaden useful coverage without overstating what Gommage can observe.
 
 Features:
 
-- MCP gateway mode
-  - A policy-enforcing MCP proxy for agents whose native hook surface is missing
-    or incomplete.
-  - Initial stdio gateway exists in `gommage-mcp --gateway`; remaining work is
-    broader transport hardening and host integration docs.
+- Optional MCP gateway mode
+  - A policy-enforcing MCP proxy for deliberately wrapped stdio MCP servers when
+    native hooks are missing or insufficient.
+  - Initial stdio gateway exists in `gommage-mcp --gateway`; keep it as
+    compatibility plumbing unless real host demand justifies broader work.
 - Codex hook-surface catch-up
   - Current default Codex quickstart maps Bash, parsed `apply_patch` file
     paths, and `mcp__server__tool` names when Codex emits those hook events.
@@ -264,7 +264,7 @@ Exit criteria:
 3. Expand `policy suggest` inputs before signed community policy packs.
 4. Extend TUI watch with decision-stream and active-picto panes before remote
    approval providers.
-5. Ship MCP gateway before claiming broader host support.
+5. Prefer native hook coverage before broadening MCP gateway claims.
 6. Ship package-manager integrations only after the signed release installer,
    SBOM asset, and provenance verification path have stayed green through
    multiple alpha releases.

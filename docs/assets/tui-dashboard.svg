@@ -62,7 +62,7 @@
     <text x="118" y="834" fill="#e2e8f0">- pending approvals: 0</text>
     <text x="118" y="866" fill="#e2e8f0">- socket exists: false</text>
     <text x="500" y="834" fill="#a7f3d0">gommage uninstall --all --dry-run</text>
-    <text x="500" y="866" fill="#a7f3d0">GOMMAGE_BYPASS=1 gommage-mcp &lt; hook.json</text>
+    <text x="500" y="866" fill="#a7f3d0">GOMMAGE_BYPASS=1 gommage hook --agent claude &lt; hook.json</text>
   </g>
 
   <rect x="58" y="879" width="1284" height="3" fill="#d6b45f"/>

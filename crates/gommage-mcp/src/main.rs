@@ -1,5 +1,7 @@
-//! gommage-mcp — thin adapter that bridges Claude Code's `PreToolUse` hook to
-//! the running Gommage daemon.
+//! gommage-mcp — legacy compatibility adapter and optional stdio MCP gateway.
+//!
+//! New agent hooks should call `gommage hook`. This binary remains for older
+//! hooks and for explicitly wrapped MCP gateway use.
 //!
 //! Reads a single hook JSON from stdin, forwards a `decide` op to the daemon,
 //! and prints the hook response JSON on stdout. If the daemon is not running,
@@ -75,12 +77,30 @@ async fn run_hook() -> Result<()> {
         return handle_bypass(&buf);
     }
 
-    let call = parse_hook_tool_call(&buf)?;
+    let call = match parse_hook_tool_call(&buf) {
+        Ok(call) => call,
+        Err(error) => {
+            write_hook_response("deny", &format!("gommage hook failed closed: {error:#}"))?;
+            return Ok(());
+        }
+    };
 
     let layout = HomeLayout::default();
-    layout.ensure()?;
+    if let Err(error) = layout.ensure().context("initializing Gommage home") {
+        write_hook_response("deny", &format!("gommage hook failed closed: {error:#}"))?;
+        return Ok(());
+    }
 
-    let eval = decide_call(&layout, &call).await?;
+    let eval = match decide_call(&layout, &call)
+        .await
+        .context("evaluating policy")
+    {
+        Ok(eval) => eval,
+        Err(error) => {
+            write_hook_response("deny", &format!("gommage hook failed closed: {error:#}"))?;
+            return Ok(());
+        }
+    };
 
     let (decision_str, reason) = match &eval.decision {
         Decision::Allow => ("allow", "gommage allowed".to_string()),
@@ -422,7 +442,7 @@ fn handle_bypass(buf: &str) -> Result<()> {
 /// Map a tool call to capabilities using the compiled-in stdlib mappers for the
 /// bypass path. Falls back to a bare `proc.exec:<command>` for a Bash call if
 /// the bundled mappers fail to compile, so a compiled hard-stop on the raw
-/// command is still surfaced. Kept here (and mirrored in the `gommage mcp` CLI
+/// command is still surfaced. Kept here (and mirrored in the `gommage hook` CLI
 /// adapter) rather than in `gommage-stdlib` so the crate graph stays acyclic.
 fn bypass_capabilities(call: &ToolCall) -> Vec<Capability> {
     let yaml = gommage_stdlib::CAPABILITIES
@@ -460,7 +480,7 @@ fn write_hook_response(decision: &str, reason: &str) -> Result<()> {
 
 fn print_help() {
     println!(
-        "gommage-mcp {}\n\nUSAGE:\n    gommage-mcp < hook.json\n    gommage-mcp --gateway [--server-name NAME] -- <upstream-command> [args...]\n\nReads one Claude Code PreToolUse hook payload from stdin and writes one permission response JSON object to stdout. Gateway mode proxies line-delimited MCP JSON-RPC over stdio, gates tools/call requests through Gommage, and returns MCP tool errors for denied calls without forwarding them upstream.\n\nOPTIONS:\n    --gateway             Run stdio MCP gateway mode\n    --server-name NAME    Server segment used for mcp__NAME__tool capability mapping\n    -h, --help            Print help\n    -V, --version         Print version",
+        "gommage-mcp {}\n\nUSAGE:\n    gommage-mcp < hook.json\n    gommage-mcp --gateway [--server-name NAME] -- <upstream-command> [args...]\n\nLegacy compatibility adapter for older PreToolUse hooks. New hooks should call `gommage hook`. Gateway mode proxies line-delimited MCP JSON-RPC over stdio, gates tools/call requests through Gommage, and returns MCP tool errors for denied calls without forwarding them upstream.\n\nOPTIONS:\n    --gateway             Run stdio MCP gateway mode\n    --server-name NAME    Server segment used for mcp__NAME__tool capability mapping\n    -h, --help            Print help\n    -V, --version         Print version",
         env!("CARGO_PKG_VERSION")
     );
 }

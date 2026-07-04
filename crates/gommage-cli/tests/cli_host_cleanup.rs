@@ -405,7 +405,7 @@ fn repair_agent_claude_replaces_legacy_gommage_hook() {
     assert!(
         serde_json::to_string(pre_tool_use)
             .unwrap()
-            .contains("gommage-mcp")
+            .contains("gommage hook --agent claude")
     );
     assert!(
         !serde_json::to_string(pre_tool_use)
@@ -524,7 +524,7 @@ fn repair_agent_codex_preserves_nested_hooks_object() {
     assert!(pre_tool_use.iter().any(|entry| {
         entry.get("matcher").and_then(|value| value.as_str())
             == Some("^Bash$|^apply_patch$|^mcp__.*$")
-            && hook_group_contains_command(entry, "gommage-mcp")
+            && hook_group_contains_command(entry, "gommage hook --agent codex")
     }));
 }
 
@@ -786,7 +786,8 @@ fn agent_install_codex_writes_hook_and_enables_feature_flag() {
                 .and_then(|v| v.as_array())
                 .unwrap()
                 .iter()
-                .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp")))
+                .any(|hook| hook.get("command").and_then(|v| v.as_str())
+                    == Some("gommage hook --agent codex")))
     );
     let config = fs::read_to_string(config).unwrap();
     assert!(config.contains("hooks = true"));
@@ -969,7 +970,7 @@ fn agent_status_warns_when_codex_hook_misses_mcp_surface() {
 }
 
 #[test]
-fn agent_status_codex_accepts_nested_hooks_object() {
+fn agent_status_codex_warns_on_nested_legacy_wrapper_hook() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     let hooks = temp.path().join("codex").join("hooks.json");
@@ -1001,7 +1002,7 @@ fn agent_status_codex_accepts_nested_hooks_object() {
     let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
         report.get("status").and_then(|value| value.as_str()),
-        Some("ok")
+        Some("warn")
     );
     assert_eq!(
         doctor_check(&report, "pre_tool_use")
@@ -1014,6 +1015,12 @@ fn agent_status_codex_accepts_nested_hooks_object() {
             .get("status")
             .and_then(|value| value.as_str()),
         Some("ok")
+    );
+    assert_eq!(
+        doctor_check(&report, "legacy_hooks")
+            .get("status")
+            .and_then(|value| value.as_str()),
+        Some("warn")
     );
 }
 
@@ -1076,11 +1083,11 @@ fn agent_install_codex_preserves_unrelated_hooks_by_default() {
     assert!(
         pre_tool_use
             .iter()
-            .any(|entry| hook_group_contains_command(entry, "gommage-mcp"))
+            .any(|entry| hook_group_contains_command(entry, "gommage hook --agent codex"))
     );
     assert!(pre_tool_use.iter().any(|entry| {
         entry.get("matcher").and_then(|v| v.as_str()) == Some("^Bash$|^apply_patch$|^mcp__.*$")
-            && hook_group_contains_command(entry, "gommage-mcp")
+            && hook_group_contains_command(entry, "gommage hook --agent codex")
     }));
     assert!(
         !pre_tool_use

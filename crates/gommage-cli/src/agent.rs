@@ -11,6 +11,8 @@ use serde::Serialize;
 use std::{path::Path, process::ExitCode};
 
 pub(crate) const CODEX_GOMMAGE_MATCHER: &str = "^Bash$|^apply_patch$|^mcp__.*$";
+pub(crate) const CLAUDE_GOMMAGE_HOOK_COMMAND: &str = "gommage hook --agent claude";
+pub(crate) const CODEX_GOMMAGE_HOOK_COMMAND: &str = "gommage hook --agent codex";
 
 pub(crate) fn codex_pre_tool_use_path(root: &serde_json::Value) -> &'static [&'static str] {
     if root.pointer("/hooks/PreToolUse").is_some() {
@@ -269,7 +271,7 @@ fn install_claude(
         "hooks": [
             {
                 "type": "command",
-                "command": "gommage-mcp",
+                "command": CLAUDE_GOMMAGE_HOOK_COMMAND,
                 "timeout": 10
             }
         ]
@@ -302,7 +304,7 @@ fn install_codex(
         "hooks": [
             {
                 "type": "command",
-                "command": "gommage-mcp"
+                "command": CODEX_GOMMAGE_HOOK_COMMAND
             }
         ]
     });

@@ -508,3 +508,10 @@
     command: "(?:^|[;&|]|\\bsudo\\b|\\benv\\b)\\s*(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*(?:LD_PRELOAD|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH)="
   emit:
     - "proc.env.inject:preload"
+
+- name: bash-env-gommage-bypass
+  tool: Bash
+  match_input:
+    command: "(?:^|[;&|]|\\bsudo\\b|\\benv\\b|\\bexport\\b)\\s*(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)*GOMMAGE_BYPASS="
+  emit:
+    - "proc.env.gommage_bypass"

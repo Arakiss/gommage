@@ -4,7 +4,7 @@
 
 ```
 ┌──────────┐   JSON over stdio   ┌────────────────┐   line-JSON over Unix   ┌──────────────┐
-│  Agent   │ ──────────────────► │  gommage-mcp   │ ──────────────────────► │ gommage-     │
+│  Agent   │ ──────────────────► │ gommage hook   │ ──────────────────────► │ gommage-     │
 │ (Claude  │                     │    adapter     │                         │  daemon      │
 │  Code)   │ ◄────────────────── │                │ ◄────────────────────── │              │
 └──────────┘                     └────────────────┘                         └──────┬───────┘
@@ -48,7 +48,7 @@ safe to delete, and no permission decision reads from it.
 └──────────────┬───────────────┘
                ▼
 ┌──────────────────────────────┐
-│ 2. gommage-mcp (hook)        │
+│ 2. gommage hook --agent ...  │
 │   reads hook JSON            │
 │   connects to daemon socket  │
 │   sends { op: "decide", ... }│
@@ -137,11 +137,13 @@ Policy evaluation is still first-match-wins after compiled hard-stops, so
 earlier layers have higher precedence. Use `gommage policy layers --json` to
 inspect the layer order and effective hash on a host.
 
-## MCP gateway path
+## Optional MCP gateway path
 
 `gommage-mcp --gateway --server-name <name> -- <upstream-command>` is a stdio
-MCP proxy path for hosts whose native hook surface does not expose all tool
-calls. The gateway maps an MCP `tools/call` request to a Gommage tool name of
+MCP proxy path for hosts whose native hook surface does not expose a needed
+stdio MCP server. It is not the default agent-hook path; new hooks use
+`gommage hook --agent claude` or `gommage hook --agent codex`. The gateway maps
+an MCP `tools/call` request to a Gommage tool name of
 `mcp__<name>__<tool>`, evaluates it, and only forwards the original JSON-RPC
 line to the upstream server when the decision resolves to allow. Denied and
 picto-required calls return MCP tool results with `isError: true`; they are not

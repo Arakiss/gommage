@@ -1,0 +1,99 @@
+# Harness integrity policy.
+#
+# This file loads before the agent posture carve-outs in 06-agent-config-writable.
+# It keeps normal agent sessions from editing or disabling the decision harness
+# itself. Deliberate recovery still exists, but it must go through a signed picto
+# or direct operator action instead of silently falling through to catch-all allow.
+
+- name: deny-gommage-bypass-env
+  decision: gommage
+  match:
+    any_capability:
+      - "proc.env.gommage_bypass"
+  reason: "GOMMAGE_BYPASS changes the hook trust boundary; only the operator may set it"
+
+- name: deny-agent-hook-config-tamper
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write:${HOME}/.codex/hooks.json"
+      - "fs.write:${HOME}/.codex/config.toml"
+      - "fs.write:${HOME}/.codex/hooks/**"
+      - "fs.write:${HOME}/.claude/settings.json"
+      - "fs.write:${HOME}/.claude/settings.local.json"
+      - "fs.write:${HOME}/.claude/hooks/**"
+  reason: "agent hook and sandbox configuration are part of the harness, not normal repo work"
+
+- name: deny-gommage-home-tamper
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write:${HOME}/.gommage/policy.d/**"
+      - "fs.write:${HOME}/.gommage/capabilities.d/**"
+      - "fs.write:${HOME}/.gommage/key.ed25519"
+      - "fs.write:${HOME}/.gommage/audit.log"
+      - "fs.write:${HOME}/.gommage/pictos.sqlite"
+      - "fs.write:${HOME}/.gommage/approvals.sqlite"
+      - "fs.write:${HOME}/.gommage/state.sqlite"
+  reason: "Gommage policy, keys, grants, approvals, audit, and state are harness internals"
+
+- name: deny-gommage-binary-tamper
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write:${HOME}/.local/bin/gommage"
+      - "fs.write:${HOME}/.local/bin/gommage-daemon"
+      - "fs.write:${HOME}/.local/bin/gommage-mcp"
+      - "fs.write:/usr/local/bin/gommage"
+      - "fs.write:/usr/local/bin/gommage-daemon"
+      - "fs.write:/usr/local/bin/gommage-mcp"
+      - "fs.write:/opt/homebrew/bin/gommage"
+      - "fs.write:/opt/homebrew/bin/gommage-daemon"
+      - "fs.write:/opt/homebrew/bin/gommage-mcp"
+  reason: "Gommage binaries are part of the decision path; do not rewrite them from an agent session"
+
+- name: deny-gommage-service-tamper
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.write:${HOME}/Library/LaunchAgents/dev.gommage.daemon.plist"
+      - "fs.write:${HOME}/.config/systemd/user/gommage-daemon.service"
+      - "fs.write:/Library/LaunchDaemons/dev.gommage.daemon.plist"
+      - "fs.write:/etc/systemd/system/gommage-daemon.service"
+  reason: "Gommage service definitions control whether the harness is reachable"
+
+- name: gate-gommage-reconfigure
+  decision: ask_picto
+  required_scope: "gommage.reconfigure"
+  match:
+    any_capability:
+      - "proc.exec:gommage quickstart*"
+      - "proc.exec:*/gommage quickstart*"
+      - "proc.exec:gommage policy init --stdlib*"
+      - "proc.exec:*/gommage policy init --stdlib*"
+      - "proc.exec:gommage agent install*"
+      - "proc.exec:*/gommage agent install*"
+      - "proc.exec:gommage daemon install*"
+      - "proc.exec:*/gommage daemon install*"
+      - "proc.exec:gommage repair agent*"
+      - "proc.exec:*/gommage repair agent*"
+      - "proc.exec:gommage upgrade*"
+      - "proc.exec:*/gommage upgrade*"
+  reason: "reconfiguring Gommage hooks, policy, skills, or binaries requires an operator picto"
+
+- name: gate-gommage-disable
+  decision: ask_picto
+  required_scope: "gommage.disable"
+  match:
+    any_capability:
+      - "proc.exec:gommage daemon uninstall*"
+      - "proc.exec:*/gommage daemon uninstall*"
+      - "proc.exec:gommage agent uninstall*"
+      - "proc.exec:*/gommage agent uninstall*"
+      - "proc.exec:gommage uninstall*"
+      - "proc.exec:*/gommage uninstall*"
+      - "proc.exec:systemctl --user stop gommage-daemon.service*"
+      - "proc.exec:systemctl --user disable --now gommage-daemon.service*"
+      - "proc.exec:launchctl unload *dev.gommage.daemon*"
+      - "proc.exec:launchctl bootout *dev.gommage.daemon*"
+  reason: "disabling or removing Gommage requires a signed operator picto"

@@ -4,6 +4,8 @@ use std::fs;
 use support::gommage;
 use tempfile::tempdir;
 
+use gommage_stdlib::POLICIES;
+
 #[test]
 fn report_bundle_writes_redacted_support_json() {
     let temp = tempdir().unwrap();
@@ -104,7 +106,7 @@ fn report_bundle_writes_redacted_support_json() {
             .and_then(|v| v.as_array())
             .unwrap()
             .len(),
-        10
+        POLICIES.len()
     );
     assert!(
         report

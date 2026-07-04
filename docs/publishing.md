@@ -19,8 +19,9 @@ can additionally check the CycloneDX SBOM and GitHub artifact attestation with
 `gommage release verify` or `scripts/verify-release.sh`.
 
 This is binary installation only. It does not register a universal MCP gateway
-with Claude Code, Codex, or any other host. Agent hooks call `gommage-mcp` after
-`quickstart`, and gateway mode is opt-in per stdio MCP server through
+with Claude Code, Codex, or any other host. New `quickstart` integrations call
+the CLI hook adapter, `gommage hook --agent <host>`. The `gommage-mcp` binary
+remains for compatibility and opt-in stdio gateway use through
 `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
 
 Treat `gommage-cli-v*` as the product release tag stream. The public GitHub

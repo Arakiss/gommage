@@ -2,8 +2,11 @@
 
 Codex CLI's `PreToolUse` hook schema is near-identical to Claude Code's: same
 `permissionDecision` / `permissionDecisionReason` contract, slightly different
-config location. The existing `gommage-mcp` binary is schema-compatible with
-both — Codex just points its hook at it.
+config location. The canonical Codex hook adapter is
+`gommage hook --agent codex`, which converts picto-required `ask` decisions to
+denials because Codex does not support interactive hook approval yet. The
+existing `gommage-mcp` binary remains schema-compatible for older hooks and
+optional gateway use, but new Codex installs point at the CLI adapter.
 
 > **Current Gommage beta scope caveat**:
 > `quickstart --agent codex` installs a matcher for Bash, `apply_patch`, and
@@ -38,8 +41,8 @@ starting Codex.
 
 ## 2. Install the daemon service (recommended for long sessions)
 
-The `gommage-mcp` adapter falls back to in-process evaluation when the
-daemon socket isn't available, and that fallback still writes signed audit
+The `gommage hook --agent codex` adapter falls back to in-process evaluation
+when the daemon socket isn't available, and that fallback still writes signed audit
 entries. Running the daemon is recommended for longer sessions because it keeps
 policy + mapper rules pre-compiled in memory and centralizes reload/audit
 behavior:

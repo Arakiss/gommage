@@ -329,8 +329,11 @@ snapshot.
 Install the binaries first. Add `--with-skill` when you want the installer to
 also install the Gommage agent skill for Codex, Claude Code, or both.
 Installing the `gommage-mcp` binary does not automatically register an MCP
-gateway for every MCP server on the host; `quickstart` wires supported agent
-hooks to `gommage-mcp`, and explicit MCP proxying still uses
+gateway for every MCP server on the host. New `quickstart` installs supported
+agent hooks through the primary CLI command, `gommage hook --agent <host>`, so
+Claude can keep `ask` decisions while Codex turns picto-required calls into
+explicit denials. The MCP gateway is an optional compatibility bridge for a
+deliberately wrapped stdio server:
 `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
 
 ```sh
@@ -932,7 +935,7 @@ GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooco
 - Capability mapping inspector for policy-authoring and mapper-debugging loops
 - Deterministic policy layering for explicit org policy, project-local policy,
   and user policy, inspectable with `gommage policy layers --json`
-- Initial stdio MCP gateway mode in `gommage-mcp --gateway`, gating
+- Optional legacy stdio MCP gateway mode in `gommage-mcp --gateway`, gating
   `tools/call` requests before forwarding allowed calls to an upstream server
 - Advisory sandbox bridge output through `gommage sandbox advise`
 - Packaged `gommage-stdlib` crate assets for future crates.io support
@@ -950,7 +953,8 @@ GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooco
   hook-exposed tool families once Gommage has payload captures, mapper
   fixtures, and host-smoke evidence
 - Cursor integration (Cursor has hooks but they run _after_ the native permission layer — needs a different wiring path; evaluated for v1.0)
-- Broader MCP gateway hardening for agents without a PreToolUse concept
+- Broader MCP gateway hardening only if there is real demand from agents
+  without a usable PreToolUse-style hook
 - Community policy packs in `gommage-policies/`
 - Native ntfy approval provider and richer editable approval forms on top of
   the generic webhook payload

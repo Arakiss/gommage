@@ -5,9 +5,9 @@ use std::{path::Path, process::ExitCode};
 
 use crate::{
     agent::{
-        AgentKind, CODEX_GOMMAGE_MATCHER, claude_gommage_matcher, native_permission_rules,
-        translate_claude_native_rules, translate_claude_permission_allow,
-        translate_claude_permission_deny,
+        AgentKind, CLAUDE_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_MATCHER,
+        claude_gommage_matcher, native_permission_rules, translate_claude_native_rules,
+        translate_claude_permission_allow, translate_claude_permission_deny,
     },
     codex_config::codex_hooks_feature_state,
     util::{env_path_or_home, path_details, path_display, read_json_object, read_toml_document},
@@ -159,7 +159,7 @@ fn build_claude_status_report(layout: &HomeLayout) -> AgentStatusReport {
         report.push(
             "pre_tool_use",
             AgentStatus::Fail,
-            "no Claude PreToolUse hook invoking gommage-mcp",
+            "no Claude PreToolUse hook invoking the Gommage hook adapter",
             Some(serde_json::json!({
                 "path": path_display(&settings_path),
                 "pointer": "/hooks/PreToolUse",
@@ -239,7 +239,7 @@ fn build_codex_status_report() -> AgentStatusReport {
         report.push(
             "pre_tool_use",
             AgentStatus::Fail,
-            "no Codex PreToolUse hook invoking gommage-mcp",
+            "no Codex PreToolUse hook invoking the Gommage hook adapter",
             Some(serde_json::json!({
                 "path": path_display(&hooks_path),
                 "pointer": pre_tool_use_pointer,
@@ -434,7 +434,7 @@ fn push_claude_import_status(
 fn gommage_hook_matchers(root: &serde_json::Value, pointer: &str) -> Vec<String> {
     gommage_hook_entries(root, pointer)
         .into_iter()
-        .filter(|entry| entry.command.to_ascii_lowercase().contains("gommage-mcp"))
+        .filter(|entry| is_gommage_hook_command(&entry.command))
         .map(|entry| entry.matcher)
         .collect()
 }
@@ -455,7 +455,8 @@ fn push_hook_hygiene_report(
     let entries = gommage_hook_entries(root, pointer);
     let legacy = entries
         .iter()
-        .filter(|entry| !entry.command.to_ascii_lowercase().contains("gommage-mcp"))
+        .filter(|entry| is_gommage_hook_command(&entry.command))
+        .filter(|entry| !is_canonical_hook_command(&entry.command, agent))
         .map(hook_entry_json)
         .collect::<Vec<_>>();
     if !legacy.is_empty() {
@@ -463,8 +464,9 @@ fn push_hook_hygiene_report(
             "legacy_hooks",
             AgentStatus::Warn,
             format!(
-                "legacy Gommage hook command(s) found; run `gommage repair agent {} --dry-run`",
-                agent.as_str()
+                "legacy Gommage hook command(s) found; new installs use `{}`; run `gommage repair agent {} --dry-run`",
+                canonical_hook_command(agent),
+                agent.as_str(),
             ),
             Some(serde_json::json!({
                 "path": path_display(path),
@@ -599,6 +601,56 @@ fn first_gommage_command(entry: &serde_json::Value) -> Option<String> {
         .filter_map(|hook| hook.get("command").and_then(|command| command.as_str()))
         .find(|command| command.to_ascii_lowercase().contains("gommage"))
         .map(str::to_string)
+}
+
+fn is_gommage_hook_command(command: &str) -> bool {
+    let command = command.to_ascii_lowercase();
+    command.contains("gommage-mcp")
+        || command_contains_gommage_subcommand(&command, "hook")
+        || command_contains_gommage_subcommand(&command, "mcp")
+}
+
+fn is_canonical_hook_command(command: &str, agent: AgentKind) -> bool {
+    let command = command.to_ascii_lowercase();
+    command_contains_gommage_subcommand(&command, "hook")
+        && command_has_agent_arg(&command, agent.as_str())
+}
+
+fn canonical_hook_command(agent: AgentKind) -> &'static str {
+    match agent {
+        AgentKind::Claude => CLAUDE_GOMMAGE_HOOK_COMMAND,
+        AgentKind::Codex => CODEX_GOMMAGE_HOOK_COMMAND,
+    }
+}
+
+fn command_contains_gommage_subcommand(command: &str, subcommand: &str) -> bool {
+    command_tokens(command).windows(2).any(|pair| {
+        let Some(binary) = pair.first() else {
+            return false;
+        };
+        let Some(arg) = pair.get(1) else {
+            return false;
+        };
+        binary.ends_with("gommage") && *arg == subcommand
+    })
+}
+
+fn command_has_agent_arg(command: &str, agent: &str) -> bool {
+    let agent_equals = format!("--agent={agent}");
+    let tokens = command_tokens(command);
+    tokens
+        .windows(2)
+        .any(|pair| pair.first() == Some(&"--agent") && pair.get(1) == Some(&agent))
+        || tokens.contains(&agent_equals.as_str())
+}
+
+fn command_tokens(command: &str) -> Vec<&str> {
+    command
+        .split(|ch: char| {
+            ch.is_whitespace() || matches!(ch, '"' | '\'' | ';' | '&' | '|' | '(' | ')')
+        })
+        .filter(|token| !token.is_empty())
+        .collect()
 }
 
 fn matcher_is_global(matcher: &str) -> bool {

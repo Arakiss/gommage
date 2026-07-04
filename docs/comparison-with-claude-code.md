@@ -23,7 +23,7 @@ Claude Code embeds:
 Claude Code's native classifier runs BEFORE the `PreToolUse` hook. That means:
 
 - If the classifier is going to block a call, it blocks before Gommage sees it. The classifier is still authoritative for whatever it decides to flag.
-- If the classifier allows the call, it goes to the `PreToolUse` hook. That is where `gommage-mcp` steps in and applies your declarative policy.
+- If the classifier allows the call, it goes to the `PreToolUse` hook. That is where `gommage hook --agent claude` steps in and applies your declarative policy.
 
 **The two layers stack.** If you find that the classifier is over-blocking, you cannot fix that from Gommage — that is in-binary behavior. But you can make the rest of your policy reproducible and debuggable, which is often the bigger win.
 

@@ -60,7 +60,7 @@ use harness::{HarnessCmd, cmd_harness};
 use input::{evaluate_only, read_tool_call_from_stdin};
 use map::cmd_map;
 use mascot::{MascotOptions, print_mascot};
-use mcp::run_mcp;
+use mcp::{HookAgent, run_hook, run_mcp};
 use policy_cmd::{PolicyCmd, cmd_policy};
 use quickstart::{QuickstartOptions, cmd_quickstart};
 use release::{ReleaseCmd, cmd_release};
@@ -381,7 +381,15 @@ enum Cmd {
         compact: bool,
     },
 
-    /// Run the MCP / PreToolUse hook adapter (stdin → decision JSON on stdout).
+    /// Run the PreToolUse hook adapter (stdin → decision JSON on stdout).
+    Hook {
+        /// Host-specific response semantics.
+        #[arg(long, value_enum, default_value_t = HookAgent::Auto)]
+        agent: HookAgent,
+    },
+
+    /// Run the legacy MCP-named PreToolUse hook adapter.
+    #[command(hide = true)]
     Mcp,
 
     /// Install, uninstall, or inspect the user-level daemon service.
@@ -667,6 +675,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Mascot { plain, compact } => {
             print_mascot(MascotOptions { plain, compact });
         }
+        Cmd::Hook { agent } => return run_hook(layout, agent),
         Cmd::Mcp => return run_mcp(layout),
         Cmd::Daemon(sub) => return cmd_daemon(sub, layout),
     }

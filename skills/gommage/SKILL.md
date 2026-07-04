@@ -179,7 +179,8 @@ crates.io becomes a supported install path.
   Prefer a shared `GOMMAGE_HOME` or deliberate org/project policy layer, then
   run both `gommage agent status claude --json` and
   `gommage agent status codex --json` before the handoff.
-- MCP gateway: use `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>` only for stdio MCP servers you intentionally proxy. Allowed `tools/call` requests are forwarded; denied or picto-required calls return MCP tool errors and are not sent upstream.
+- Hook adapter: new quickstart installs call `gommage hook --agent claude` or `gommage hook --agent codex`; older `gommage-mcp`, `gommage mcp`, and unqualified `gommage hook` commands are compatibility surfaces.
+- MCP gateway: use `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>` only for stdio MCP servers you intentionally proxy. This is optional compatibility plumbing, not the canonical Gommage operation path. Allowed `tools/call` requests are forwarded; denied or picto-required calls return MCP tool errors and are not sent upstream.
 - Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
 - Quickstart self-test: the readiness gate runs by default. `--self-test` remains accepted for scripts; `--no-self-test` is the manual escape hatch.
 - Backups: Gommage writes `.gommage-bak-<timestamp>` backups before replacing agent configs, generated policy imports, daemon service files, installed binaries, or installed skill files when content changes. Unchanged files are not backed up.
@@ -245,9 +246,9 @@ Current beta distribution:
   and stream fallback. Rebuild with `gommage state rebuild`; verify with
   `gommage state verify --json`. The signed `audit.log` remains authoritative.
 - Installing the `gommage-mcp` binary does not auto-register a universal MCP
-  gateway. Agent hooks invoke it after `quickstart`; gateway mode remains
-  explicit per stdio MCP server with `gommage-mcp --gateway --server-name
-  <name> -- <stdio-mcp-server>`.
+  gateway. New agent hooks invoke `gommage hook --agent <host>` after `quickstart`;
+  `gommage-mcp` remains explicit per stdio MCP server with
+  `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
 - Use `gommage release verify --all-assets --json --require-sbom --require-provenance` for full beta/RC release evidence. For current-platform checks, use `gommage release verify --json --require-sbom --require-provenance`; from a checkout, `sh scripts/verify-release.sh --json --require-sbom --require-provenance` provides the shell fallback.
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.

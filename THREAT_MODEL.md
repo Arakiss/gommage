@@ -45,15 +45,17 @@ A compiled-in hard-stop list rejects a finite, documented set of capabilities re
 
 Scope note on `rm -rf`: despite the id `hs.rm-rf-root` and the `rm -rf /*` glob, this hard-stop is **any-absolute-path**, not root-only. `rm -rf` with any argument that begins with `/` (e.g. `/tmp/scratch`, `/home/me/build`) is denied; the `*` in the glob crosses `/`, and a second shell-semantic scanner independently flags `rm` with `r`+`f` flags and a `/`-leading argument. Relative paths (`./build`, `node_modules`) are deliberately out of scope — gate those at the policy layer if you need to. This is intentional blast-radius containment, not a root-only check; a force to delete an absolute scratch path is friction by design (there is no picto for a hard-stop). Loosening it to a protected-prefix allow-list is a deliberate, reviewed change, not a bug.
 
-`GOMMAGE_BYPASS=1` does not bypass this list. Both hook entry points — the
-`gommage-mcp` binary and the `gommage mcp` CLI adapter — share one bypass path
-(`gommage_stdlib::evaluate_bypass`): when the hook payload is valid it is mapped
-through the bundled capability rules before honoring bypass, and compiled
-hard-stop hits still return `deny`. If `~/.gommage/key.ed25519` is usable, the
-bypass path writes a signed `bypass_activated` audit event. The variable must be
-set in the **hook process environment** (launch the agent with it, or set it on
-the hook command); exporting it inside a child shell mid-session does not affect
-later hook invocations.
+`GOMMAGE_BYPASS=1` does not bypass this list. Hook entry points — the canonical
+`gommage hook --agent <host>` command and the legacy `gommage-mcp` /
+`gommage mcp` compatibility paths — share one bypass path
+(`gommage_stdlib::evaluate_bypass`):
+when the hook payload is valid it is mapped through the bundled capability rules
+before honoring bypass, and compiled hard-stop hits still return `deny`. If
+`~/.gommage/key.ed25519` is usable, the bypass path writes a signed
+`bypass_activated` audit event. The variable must be set in the **hook process
+environment** (launch the agent with it, or set it on the hook command);
+exporting it inside a child shell mid-session does not affect later hook
+invocations.
 
 ---
 
@@ -230,7 +232,7 @@ The "zero heuristics" claim specifically means: **no component of the decision r
                │ tool calls (JSON over PreToolUse hook)
                ▼
 ┌──────────────────────────────┐
-│  gommage-mcp adapter         │  <- stateless; translates to daemon IPC
+│  gommage hook adapter        │  <- stateless; translates to daemon IPC
 └──────────────┬───────────────┘
                │ line-JSON over Unix socket
                ▼

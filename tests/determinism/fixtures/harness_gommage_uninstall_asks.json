@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-uninstall-asks",
+  "note": "Removing Gommage from inside an agent session disables the guard. It requires an operator picto instead of falling through to recovery allow.",
+  "call": { "tool": "Bash", "input": { "command": "gommage uninstall --all" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.disable" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "harness-codex-hooks-write-denied",
+  "note": "Codex hooks are part of the decision harness. The early harness integrity policy denies direct writes before the agent config carve-out can allow ~/.codex.",
+  "call": { "tool": "Write", "input": { "file_path": "/__no_home__/.codex/hooks.json", "content": "{}" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

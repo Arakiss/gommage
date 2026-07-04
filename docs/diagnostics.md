@@ -519,18 +519,19 @@ therefore have higher policy precedence than later layers. The effective policy
 hash includes layer names and relative file paths whenever more than one layer
 is active, so org/project/user order changes are visible in audit evidence.
 
-## MCP Gateway
+## Optional MCP Gateway
 
 `gommage-mcp --gateway --server-name <name> -- <upstream-command> [args...]`
-starts an initial stdio MCP gateway. It reads line-delimited JSON-RPC, gates
+starts an optional compatibility stdio MCP gateway. It reads line-delimited JSON-RPC, gates
 `tools/call` requests through the active Gommage policy as
 `mcp__<name>__<tool>`, forwards allowed calls to the upstream server, and
 returns an MCP tool result with `isError: true` for denied or picto-required
 calls without forwarding them upstream.
 
-The gateway is intentionally narrow in this beta line: it is for stdio MCP
-servers and preserves non-`tools/call` requests by forwarding them to the
-upstream process. Use the existing `mcp.*` stdlib capabilities to gate by
+The gateway is intentionally narrow in this beta line: new agent hooks use
+`gommage hook --agent <host>`, and the gateway exists only for stdio MCP servers
+an operator chooses to wrap. It preserves non-`tools/call` requests by forwarding them to
+the upstream process. Use the existing `mcp.*` stdlib capabilities to gate by
 read-like, write-like, or generic MCP tool names.
 
 ## Sandbox Advice

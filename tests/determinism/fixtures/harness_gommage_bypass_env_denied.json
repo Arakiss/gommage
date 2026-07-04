@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-bypass-env-denied",
+  "note": "GOMMAGE_BYPASS changes the hook trust boundary. A normal agent command must not set it.",
+  "call": { "tool": "Bash", "input": { "command": "GOMMAGE_BYPASS=1 gommage hook" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

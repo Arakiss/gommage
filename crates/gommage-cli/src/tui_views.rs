@@ -386,7 +386,7 @@ fn recovery_report(layout: &HomeLayout) -> ViewReport {
             "gommage verify --json".to_string(),
             "gommage agent status claude --json".to_string(),
             "gommage uninstall --all --dry-run".to_string(),
-            "GOMMAGE_BYPASS=1 gommage-mcp < hook.json".to_string(),
+            "GOMMAGE_BYPASS=1 gommage hook --agent claude < hook.json".to_string(),
         ],
     }
 }

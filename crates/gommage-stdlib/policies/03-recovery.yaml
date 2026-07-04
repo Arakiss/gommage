@@ -17,13 +17,8 @@
       - "proc.exec:gommage doctor*"
       - "proc.exec:gommage smoke*"
       - "proc.exec:gommage policy check*"
-      - "proc.exec:gommage policy init --stdlib*"
       - "proc.exec:gommage agent status*"
-      - "proc.exec:gommage quickstart*"
       - "proc.exec:gommage daemon status*"
-      - "proc.exec:gommage daemon uninstall*"
-      - "proc.exec:gommage agent uninstall*"
-      - "proc.exec:gommage uninstall*"
   reason: "Gommage readiness and recovery commands must remain available after quickstart"
 
 - name: allow-absolute-gommage-readiness-commands
@@ -39,13 +34,8 @@
       - "proc.exec:*/gommage doctor*"
       - "proc.exec:*/gommage smoke*"
       - "proc.exec:*/gommage policy check*"
-      - "proc.exec:*/gommage policy init --stdlib*"
       - "proc.exec:*/gommage agent status*"
-      - "proc.exec:*/gommage quickstart*"
       - "proc.exec:*/gommage daemon status*"
-      - "proc.exec:*/gommage daemon uninstall*"
-      - "proc.exec:*/gommage agent uninstall*"
-      - "proc.exec:*/gommage uninstall*"
   reason: "absolute Gommage binary paths are valid recovery commands"
 
 - name: allow-basic-shell-inspection
@@ -65,8 +55,6 @@
   match:
     any_capability:
       - "proc.exec:systemctl --user status gommage-daemon.service*"
-      - "proc.exec:systemctl --user stop gommage-daemon.service*"
-      - "proc.exec:systemctl --user disable --now gommage-daemon.service*"
       - "proc.exec:systemctl --user daemon-reload"
   reason: "user-level daemon inspection and rollback must stay available"
 

@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-daemon-stop-asks",
+  "note": "Stopping the user daemon is no longer silently allowed. The in-process fallback keeps decisions working, but disabling the service still needs an operator picto.",
+  "call": { "tool": "Bash", "input": { "command": "systemctl --user stop gommage-daemon.service" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.disable" }
+}

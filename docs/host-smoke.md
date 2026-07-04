@@ -96,7 +96,7 @@ The capture directory contains:
 |---|---|
 | `version.txt` | CLI version used for the run. |
 | `gommage-daemon-version.txt` | Daemon companion binary version. |
-| `gommage-mcp-version.txt` | MCP hook adapter companion binary version. |
+| `gommage-mcp-version.txt` | Legacy MCP compatibility/gateway companion binary version. |
 | `quickstart-plan.json` | Dry-run setup mutations before writes. |
 | `quickstart.txt` | Applied quickstart output with daemon-no-start. |
 | `verify.json` | Aggregated readiness gate. |

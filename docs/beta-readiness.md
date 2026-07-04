@@ -59,9 +59,9 @@ issue:
 | Legacy repair | `gommage repair agent claude --dry-run` and `gommage repair agent codex --dry-run` show how old or broken alpha hooks would be rewritten without mutating host config. |
 | Policy fixtures | `examples/policy-fixtures.yaml` passes through `gommage policy test --json`, and any repository-specific fixture additions are documented or linked. |
 | Policy layers | `gommage policy layers --json` reports active org/project/user layer order, rule counts, and the effective policy hash. |
-| MCP gateway | `gommage-mcp --gateway` has fixtures proving allowed `tools/call` requests are forwarded and denied calls return MCP tool errors without upstream execution. |
+| MCP gateway | Optional compatibility surface: `gommage-mcp --gateway` has fixtures proving allowed `tools/call` requests are forwarded and denied calls return MCP tool errors without upstream execution. New agent hooks use `gommage hook --agent claude` or `gommage hook --agent codex`. |
 | Sandbox advice | `gommage sandbox advise --json` reports `advisory_only: true` and never claims OS confinement enforcement. |
-| Audit verification | A daemon or MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
+| Audit verification | A daemon, `gommage hook`, or legacy MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
 | Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host, including companion versions, selected-agent beta check, repair dry-runs, bounded TUI captures, report bundle, and rollback dry-run. |
 | CI | `ci`, `audit`, and `scorecard` are green on the release commit. `release` is green for publication commits, or intentionally skipped when `GOMMAGE_RELEASE_HOLD=true` is active during repository maintenance. |
 | Docs | README, beta contract, existing-setups, diagnostics, agent compatibility, publishing, release-signing docs, examples, and the `skills/gommage` agent skill match the current CLI. |

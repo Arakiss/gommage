@@ -31,7 +31,7 @@ On the wire — which is what agents send over the `PreToolUse` hook or the daem
 
 **Two tool calls with the same canonical JSON produce the same decision.** "Canonical" means: `tool` string equal, `input` value structurally equal under object-key-sort and array-preserve. The `ToolCall::input_hash()` method computes this canonicalisation for audit purposes.
 
-The `gommage-mcp` adapter preserves the agent's `tool_input`, strips any
+The `gommage hook` adapter preserves the agent's `tool_input`, strips any
 agent-supplied `__gommage_*` fields, and then may add reserved
 `__gommage_*` fields before constructing the canonical `ToolCall`. Today this
 is used to resolve hook-relative `Read` / `Write` / `Edit` / `NotebookEdit`,

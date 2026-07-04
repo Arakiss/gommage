@@ -31,6 +31,7 @@ These surfaces are part of the beta operator contract:
 | Surface | Contract |
 |---|---|
 | Installer | Downloads one platform archive, verifies Sigstore and SHA-256 before extraction, installs `gommage`, `gommage-daemon`, and `gommage-mcp`. |
+| Hook adapter | New agent hooks call `gommage hook --agent claude` or `gommage hook --agent codex`; `gommage-mcp` remains a compatibility binary and optional stdio MCP gateway. |
 | Agent skill | Installed by `--with-skill` or `--skill-only`; teaches agents to diagnose, dry-run, verify, and avoid overclaiming coverage. |
 | Harness diagnostics | `gommage harness diagnose --json`, `harness explain`, and `harness write-context --dry-run` are the source of local truth for agents. |
 | Quickstart | Additive by default; preserves unrelated Claude hooks, backs up changed files, imports supported native Claude permissions, and self-tests unless disabled. |

@@ -114,7 +114,8 @@ fn quickstart_installs_claude_hook_and_imports_native_denies() {
             .and_then(|v| v.as_array())
             .unwrap()
             .iter()
-            .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp"))
+            .any(|hook| hook.get("command").and_then(|v| v.as_str())
+                == Some("gommage hook --agent claude"))
     );
 
     let status = gommage(&home)
@@ -217,7 +218,9 @@ fn quickstart_preserves_unrelated_claude_hooks_by_default() {
             .and_then(|v| v.as_array())
             .unwrap()
             .iter()
-            .any(|hook| hook.get("command").and_then(|v| v.as_str()) == Some("gommage-mcp"))
+            .any(|hook| {
+                hook.get("command").and_then(|v| v.as_str()) == Some("gommage hook --agent claude")
+            })
     }));
     assert!(
         !pre_tool_use

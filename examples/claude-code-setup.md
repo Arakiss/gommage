@@ -65,8 +65,8 @@ gommage quickstart --agent claude --daemon-no-start
 On macOS this writes `~/Library/LaunchAgents/dev.gommage.daemon.plist` and
 loads it with launchd. On Linux this writes
 `~/.config/systemd/user/gommage-daemon.service` and enables it with
-`systemctl --user`. If you skip daemon installation, `gommage-mcp` still uses
-the audited in-process fallback.
+`systemctl --user`. If you skip daemon installation,
+`gommage hook --agent claude` still uses the audited in-process fallback.
 
 Useful service commands:
 

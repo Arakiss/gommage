@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-key-write-denied",
+  "note": "The signing key protects pictos and audit. Direct writes to key.ed25519 are denied as harness tampering.",
+  "call": { "tool": "Write", "input": { "file_path": "/__no_home__/.gommage/key.ed25519", "content": "not-a-key" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}

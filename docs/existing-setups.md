@@ -154,9 +154,10 @@ There are two MCP paths:
   This proxies one stdio MCP server and gates `tools/call` requests before
   forwarding allowed calls upstream.
 
-The gateway covers only the MCP server you intentionally wrap. It does not
-cover unrelated MCP servers, built-in file tools, or OS-level effects below the
-agent layer.
+The gateway is optional compatibility plumbing, not the default hook path.
+New agent integrations use `gommage hook --agent <host>`. The gateway covers
+only the MCP server you intentionally wrap. It does not cover unrelated MCP
+servers, built-in file tools, or OS-level effects below the agent layer.
 
 ## Dual-Agent Flows
 

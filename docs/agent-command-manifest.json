@@ -22,6 +22,28 @@
       "argv": ["policy", "init", "--stdlib"]
     },
     {
+      "id": "hook_decision_json",
+      "purpose": "Evaluate one PreToolUse hook payload through the canonical hook adapter.",
+      "stdin_mode": "json",
+      "stdin_json": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": "ls" }
+      },
+      "argv": ["hook", "--agent", "claude"]
+    },
+    {
+      "id": "hook_codex_ask_deny_json",
+      "purpose": "Evaluate a picto-required PreToolUse hook payload with Codex-safe deny semantics.",
+      "stdin_mode": "json",
+      "stdin_json": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": { "command": "git push origin main" }
+      },
+      "argv": ["hook", "--agent", "codex"]
+    },
+    {
       "id": "quickstart_dry_run_json",
       "purpose": "Inspect setup mutations without writing files.",
       "stdin_mode": "none",

@@ -6,8 +6,9 @@ use std::path::Path;
 
 use crate::{
     agent::{
-        AgentKind, CODEX_GOMMAGE_MATCHER, claude_gommage_matcher, codex_pre_tool_use_pointer,
-        native_permission_rules, translate_claude_native_rules, translate_claude_permission_allow,
+        AgentKind, CLAUDE_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_MATCHER,
+        claude_gommage_matcher, codex_pre_tool_use_pointer, native_permission_rules,
+        translate_claude_native_rules, translate_claude_permission_allow,
         translate_claude_permission_deny,
     },
     daemon::{DaemonDryRunPlan, ServiceManager, daemon_dry_run_plan, resolve_service_manager},
@@ -351,7 +352,7 @@ fn build_claude_plan(
     let matcher = claude_gommage_matcher(&settings);
     let hook = hook_plan(
         matcher,
-        "gommage-mcp",
+        CLAUDE_GOMMAGE_HOOK_COMMAND,
         &settings,
         "/hooks/PreToolUse",
         replace_hooks,
@@ -398,7 +399,7 @@ fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
         config_paths: vec![path_display(&hooks_path), path_display(&config_path)],
         hook: hook_plan(
             CODEX_GOMMAGE_MATCHER.to_string(),
-            "gommage-mcp",
+            CODEX_GOMMAGE_HOOK_COMMAND,
             &hooks,
             hook_pointer,
             replace_hooks,
@@ -664,7 +665,7 @@ fn agent_quickstart_guidance(
             ],
             operator_notes: vec![
                 "keep Codex native sandboxing and hook trust enabled; Gommage is a policy decision layer, not OS confinement".to_string(),
-                "use gommage-mcp --gateway when an operator intentionally wants a stdio MCP proxy in addition to native Codex hooks".to_string(),
+                "use the optional legacy MCP gateway only when an operator intentionally wants a stdio MCP proxy in addition to native Codex hooks".to_string(),
             ],
         },
     }

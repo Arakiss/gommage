@@ -342,7 +342,7 @@ fn codex_coverage() -> Vec<CoverageSurface> {
         CoverageSurface {
             surface: "mcp",
             default_coverage: "mapped when Codex emits mcp__server__tool names",
-            boundary: "use gommage-mcp --gateway for intentionally wrapped stdio MCP servers when native hooks are not enough",
+            boundary: "use optional gommage-mcp --gateway only for intentionally wrapped stdio MCP servers when native hooks are not enough",
         },
         CoverageSurface {
             surface: "filesystem",

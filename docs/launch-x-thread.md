@@ -75,7 +75,8 @@ passes.
     is done.
 
     Next focus: broader Codex hook coverage, crates.io publishing gate,
-    package-manager installs, MCP gateway hardening, and community policy packs.
+    package-manager installs, optional MCP gateway evidence, and community
+    policy packs.
 
 ## Short Post
 

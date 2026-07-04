@@ -16,6 +16,10 @@ pub const POLICIES: &[StdlibFile] = &[
         contents: include_str!("../policies/03-recovery.yaml"),
     },
     StdlibFile {
+        name: "05-harness-integrity.yaml",
+        contents: include_str!("../policies/05-harness-integrity.yaml"),
+    },
+    StdlibFile {
         name: "10-filesystem.yaml",
         contents: include_str!("../policies/10-filesystem.yaml"),
     },
@@ -79,6 +83,11 @@ mod tests {
     #[test]
     fn recovery_policy_has_unambiguous_early_prefix() {
         assert!(POLICIES.iter().any(|file| file.name == "03-recovery.yaml"));
+        assert!(
+            POLICIES
+                .iter()
+                .any(|file| file.name == "05-harness-integrity.yaml")
+        );
         assert!(!POLICIES.iter().any(|file| file.name == "05-recovery.yaml"));
     }
 }

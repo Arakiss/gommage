@@ -51,7 +51,7 @@ codex exec --sandbox workspace-write "apply the refactor we discussed"
 If a third-party stdio MCP server can be launched through a proxy, route it
 through `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>`.
 That path gates MCP `tools/call` requests as `mcp__<name>__<tool>` before
-forwarding. It is intentionally explicit: only the stdio MCP server you wrap is
+forwarding. It is intentionally explicit and optional: only the stdio MCP server you wrap is
 proxied through Gommage. It does not cover Codex built-in file tools and does
 not replace Codex's OS sandbox.
 
@@ -66,7 +66,7 @@ not replace Codex's OS sandbox.
 │  2. Approval policy?         │   ←— ~/.codex/config.toml
 │     (ask / auto-approve)     │
 │                              │
-│  3. Matched PreToolUse hook  │   ←— Codex hook config → gommage-mcp
+│  3. Matched PreToolUse hook  │   ←— Codex hook config → gommage hook --agent codex
 │     → Gommage evaluates      │       (Bash, apply_patch, MCP by default)
 │                              │
 │  4. OS sandbox                │   ←— Seatbelt / bwrap+seccomp

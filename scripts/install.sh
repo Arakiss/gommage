@@ -14,7 +14,7 @@
 # Installs three binaries into $GOMMAGE_BIN (default: $HOME/.local/bin):
 #   - gommage          (cli)
 #   - gommage-daemon   (long-running process)
-#   - gommage-mcp      (PreToolUse hook adapter)
+#   - gommage-mcp      (legacy hook compatibility + optional MCP gateway)
 #
 # Downloads release artifacts from GitHub Releases and verifies their Sigstore
 # signature bundle plus SHA-256 checksum. Refuses to install if either check

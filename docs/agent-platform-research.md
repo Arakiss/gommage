@@ -55,8 +55,11 @@ Primary sources checked:
   documented as incomplete, and non-shell / non-MCP tools such as WebSearch are
   outside the current hook surface.
 - Codex `PreToolUse` can deny a Bash command through hook JSON or exit code 2.
-  `permissionDecision = "allow"` / `"ask"`, `updatedInput`, and additional
-  context on `PreToolUse` are parsed but currently fail open.
+  Upstream Codex parses `permissionDecision = "allow"` / `"ask"`,
+  `updatedInput`, and additional context, but those are not reliable enforcement
+  primitives today. Gommage therefore installs `gommage hook --agent codex`,
+  which stays silent on plain allows and turns picto-required `ask` decisions
+  into explicit denials.
 - Codex `PermissionRequest` can allow, deny, or decline a prompt before the
   normal approval flow. If multiple matching hooks decide, deny wins.
 - Codex `PostToolUse` can add context or replace the visible result, but it
@@ -117,9 +120,9 @@ Priority order:
 3. **Codex `apply_patch` support.** Default matcher, mapper rules, and policy
    fixtures exist; remaining work is host smoke evidence against real Codex
    sessions and deeper payload-shape captures.
-4. **Codex MCP hook support.** Default `mcp__server__tool` mapping exists;
-   keep `gommage-mcp --gateway` documented for deliberately wrapped stdio MCP
-   servers and for hosts whose native hooks are insufficient.
+4. **Codex MCP hook support.** Default `mcp__server__tool` mapping exists.
+   Keep `gommage-mcp --gateway` documented only for deliberately wrapped stdio
+   MCP servers and for hosts whose native hooks are insufficient.
 5. **Codex `PermissionRequest` integration.** Explore using Gommage policy and
    active pictos to deny or allow eligible approval requests. Do not auto-allow
    broad approvals until the policy semantics are explicit.
@@ -131,9 +134,10 @@ Priority order:
 8. **Claude async validation.** Consider a Gommage-managed async validation
    pattern for tests/formatters after file writes, clearly separate from
    preventive policy.
-9. **Distribution packaging.** Package Gommage skill, hook wiring, and optional
-   MCP gateway helpers as Codex and Claude plugins once the installer path is
-   stable enough.
+9. **Distribution packaging.** Package Gommage skill, host-specific CLI hook
+   wiring, and any
+   optional MCP gateway helpers as Codex and Claude plugins once the installer
+   path is stable enough.
 
 ## Routine Cadence
 
