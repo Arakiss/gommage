@@ -1,5 +1,12 @@
 # Changelog — gommage-mcp
 
+## [0.10.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.10.0-alpha.1...gommage-mcp-v0.10.1-alpha.1) (2026-07-04)
+
+
+### Bug fixes
+
+* harden agent hook entrypoint ([22e5ce6](https://github.com/Arakiss/gommage/commit/22e5ce619fb9a4ed42c46ee79f677c8ece78b1f0))
+
 ## [0.10.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.9.1-alpha.1...gommage-mcp-v0.10.0-alpha.1) (2026-06-30)
 
 

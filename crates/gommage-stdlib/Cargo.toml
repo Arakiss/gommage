@@ -1,6 +1,6 @@
 [package]
 name = "gommage-stdlib"
-version = "0.11.0-alpha.1"
+version = "0.12.0-alpha.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
