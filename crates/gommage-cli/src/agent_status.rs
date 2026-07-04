@@ -148,14 +148,14 @@ pub(crate) fn build_claude_status_report_at(
     let mut report = AgentStatusReport::new(AgentKind::Claude);
     push_agent_path_check(&mut report, "settings_file", settings_path);
 
-    let settings = match read_json_object(&settings_path) {
+    let settings = match read_json_object(settings_path) {
         Ok(settings) => settings,
         Err(error) => {
             report.push(
                 "settings_json",
                 AgentStatus::Fail,
                 format!("could not read Claude settings: {error}"),
-                Some(path_details(&settings_path)),
+                Some(path_details(settings_path)),
             );
             return report;
         }
@@ -168,7 +168,7 @@ pub(crate) fn build_claude_status_report_at(
             AgentStatus::Fail,
             "no Claude PreToolUse hook invoking the Gommage hook adapter",
             Some(serde_json::json!({
-                "path": path_display(&settings_path),
+                "path": path_display(settings_path),
                 "pointer": "/hooks/PreToolUse",
             })),
         );
@@ -178,7 +178,7 @@ pub(crate) fn build_claude_status_report_at(
             AgentStatus::Ok,
             format!("{} Gommage hook group(s) installed", matchers.len()),
             Some(serde_json::json!({
-                "path": path_display(&settings_path),
+                "path": path_display(settings_path),
                 "matchers": matchers,
             })),
         );
@@ -186,7 +186,7 @@ pub(crate) fn build_claude_status_report_at(
         push_hook_coverage_report(
             &mut report,
             AgentKind::Claude,
-            &settings_path,
+            settings_path,
             &matchers,
             &expected,
         );
@@ -194,7 +194,7 @@ pub(crate) fn build_claude_status_report_at(
     push_hook_hygiene_report(
         &mut report,
         AgentKind::Claude,
-        &settings_path,
+        settings_path,
         &settings,
         "/hooks/PreToolUse",
     );
@@ -235,14 +235,14 @@ pub(crate) fn build_codex_status_report_at(
     push_agent_path_check(&mut report, "hooks_file", hooks_path);
     push_agent_path_check(&mut report, "config_file", config_path);
 
-    let hooks = match read_json_object(&hooks_path) {
+    let hooks = match read_json_object(hooks_path) {
         Ok(hooks) => hooks,
         Err(error) => {
             report.push(
                 "hooks_json",
                 AgentStatus::Fail,
                 format!("could not read Codex hooks: {error}"),
-                Some(path_details(&hooks_path)),
+                Some(path_details(hooks_path)),
             );
             return report;
         }
@@ -255,7 +255,7 @@ pub(crate) fn build_codex_status_report_at(
             AgentStatus::Fail,
             "no Codex PreToolUse hook invoking the Gommage hook adapter",
             Some(serde_json::json!({
-                "path": path_display(&hooks_path),
+                "path": path_display(hooks_path),
                 "pointer": pre_tool_use_pointer,
             })),
         );
@@ -265,14 +265,14 @@ pub(crate) fn build_codex_status_report_at(
             AgentStatus::Ok,
             format!("{} Gommage hook group(s) installed", matchers.len()),
             Some(serde_json::json!({
-                "path": path_display(&hooks_path),
+                "path": path_display(hooks_path),
                 "matchers": matchers,
             })),
         );
         push_hook_coverage_report(
             &mut report,
             AgentKind::Codex,
-            &hooks_path,
+            hooks_path,
             &matchers,
             CODEX_GOMMAGE_MATCHER,
         );
@@ -280,19 +280,19 @@ pub(crate) fn build_codex_status_report_at(
     push_hook_hygiene_report(
         &mut report,
         AgentKind::Codex,
-        &hooks_path,
+        hooks_path,
         &hooks,
         pre_tool_use_pointer,
     );
 
-    let config = match read_toml_document(&config_path) {
+    let config = match read_toml_document(config_path) {
         Ok(config) => config,
         Err(error) => {
             report.push(
                 "config_toml",
                 AgentStatus::Fail,
                 format!("could not read Codex config: {error}"),
-                Some(path_details(&config_path)),
+                Some(path_details(config_path)),
             );
             return report;
         }
@@ -304,7 +304,7 @@ pub(crate) fn build_codex_status_report_at(
             AgentStatus::Ok,
             "features.hooks is enabled",
             Some(serde_json::json!({
-                "path": path_display(&config_path),
+                "path": path_display(config_path),
                 "feature": "features.hooks",
                 "legacy_codex_hooks": hooks_feature.legacy_codex_hooks,
             })),
@@ -315,7 +315,7 @@ pub(crate) fn build_codex_status_report_at(
             AgentStatus::Warn,
             "legacy features.codex_hooks is enabled; rerun install to write canonical features.hooks",
             Some(serde_json::json!({
-                "path": path_display(&config_path),
+                "path": path_display(config_path),
                 "feature": "features.hooks",
                 "legacy_feature": "features.codex_hooks",
             })),
@@ -326,7 +326,7 @@ pub(crate) fn build_codex_status_report_at(
             AgentStatus::Fail,
             "features.hooks is not enabled",
             Some(serde_json::json!({
-                "path": path_display(&config_path),
+                "path": path_display(config_path),
                 "feature": "features.hooks",
                 "legacy_codex_hooks": hooks_feature.legacy_codex_hooks,
             })),
@@ -343,7 +343,7 @@ pub(crate) fn build_codex_status_report_at(
             AgentStatus::Warn,
             "Codex sandbox_mode is danger-full-access; Gommage governs matched hook events only, so sandboxing remains the boundary for other Codex tool paths",
             Some(serde_json::json!({
-                "path": path_display(&config_path),
+                "path": path_display(config_path),
                 "sandbox_mode": sandbox_mode,
             })),
         ),
@@ -352,7 +352,7 @@ pub(crate) fn build_codex_status_report_at(
             AgentStatus::Ok,
             format!("Codex sandbox_mode is {mode}"),
             Some(serde_json::json!({
-                "path": path_display(&config_path),
+                "path": path_display(config_path),
                 "sandbox_mode": mode,
             })),
         ),
@@ -360,7 +360,7 @@ pub(crate) fn build_codex_status_report_at(
             "sandbox",
             AgentStatus::Ok,
             "Codex sandbox_mode is not set; Codex default remains authoritative",
-            Some(path_details(&config_path)),
+            Some(path_details(config_path)),
         ),
     }
 
