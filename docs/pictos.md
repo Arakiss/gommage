@@ -94,6 +94,49 @@ pending approval. That makes generic, Slack, and Discord payloads inspectable
 without network delivery, and keeps endpoint tests composable with tools like
 `jq` and `curl`.
 
+Webhook payloads also include a callback envelope:
+
+```json
+{
+  "callback": {
+    "kind": "gommage_approval_callback",
+    "request_id": "apr_...",
+    "nonce": "nonce_...",
+    "actions": ["approve", "deny"]
+  }
+}
+```
+
+The nonce is bound to the pending request id, input hash, required scope, and
+policy version. A remote approval provider must echo that nonce in a signed
+callback body:
+
+```json
+{
+  "kind": "gommage_approval_callback",
+  "request_id": "apr_...",
+  "action": "approve",
+  "nonce": "nonce_...",
+  "reason": "reviewed in Slack",
+  "ttl": 600,
+  "uses": 1
+}
+```
+
+Gommage verifies the HMAC signature, timestamp freshness, pending request
+state, and nonce before delegating to the same local approve/deny path used by
+the CLI and TUI:
+
+```sh
+gommage approval callback \
+  --body callback.json \
+  --signature "$X_GOMMAGE_SIGNATURE" \
+  --timestamp "$X_GOMMAGE_SIGNATURE_TIMESTAMP" \
+  --signing-secret "$GOMMAGE_APPROVAL_CALLBACK_SECRET" \
+  --dry-run \
+  --json
+```
+
 Real delivery uses bounded retries. When all attempts fail, Gommage keeps the
 permission decision as `ask`, appends a dead-letter entry to
 `~/.gommage/approval-webhook-dlq.jsonl`, and exposes it through:

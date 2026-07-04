@@ -24,8 +24,8 @@ pub use approval::{
 pub use approval_webhook::{
     ApprovalWebhookDeadLetter, ApprovalWebhookDeadLetterStore, ApprovalWebhookDeliveryKind,
     ApprovalWebhookDeliveryOutcome, ApprovalWebhookDeliverySettings, ApprovalWebhookSource,
-    PreparedApprovalWebhook, approval_webhook_generic_payload, deliver_prepared_approval_webhook,
-    prepare_approval_webhook,
+    PreparedApprovalWebhook, approval_callback_nonce, approval_webhook_generic_payload,
+    deliver_prepared_approval_webhook, prepare_approval_webhook,
 };
 pub use capability::Capability;
 pub use error::GommageError;

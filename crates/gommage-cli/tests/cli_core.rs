@@ -941,3 +941,98 @@ fn smoke_json_warns_for_local_policy_relaxations() {
         }));
     }
 }
+
+#[test]
+fn posture_json_reports_strict_stdlib_policy() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let output = gommage(&home).args(["posture", "--json"]).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"].as_str(), Some("pass"));
+    assert_eq!(report["posture"].as_str(), Some("strict"));
+    assert_eq!(report["summary"]["relaxed"].as_u64(), Some(0));
+    assert!(report["checks"].as_array().unwrap().iter().all(|check| {
+        check["classification"].as_str() == Some("same") && check["status"].as_str() == Some("pass")
+    }));
+}
+
+#[test]
+fn posture_json_reports_local_policy_relaxations() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    fs::write(
+        home.join("policy.d")
+            .join("14-operator-allow-agent-tools.yaml"),
+        r#"- name: operator-allow-web-fetch
+  decision: allow
+  match:
+    any_capability:
+      - "net.fetch:*"
+  reason: "operator opts into frictionless WebFetch"
+
+- name: operator-allow-mcp
+  decision: allow
+  match:
+    any_capability:
+      - "mcp.write:*"
+      - "mcp.call:*"
+  reason: "operator opts into frictionless MCP"
+"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join("policy.d").join("19-operator-main-push.yaml"),
+        r#"- name: operator-allow-main-push
+  decision: allow
+  match:
+    any_capability:
+      - "git.push:refs/heads/main"
+  reason: "operator opts into routine main pushes"
+"#,
+    )
+    .unwrap();
+
+    let output = gommage(&home).args(["posture", "--json"]).output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"].as_str(), Some("warn"));
+    assert_eq!(report["posture"].as_str(), Some("relaxed"));
+    assert_eq!(report["summary"]["relaxed"].as_u64(), Some(3));
+    let checks = report["checks"].as_array().unwrap();
+    for name in ["ask_main_push", "ask_web_fetch", "ask_mcp_write"] {
+        assert!(checks.iter().any(|check| {
+            check["name"].as_str() == Some(name)
+                && check["classification"].as_str() == Some("relaxed")
+                && check["active_decision"]["kind"].as_str() == Some("allow")
+        }));
+    }
+}

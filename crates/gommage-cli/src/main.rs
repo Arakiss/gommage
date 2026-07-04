@@ -22,20 +22,25 @@ mod doctor;
 mod gestral;
 mod harness;
 mod input;
+mod managed;
 mod map;
 mod mascot;
 mod mcp;
 mod operator_metrics;
 mod policy_cmd;
 mod policy_diff;
+mod posture;
+mod project;
 mod quickstart;
 mod quickstart_plan;
 mod release;
 mod repair;
 mod replay;
 mod report;
+mod run_agent;
 mod sandbox;
 mod self_update;
+mod session;
 mod smoke;
 mod state;
 mod stats;
@@ -58,17 +63,22 @@ use daemon::{DaemonCmd, ServiceManager, cmd_daemon};
 use doctor::cmd_doctor;
 use harness::{HarnessCmd, cmd_harness};
 use input::{evaluate_only, read_tool_call_from_stdin};
+use managed::{ManagedCmd, cmd_managed};
 use map::cmd_map;
 use mascot::{MascotOptions, print_mascot};
 use mcp::{HookAgent, run_hook, run_mcp};
 use policy_cmd::{PolicyCmd, cmd_policy};
+use posture::cmd_posture;
+use project::{ProjectCmd, cmd_project};
 use quickstart::{QuickstartOptions, cmd_quickstart};
 use release::{ReleaseCmd, cmd_release};
 use repair::{RepairCmd, cmd_repair};
 use replay::{ReplayOptions, cmd_replay};
 use report::{ReportCmd, cmd_report};
+use run_agent::{RunCmd, cmd_run};
 use sandbox::{SandboxCmd, cmd_sandbox};
 use self_update::{UpdateOptions, UpgradeOptions, cmd_update, cmd_upgrade};
+use session::{SessionCmd, cmd_session};
 use smoke::cmd_smoke;
 use state::{StateCmd, cmd_state};
 use stats::{StatsOptions, cmd_stats};
@@ -232,6 +242,17 @@ enum Cmd {
     #[command(subcommand)]
     Policy(PolicyCmd),
 
+    /// Compare active local policy against bundled strict stdlib posture.
+    Posture {
+        /// Emit a stable machine-readable posture report.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Manage project-local policy starter files.
+    #[command(subcommand)]
+    Project(ProjectCmd),
+
     /// Tail the audit log.
     Tail {
         /// Follow mode — keep reading new entries.
@@ -306,6 +327,10 @@ enum Cmd {
     #[command(subcommand)]
     Harness(HarnessCmd),
 
+    /// Inspect optional managed-mode readiness and harness integrity.
+    #[command(subcommand)]
+    Managed(ManagedCmd),
+
     /// Inspect or verify published release artifacts.
     #[command(subcommand)]
     Release(ReleaseCmd),
@@ -313,6 +338,10 @@ enum Cmd {
     /// Create diagnostic reports for support and issue triage.
     #[command(subcommand)]
     Report(ReportCmd),
+
+    /// Launch supported agents through a verified Gommage-aware wrapper.
+    #[command(subcommand)]
+    Run(RunCmd),
 
     /// Run semantic policy smoke tests against the active home.
     Smoke {
@@ -338,6 +367,10 @@ enum Cmd {
     /// Print advisory native sandbox bridge guidance.
     #[command(subcommand)]
     Sandbox(SandboxCmd),
+
+    /// Inspect live agent sessions and whether their homes are Gommage-wired.
+    #[command(subcommand)]
+    Session(SessionCmd),
 
     /// Open the operator dashboard TUI.
     Tui {
@@ -591,6 +624,8 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         }
         Cmd::Approval(sub) => return cmd_approval(sub, layout),
         Cmd::Policy(sub) => return cmd_policy(sub, layout),
+        Cmd::Posture { json } => return cmd_posture(layout, json),
+        Cmd::Project(sub) => return cmd_project(sub),
         Cmd::Tail { follow } => {
             use std::io::{BufRead, BufReader};
             let path = layout.audit_log.clone();
@@ -638,14 +673,17 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Doctor { json } => return cmd_doctor(layout, json),
         Cmd::Verify { json, policy_tests } => return cmd_verify(layout, json, policy_tests),
         Cmd::Harness(sub) => return cmd_harness(sub, layout),
+        Cmd::Managed(sub) => return cmd_managed(sub, layout),
         Cmd::Release(sub) => return cmd_release(sub),
         Cmd::Report(sub) => return cmd_report(sub, layout),
+        Cmd::Run(sub) => return cmd_run(sub, layout),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
         Cmd::Stats { json, window_days } => {
             return cmd_stats(layout, StatsOptions { json, window_days });
         }
         Cmd::State(sub) => return cmd_state(sub, layout),
         Cmd::Sandbox(sub) => return cmd_sandbox(sub, layout),
+        Cmd::Session(sub) => return cmd_session(sub, layout),
         Cmd::Tui {
             agents,
             view,

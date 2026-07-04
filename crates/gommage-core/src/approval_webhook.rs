@@ -186,6 +186,12 @@ pub fn approval_webhook_generic_payload(request: &ApprovalRequest) -> serde_json
         "capabilities": request.capabilities,
         "matched_rule": request.matched_rule,
         "policy_version": request.policy_version,
+        "callback": {
+            "kind": "gommage_approval_callback",
+            "request_id": request.id,
+            "nonce": approval_callback_nonce(request),
+            "actions": ["approve", "deny"]
+        },
         "commands": {
             "show": format!("gommage approval show {} --json", request.id),
             "approve": format!("gommage approval approve {}", request.id),
@@ -196,6 +202,20 @@ pub fn approval_webhook_generic_payload(request: &ApprovalRequest) -> serde_json
             "tui": "gommage tui --snapshot --view approvals"
         }
     })
+}
+
+pub fn approval_callback_nonce(request: &ApprovalRequest) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"gommage-approval-callback-v1\0");
+    h.update(request.id.as_bytes());
+    h.update(b"\0");
+    h.update(request.input_hash.as_bytes());
+    h.update(b"\0");
+    h.update(request.required_scope.as_bytes());
+    h.update(b"\0");
+    h.update(request.policy_version.as_bytes());
+    format!("nonce_{}", hex::encode(h.finalize()))
 }
 
 fn format_timestamp(value: OffsetDateTime) -> String {

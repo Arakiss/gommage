@@ -79,10 +79,10 @@ struct SmokeCheck {
     warning: Option<String>,
 }
 
-struct SmokeFixture {
-    name: &'static str,
-    description: &'static str,
-    call: ToolCall,
+pub(crate) struct SmokeFixture {
+    pub(crate) name: &'static str,
+    pub(crate) description: &'static str,
+    pub(crate) call: ToolCall,
     expectation: SmokeExpectation,
     allow_local_relaxation: bool,
 }
@@ -199,7 +199,7 @@ pub(crate) fn build_smoke_report(layout: &HomeLayout) -> Result<SmokeReport> {
     })
 }
 
-fn smoke_fixtures() -> Vec<SmokeFixture> {
+pub(crate) fn smoke_fixtures() -> Vec<SmokeFixture> {
     vec![
         SmokeFixture {
             name: "hardstop_rm_root",

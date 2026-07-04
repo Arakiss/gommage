@@ -137,9 +137,16 @@ pub(crate) fn build_agent_status_report(
 }
 
 fn build_claude_status_report(layout: &HomeLayout) -> AgentStatusReport {
-    let mut report = AgentStatusReport::new(AgentKind::Claude);
     let settings_path = env_path_or_home("GOMMAGE_CLAUDE_SETTINGS", &[".claude", "settings.json"]);
-    push_agent_path_check(&mut report, "settings_file", &settings_path);
+    build_claude_status_report_at(layout, &settings_path)
+}
+
+pub(crate) fn build_claude_status_report_at(
+    layout: &HomeLayout,
+    settings_path: &Path,
+) -> AgentStatusReport {
+    let mut report = AgentStatusReport::new(AgentKind::Claude);
+    push_agent_path_check(&mut report, "settings_file", settings_path);
 
     let settings = match read_json_object(&settings_path) {
         Ok(settings) => settings,
@@ -215,11 +222,18 @@ fn build_claude_status_report(layout: &HomeLayout) -> AgentStatusReport {
 }
 
 fn build_codex_status_report() -> AgentStatusReport {
-    let mut report = AgentStatusReport::new(AgentKind::Codex);
     let hooks_path = env_path_or_home("GOMMAGE_CODEX_HOOKS", &[".codex", "hooks.json"]);
     let config_path = env_path_or_home("GOMMAGE_CODEX_CONFIG", &[".codex", "config.toml"]);
-    push_agent_path_check(&mut report, "hooks_file", &hooks_path);
-    push_agent_path_check(&mut report, "config_file", &config_path);
+    build_codex_status_report_at(&hooks_path, &config_path)
+}
+
+pub(crate) fn build_codex_status_report_at(
+    hooks_path: &Path,
+    config_path: &Path,
+) -> AgentStatusReport {
+    let mut report = AgentStatusReport::new(AgentKind::Codex);
+    push_agent_path_check(&mut report, "hooks_file", hooks_path);
+    push_agent_path_check(&mut report, "config_file", config_path);
 
     let hooks = match read_json_object(&hooks_path) {
         Ok(hooks) => hooks,

@@ -89,6 +89,75 @@ fn sign_webhook_body_at(
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookSignatureVerification {
+    pub ok: bool,
+    pub algorithm: String,
+    pub timestamp: String,
+    pub body_sha256: String,
+    pub expected: String,
+    pub provided: String,
+    pub max_age_seconds: i64,
+    pub age_seconds: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub fn verify_webhook_body(
+    body: &[u8],
+    secret: &str,
+    timestamp: &str,
+    signature: &str,
+    max_age_seconds: i64,
+) -> WebhookSignatureVerification {
+    let body_sha256 = hex::encode(Sha256::digest(body));
+    let parsed = OffsetDateTime::parse(timestamp, &Rfc3339);
+    let now = OffsetDateTime::now_utc();
+    let age_seconds = parsed
+        .map(|parsed| (now - parsed).whole_seconds().abs())
+        .unwrap_or(i64::MAX);
+    let mut signed = Vec::with_capacity(timestamp.len() + 1 + body.len());
+    signed.extend_from_slice(timestamp.as_bytes());
+    signed.push(b'.');
+    signed.extend_from_slice(body);
+    let expected = format!(
+        "v1={}",
+        hex::encode(hmac_sha256(secret.as_bytes(), &signed))
+    );
+    let mut error = None;
+    if parsed.is_err() {
+        error = Some("timestamp is not RFC3339".to_string());
+    } else if age_seconds > max_age_seconds {
+        error = Some(format!(
+            "timestamp age {age_seconds}s exceeds max age {max_age_seconds}s"
+        ));
+    } else if !constant_time_eq(expected.as_bytes(), signature.as_bytes()) {
+        error = Some("signature mismatch".to_string());
+    }
+    WebhookSignatureVerification {
+        ok: error.is_none(),
+        algorithm: "hmac-sha256".to_string(),
+        timestamp: timestamp.to_string(),
+        body_sha256,
+        expected,
+        provided: signature.to_string(),
+        max_age_seconds,
+        age_seconds,
+        error,
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (left, right) in a.iter().zip(b.iter()) {
+        diff |= left ^ right;
+    }
+    diff == 0
+}
+
 fn hmac_sha256(secret: &[u8], message: &[u8]) -> [u8; 32] {
     const BLOCK: usize = 64;
     let mut key = [0u8; BLOCK];
@@ -143,5 +212,23 @@ mod tests {
                 .iter()
                 .any(|header| header.name == SIGNATURE_HEADER)
         );
+    }
+
+    #[test]
+    fn verification_accepts_current_matching_signature() {
+        let timestamp = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .expect("timestamp");
+        let body = br#"{"id":"apr_1"}"#;
+        let signed = sign_webhook_body_at(
+            body,
+            "secret",
+            None,
+            OffsetDateTime::parse(&timestamp, &Rfc3339).unwrap(),
+        );
+
+        let verification = verify_webhook_body(body, "secret", &timestamp, &signed.signature, 300);
+
+        assert!(verification.ok, "{verification:?}");
     }
 }

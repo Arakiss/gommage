@@ -3,6 +3,7 @@
   "description": "Canonical agent-facing Gommage command contract. Commands are executed in order by scripts/check-agent-command-contracts.sh.",
   "placeholders": {
     "{report_bundle}": "Temporary JSON output path provided by the contract test.",
+    "{project_root}": "Temporary project root provided by the contract test.",
     "{replay_audit}": "Temporary audit JSONL fixture provided by the contract test.",
     "{replay_policy}": "Temporary policy directory fixture provided by the contract test.",
     "{policy_diff_from}": "Temporary baseline policy directory fixture provided by the contract test.",
@@ -168,6 +169,39 @@
       "purpose": "Inspect Codex hook and sandbox state.",
       "stdin_mode": "none",
       "argv": ["agent", "status", "codex", "--json"]
+    },
+    {
+      "id": "posture_json",
+      "purpose": "Compare the active local policy posture against bundled strict stdlib semantics.",
+      "stdin_mode": "none",
+      "argv": ["posture", "--json"]
+    },
+    {
+      "id": "session_doctor_json",
+      "purpose": "Inspect live or injected agent sessions and whether their homes are Gommage-wired.",
+      "stdin_mode": "none",
+      "argv": ["session", "doctor", "--json"]
+    },
+    {
+      "id": "managed_status_json",
+      "purpose": "Inspect optional managed-mode readiness, daemon presence, hook integrity, and bypass posture.",
+      "stdin_mode": "none",
+      "argv": ["managed", "status", "--json"]
+    },
+    {
+      "id": "run_codex_dry_run_json",
+      "purpose": "Build a verified Codex launch plan without executing Codex.",
+      "stdin_mode": "none",
+      "argv": [
+        "run",
+        "codex",
+        "--dry-run",
+        "--json",
+        "--sandbox",
+        "workspace-write",
+        "--",
+        "contract"
+      ]
     },
     {
       "id": "smoke_json",
@@ -383,6 +417,12 @@
       "purpose": "Run a fixture file directly.",
       "stdin_mode": "none",
       "argv": ["policy", "test", "examples/policy-fixtures.yaml", "--json"]
+    },
+    {
+      "id": "project_init_dry_run_json",
+      "purpose": "Inspect project-local policy starter files without writing them.",
+      "stdin_mode": "none",
+      "argv": ["project", "init", "--root", "{project_root}", "--dry-run", "--json"]
     },
     {
       "id": "map_json",

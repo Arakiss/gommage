@@ -4,11 +4,15 @@ use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
     ApprovalState, ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetter,
     ApprovalWebhookDeadLetterStore, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
-    ApprovalWebhookSource, PictoStore, deliver_prepared_approval_webhook, prepare_approval_webhook,
-    runtime::HomeLayout, webhook_signature::WebhookSignatureReport,
+    ApprovalWebhookSource, PictoStore, approval_callback_nonce, deliver_prepared_approval_webhook,
+    prepare_approval_webhook,
+    runtime::HomeLayout,
+    webhook_signature::{
+        WebhookSignatureReport, WebhookSignatureVerification, verify_webhook_body,
+    },
 };
-use serde::Serialize;
-use std::{path::PathBuf, process::ExitCode};
+use serde::{Deserialize, Serialize};
+use std::{io::Read, path::PathBuf, process::ExitCode};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::approval_workflow::{
@@ -90,6 +94,30 @@ pub(crate) enum ApprovalCmd {
             default_value_t = 250
         )]
         backoff_ms: u64,
+    },
+    /// Apply a signed remote approval callback payload.
+    Callback {
+        /// JSON callback body. Defaults to stdin.
+        #[arg(long, value_name = "FILE")]
+        body: Option<PathBuf>,
+        /// HMAC signature over `<timestamp>.<body>`.
+        #[arg(long, env = "GOMMAGE_APPROVAL_CALLBACK_SIGNATURE")]
+        signature: String,
+        /// RFC3339 timestamp used in the HMAC signed message.
+        #[arg(long, env = "GOMMAGE_APPROVAL_CALLBACK_TIMESTAMP")]
+        timestamp: String,
+        /// HMAC secret shared with the callback provider.
+        #[arg(long, env = "GOMMAGE_APPROVAL_CALLBACK_SECRET")]
+        signing_secret: String,
+        /// Maximum accepted timestamp age in seconds.
+        #[arg(long, default_value_t = 300)]
+        max_age_seconds: i64,
+        /// Verify and report the intended action without mutating approval state.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
     /// Inspect locally dead-lettered approval webhook deliveries.
     Dlq {
@@ -237,6 +265,74 @@ struct WebhookDlqItem<'a> {
     request: &'a gommage_core::ApprovalRequest,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct ApprovalCallbackPayload {
+    #[serde(default)]
+    kind: Option<String>,
+    request_id: String,
+    action: ApprovalCallbackAction,
+    nonce: String,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    ttl: Option<i64>,
+    #[serde(default)]
+    uses: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ApprovalCallbackAction {
+    Approve,
+    Deny,
+}
+
+impl ApprovalCallbackAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approve => "approve",
+            Self::Deny => "deny",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ApprovalCallbackReport {
+    schema_version: u8,
+    kind: &'static str,
+    status: ApprovalCallbackStatus,
+    dry_run: bool,
+    request_id: Option<String>,
+    action: Option<ApprovalCallbackAction>,
+    signature: WebhookSignatureVerification,
+    nonce_match: bool,
+    pending: bool,
+    errors: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<ApprovalActionReport>,
+}
+
+impl ApprovalCallbackReport {
+    fn exit_code(&self) -> ExitCode {
+        if matches!(
+            self.status,
+            ApprovalCallbackStatus::Valid | ApprovalCallbackStatus::Applied
+        ) {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ApprovalCallbackStatus {
+    Valid,
+    Applied,
+    Rejected,
+}
+
 impl<'a> From<&'a ApprovalWebhookDeadLetter> for WebhookDlqItem<'a> {
     fn from(entry: &'a ApprovalWebhookDeadLetter) -> Self {
         Self {
@@ -313,6 +409,24 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
             attempts,
             backoff_ms,
         }),
+        ApprovalCmd::Callback {
+            body,
+            signature,
+            timestamp,
+            signing_secret,
+            max_age_seconds,
+            dry_run,
+            json,
+        } => approval_callback(ApprovalCallbackOptions {
+            layout,
+            body,
+            signature,
+            timestamp,
+            signing_secret,
+            max_age_seconds,
+            dry_run,
+            json,
+        }),
         ApprovalCmd::Dlq { json, limit } => approval_dlq(layout, json, limit),
         ApprovalCmd::Replay { id, json } => approval_replay(layout, &id, json),
         ApprovalCmd::Evidence {
@@ -323,6 +437,156 @@ pub(crate) fn cmd_approval(cmd: ApprovalCmd, layout: HomeLayout) -> Result<ExitC
         } => approval_evidence(layout, &id, redact, output, force),
         ApprovalCmd::Template { provider, json } => approval_template(provider, json),
     }
+}
+
+struct ApprovalCallbackOptions {
+    layout: HomeLayout,
+    body: Option<PathBuf>,
+    signature: String,
+    timestamp: String,
+    signing_secret: String,
+    max_age_seconds: i64,
+    dry_run: bool,
+    json: bool,
+}
+
+fn approval_callback(options: ApprovalCallbackOptions) -> Result<ExitCode> {
+    let ApprovalCallbackOptions {
+        layout,
+        body,
+        signature,
+        timestamp,
+        signing_secret,
+        max_age_seconds,
+        dry_run,
+        json,
+    } = options;
+    let body = read_callback_body(body)?;
+    let verification = verify_webhook_body(
+        &body,
+        &signing_secret,
+        &timestamp,
+        &signature,
+        max_age_seconds,
+    );
+    let payload = serde_json::from_slice::<ApprovalCallbackPayload>(&body);
+    let mut errors = Vec::new();
+    if let Some(error) = &verification.error {
+        errors.push(error.clone());
+    }
+    let (request_id, action, nonce, reason, ttl, uses) = match payload {
+        Ok(payload) => {
+            if payload.kind.as_deref() != Some("gommage_approval_callback") {
+                errors.push("callback kind must be gommage_approval_callback".to_string());
+            }
+            (
+                Some(payload.request_id),
+                Some(payload.action),
+                Some(payload.nonce),
+                payload.reason,
+                payload.ttl,
+                payload.uses,
+            )
+        }
+        Err(error) => {
+            errors.push(format!("callback body is not valid JSON: {error}"));
+            (None, None, None, None, None, None)
+        }
+    };
+
+    let mut nonce_match = false;
+    let mut pending = false;
+    if let Some(request_id) = &request_id {
+        let store = ApprovalStore::open(&layout.approvals_log);
+        match store.get(request_id)? {
+            Some(state) => {
+                pending = state.status == ApprovalStatus::Pending;
+                if !pending {
+                    errors.push(format!(
+                        "approval request {request_id} is {}",
+                        state.status.as_str()
+                    ));
+                }
+                let expected_nonce = approval_callback_nonce(&state.request);
+                nonce_match = nonce.as_deref() == Some(expected_nonce.as_str());
+                if !nonce_match {
+                    errors.push("callback nonce does not match pending request".to_string());
+                }
+            }
+            None => errors.push(format!("approval request {request_id} not found")),
+        }
+    }
+
+    if !errors.is_empty() {
+        let report = ApprovalCallbackReport {
+            schema_version: 1,
+            kind: "approval_callback",
+            status: ApprovalCallbackStatus::Rejected,
+            dry_run,
+            request_id,
+            action,
+            signature: verification,
+            nonce_match,
+            pending,
+            errors,
+            outcome: None,
+        };
+        return print_callback_report(json, report);
+    }
+
+    if dry_run {
+        let report = ApprovalCallbackReport {
+            schema_version: 1,
+            kind: "approval_callback",
+            status: ApprovalCallbackStatus::Valid,
+            dry_run,
+            request_id,
+            action,
+            signature: verification,
+            nonce_match,
+            pending,
+            errors,
+            outcome: None,
+        };
+        return print_callback_report(json, report);
+    }
+
+    let request_id = request_id.expect("validated request id");
+    let action = action.expect("validated callback action");
+    let reason = reason.unwrap_or_else(|| format!("signed callback {}", action.as_str()));
+    let outcome = match action {
+        ApprovalCallbackAction::Approve => approve_request(
+            &layout,
+            &request_id,
+            uses.unwrap_or(1),
+            ttl.unwrap_or(600),
+            &reason,
+        )?,
+        ApprovalCallbackAction::Deny => deny_request(&layout, &request_id, &reason)?,
+    };
+    let report = ApprovalCallbackReport {
+        schema_version: 1,
+        kind: "approval_callback",
+        status: ApprovalCallbackStatus::Applied,
+        dry_run,
+        request_id: Some(request_id),
+        action: Some(action),
+        signature: verification,
+        nonce_match,
+        pending,
+        errors,
+        outcome: Some(outcome),
+    };
+    print_callback_report(json, report)
+}
+
+fn read_callback_body(path: Option<PathBuf>) -> Result<Vec<u8>> {
+    if let Some(path) = path {
+        return Ok(std::fs::read(path)?);
+    }
+    let mut body = Vec::new();
+    std::io::stdin().read_to_end(&mut body)?;
+    Ok(body)
 }
 
 fn approval_list(layout: HomeLayout, json: bool, status: ApprovalStatusArg) -> Result<ExitCode> {
@@ -712,6 +976,39 @@ fn print_action(json: bool, report: ApprovalActionReport) -> Result<ExitCode> {
         print_action_human(&report);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn print_callback_report(json: bool, report: ApprovalCallbackReport) -> Result<ExitCode> {
+    let exit_code = report.exit_code();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("approval callback: {:?}", report.status);
+        if let Some(request_id) = &report.request_id {
+            println!("request: {request_id}");
+        }
+        if let Some(action) = report.action {
+            println!("action: {}", action.as_str());
+        }
+        println!(
+            "signature: {}",
+            if report.signature.ok { "ok" } else { "invalid" }
+        );
+        println!(
+            "nonce: {}",
+            if report.nonce_match { "ok" } else { "mismatch" }
+        );
+        if report.dry_run {
+            println!("dry-run: state not changed");
+        }
+        for error in &report.errors {
+            println!("error: {error}");
+        }
+        if let Some(outcome) = &report.outcome {
+            println!("outcome: {}", outcome.message);
+        }
+    }
+    Ok(exit_code)
 }
 
 fn print_action_human(report: &ApprovalActionReport) {

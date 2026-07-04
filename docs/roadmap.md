@@ -141,8 +141,12 @@ Features:
 - Approval provider interface
   - Generic, Slack-shaped, and Discord-shaped webhook payloads now exist through
     `gommage approval webhook`, including payloads in dry-run JSON and optional
-    HMAC-SHA256 signatures over `<timestamp>.<exact HTTP body>`. Next step is
-    native provider callbacks and native ntfy provider support.
+    HMAC-SHA256 signatures over `<timestamp>.<exact HTTP body>`.
+  - Signed callback application now exists through
+    `gommage approval callback`: callbacks must carry the request-bound nonce
+    emitted in webhook payloads and pass signature, timestamp, pending-request,
+    and nonce checks before resolving a request. Next step is provider-native
+    callback transport and native ntfy provider support.
 - Metrics endpoint
   - Local TUI counters now cover decisions, denials, asks, approval pressure,
     picto outcomes, webhook DLQ entries, audit anomalies, and daemon health.
@@ -187,6 +191,8 @@ Features:
 - Project-local harness mode
   - `gommage project init` creates reviewed fixtures and project policy that can
     be layered with user policy.
+  - Current implementation writes dry-runnable starter project policy,
+    executable fixtures, and a local README without overwriting unless forced.
 - Policy inheritance
   - Explicit precedence: hard-stops, org, project, user imports, local pictos.
   - Current implementation supports explicit org/project/user policy

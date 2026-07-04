@@ -7,20 +7,26 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 export GOMMAGE_HOME="$tmp/.gommage"
+export CODEX_HOME="$tmp/codex"
+export CLAUDE_HOME="$tmp/claude"
 export GOMMAGE_CLAUDE_SETTINGS="$tmp/claude/settings.json"
 export GOMMAGE_CODEX_HOOKS="$tmp/codex/hooks.json"
 export GOMMAGE_CODEX_CONFIG="$tmp/codex/config.toml"
 export GOMMAGE_SYSTEMD_USER_DIR="$tmp/systemd-user"
 export GOMMAGE_CONTRACT_REPORT="$tmp/report-bundle.json"
+export GOMMAGE_CONTRACT_PROJECT_ROOT="$tmp/project"
 export GOMMAGE_CONTRACT_REPLAY_AUDIT="$tmp/replay-audit.log"
 export GOMMAGE_CONTRACT_REPLAY_POLICY="$tmp/replay-policy.d"
 export GOMMAGE_CONTRACT_POLICY_DIFF_FROM="$tmp/policy-diff-from.d"
 export GOMMAGE_CONTRACT_POLICY_DIFF_TO="$tmp/policy-diff-to.d"
 mkdir -p "$(dirname "$GOMMAGE_CLAUDE_SETTINGS")" "$(dirname "$GOMMAGE_CODEX_HOOKS")"
+mkdir -p "$GOMMAGE_CONTRACT_PROJECT_ROOT"
 mkdir -p "$GOMMAGE_CONTRACT_REPLAY_POLICY"
 mkdir -p "$GOMMAGE_CONTRACT_POLICY_DIFF_FROM" "$GOMMAGE_CONTRACT_POLICY_DIFF_TO"
 printf '{"permissions":{"allow":["Bash","Read(./docs/**)"],"deny":["Read(./secrets/**)"]}}\n' > "$GOMMAGE_CLAUDE_SETTINGS"
 printf 'sandbox_mode = "workspace-write"\n[features]\n' > "$GOMMAGE_CODEX_CONFIG"
+export GOMMAGE_SESSION_PROCESS_TABLE="101 CODEX_HOME=$CODEX_HOME codex exec contract
+102 CLAUDE_HOME=$CLAUDE_HOME claude"
 cat > "$GOMMAGE_CONTRACT_REPLAY_POLICY/10-contract.yaml" <<'EOF'
 - name: allow-contract-status
   decision: allow
@@ -85,6 +91,7 @@ with open(manifest_path, encoding="utf-8") as handle:
 for command in manifest["commands"]:
     argv = [
         os.environ["GOMMAGE_CONTRACT_REPORT"] if arg == "{report_bundle}"
+        else os.environ["GOMMAGE_CONTRACT_PROJECT_ROOT"] if arg == "{project_root}"
         else os.environ["GOMMAGE_CONTRACT_REPLAY_AUDIT"] if arg == "{replay_audit}"
         else os.environ["GOMMAGE_CONTRACT_REPLAY_POLICY"] if arg == "{replay_policy}"
         else os.environ["GOMMAGE_CONTRACT_POLICY_DIFF_FROM"] if arg == "{policy_diff_from}"

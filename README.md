@@ -556,6 +556,10 @@ Stable automation contracts:
 | `report bundle --redact` | Support artifact for install or host-integration failures without exposing secrets. |
 | `doctor --json` | Lower-level runtime and install diagnostics. |
 | `agent status --json` | Claude/Codex hook wiring and native permission import state. |
+| `posture --json` | Compare active local policy against bundled strict stdlib semantics and name relaxed/custom posture. |
+| `session doctor --json` | Inspect live agent-like processes and whether their inferred Claude/Codex homes are Gommage-wired. |
+| `managed status --json` | Inspect optional managed-mode readiness: daemon service/socket, permissions, hooks, and bypass environment. |
+| `run codex --dry-run --json -- <task>` | Build a verified Codex launch plan with an explicit sandbox without executing Codex. |
 | `repair agent <agent> --dry-run` | Inspect legacy/broken Gommage hook repair before mutating host config. |
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
 | `smoke --json` | Built-in semantic post-install checks. |
@@ -583,7 +587,9 @@ Stable automation contracts:
 | `approval evidence <id> --redact` | Export request state, relevant signed audit lines, verification summary, and next commands. |
 | `approval dlq --json` | Inspect dead-lettered approval webhook deliveries after bounded retries are exhausted. |
 | `approval webhook --dry-run --json` | Render generic, Slack, or Discord payloads in `requests[].payload` without sending network traffic. |
+| `approval callback --dry-run --json` | Verify a signed remote approval callback, timestamp, and request-bound nonce without mutating state. |
 | `approval template --provider <name> --json` | Render generic, Slack, Discord, or ntfy notification payload templates. |
+| `project init --dry-run --json` | Inspect project-local policy, fixture, and README starter files before creating them. |
 | `agent uninstall` / `uninstall --dry-run` | Reversible cleanup and recovery. |
 
 The manifest and command contract above are checked by CI:
@@ -669,6 +675,24 @@ gommage quickstart --agent claude --daemon-no-start --self-test
 # Keep Codex sandbox enabled for surfaces outside mapped hook events.
 gommage agent install codex
 
+# Compare this host's active policy posture against the bundled strict stdlib.
+gommage posture --json
+
+# Inspect live/nested agent sessions and default homes.
+gommage session doctor --json
+
+# Launch Codex through an explicit, inspected plan.
+gommage run codex --dry-run --json -- "audit this repo"
+gommage run codex --sandbox workspace-write -- "implement the reviewed patch"
+
+# Inspect optional managed-mode readiness. Root is not required for normal use;
+# managed deployment is an operator hardening choice.
+gommage managed status --json
+
+# Create a project-local policy starter pack and fixtures.
+gommage project init --dry-run --json
+gommage project init
+
 # Diagnose the local installation
 gommage verify
 
@@ -697,6 +721,16 @@ gommage approval dlq --json
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL"
 gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL"
 gommage approval template --provider ntfy
+
+# Remote callbacks are signed over `<timestamp>.<body>` and bound to the pending
+# approval request by the callback nonce included in webhook payloads.
+gommage approval callback \
+  --body callback.json \
+  --signature "$X_GOMMAGE_SIGNATURE" \
+  --timestamp "$X_GOMMAGE_SIGNATURE_TIMESTAMP" \
+  --signing-secret "$GOMMAGE_APPROVAL_CALLBACK_SECRET" \
+  --dry-run \
+  --json
 
 # Watch decisions live
 gommage tail

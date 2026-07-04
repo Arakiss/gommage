@@ -1,5 +1,6 @@
 mod support;
 
+use gommage_core::webhook_signature::sign_webhook_body;
 use std::{fs, io::Write, process::Stdio};
 use support::gommage;
 use tempfile::tempdir;
@@ -199,6 +200,105 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
     assert!(audit.contains(r#""type":"approval_requested""#));
     assert!(audit.contains(r#""type":"approval_resolved""#));
     assert!(audit.contains(r#""type":"picto_consumed""#));
+}
+
+#[test]
+fn signed_approval_callback_dry_run_and_apply_approve_pending_request() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+    let webhook = gommage(&home)
+        .args([
+            "approval",
+            "webhook",
+            "--url",
+            "https://example.invalid/gommage",
+            "--dry-run",
+            "--json",
+            "--signing-secret",
+            "secret",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        webhook.status.success(),
+        "{}",
+        String::from_utf8_lossy(&webhook.stderr)
+    );
+    let rendered: serde_json::Value = serde_json::from_slice(&webhook.stdout).unwrap();
+    let request = &rendered["requests"][0]["payload"];
+    let request_id = request["id"].as_str().unwrap();
+    let nonce = request["callback"]["nonce"].as_str().unwrap();
+    let body = serde_json::to_vec(&serde_json::json!({
+        "kind": "gommage_approval_callback",
+        "request_id": request_id,
+        "action": "approve",
+        "nonce": nonce,
+        "reason": "signed callback test",
+        "ttl": 600,
+        "uses": 1
+    }))
+    .unwrap();
+    let body_file = temp.path().join("callback.json");
+    fs::write(&body_file, &body).unwrap();
+    let signature = sign_webhook_body(&body, "secret", None);
+
+    let dry_run = gommage(&home)
+        .args([
+            "approval",
+            "callback",
+            "--body",
+            body_file.to_str().unwrap(),
+            "--signature",
+            &signature.signature,
+            "--timestamp",
+            &signature.timestamp,
+            "--signing-secret",
+            "secret",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    let dry_report: serde_json::Value = serde_json::from_slice(&dry_run.stdout).unwrap();
+    assert_eq!(dry_report["status"].as_str(), Some("valid"));
+    assert_eq!(dry_report["nonce_match"].as_bool(), Some(true));
+    assert_eq!(dry_report["pending"].as_bool(), Some(true));
+
+    let apply = gommage(&home)
+        .args([
+            "approval",
+            "callback",
+            "--body",
+            body_file.to_str().unwrap(),
+            "--signature",
+            &signature.signature,
+            "--timestamp",
+            &signature.timestamp,
+            "--signing-secret",
+            "secret",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        apply.status.success(),
+        "{}",
+        String::from_utf8_lossy(&apply.stderr)
+    );
+    let applied: serde_json::Value = serde_json::from_slice(&apply.stdout).unwrap();
+    assert_eq!(applied["status"].as_str(), Some("applied"));
+    assert_eq!(applied["outcome"]["status"].as_str(), Some("approved"));
+    assert_eq!(applied["outcome"]["request_id"].as_str(), Some(request_id));
 }
 
 #[test]

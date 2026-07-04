@@ -39,6 +39,24 @@ append or replay the same approval inbox.
 queries. It indexes signed audit entries after `gommage state rebuild`; it is
 safe to delete, and no permission decision reads from it.
 
+## Local control plane
+
+The primary Gommage operation path is CLI + daemon + host hooks:
+
+- `gommage posture` compares the active local policy against bundled strict
+  stdlib semantics and names relaxed/custom posture.
+- `gommage session doctor` inspects live agent-like processes and whether their
+  inferred Claude/Codex homes are wired to Gommage.
+- `gommage run codex` builds an explicit Codex launch plan with a selected
+  sandbox after validating the Codex home.
+- `gommage managed status` inspects optional managed-mode readiness without
+  requiring root for normal local development.
+- `gommage project init` creates reviewed project-local policy and fixtures.
+
+These commands do not change the evaluator contract. They make coverage,
+configuration, launch posture, and operator evidence more visible around the
+deterministic decision kernel.
+
 ## Request lifecycle
 
 ```
@@ -148,6 +166,10 @@ an MCP `tools/call` request to a Gommage tool name of
 line to the upstream server when the decision resolves to allow. Denied and
 picto-required calls return MCP tool results with `isError: true`; they are not
 sent to the upstream process.
+
+Treat this as adapter plumbing, not as the canonical Gommage control path. Use
+it only for deliberately wrapped stdio MCP servers where the native hook layer
+does not give enough coverage.
 
 ## Picto scope matching
 
