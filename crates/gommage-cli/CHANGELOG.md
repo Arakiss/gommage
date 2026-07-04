@@ -1,5 +1,21 @@
 # Changelog — gommage-cli
 
+## [0.48.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.47.2-beta.1...gommage-cli-v0.48.0-beta.1) (2026-07-04)
+
+
+### Features
+
+* add audit friction stats ([b772b3e](https://github.com/Arakiss/gommage/commit/b772b3e6ea92159aa20f142a7f288ab4caf4841d))
+* add local control plane diagnostics ([45ea235](https://github.com/Arakiss/gommage/commit/45ea2355f35dbffcf9cc2476a47f14022bb92168))
+
+
+### Bug fixes
+
+* harden agent hook entrypoint ([22e5ce6](https://github.com/Arakiss/gommage/commit/22e5ce619fb9a4ed42c46ee79f677c8ece78b1f0))
+* preserve nested Codex hooks ([276743c](https://github.com/Arakiss/gommage/commit/276743ce32e3c434dfee13fa428af7eb25e2f641))
+* satisfy strict clippy on agent status paths ([1301bcb](https://github.com/Arakiss/gommage/commit/1301bcbc7c73c0002ea9a25e8c2f6404469af112))
+* treat local smoke relaxations as warnings ([b32f130](https://github.com/Arakiss/gommage/commit/b32f1304fb4e303ecd650ab48dbf6506dd5e9f9d))
+
 ## [0.47.2-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.47.1-beta.1...gommage-cli-v0.47.2-beta.1) (2026-06-30)
 
 

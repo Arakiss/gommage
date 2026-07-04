@@ -1,5 +1,17 @@
 # Changelog — gommage-stdlib
 
+## [0.12.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.11.0-alpha.1...gommage-stdlib-v0.12.0-alpha.1) (2026-07-04)
+
+
+### Features
+
+* add audit friction stats ([b772b3e](https://github.com/Arakiss/gommage/commit/b772b3e6ea92159aa20f142a7f288ab4caf4841d))
+
+
+### Bug fixes
+
+* harden agent hook entrypoint ([22e5ce6](https://github.com/Arakiss/gommage/commit/22e5ce619fb9a4ed42c46ee79f677c8ece78b1f0))
+
 ## [0.11.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.10.0-alpha.1...gommage-stdlib-v0.11.0-alpha.1) (2026-06-30)
 
 
