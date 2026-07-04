@@ -1,5 +1,12 @@
 # Git operations policy.
 
+- name: deny-bulk-git-stage
+  decision: gommage
+  match:
+    any_capability:
+      - "git.stage:bulk"
+  reason: "Do not stage the whole tree. Stage explicit paths instead, for example `git add path/to/file.rs path/to/test.rs`."
+
 - name: gate-main-push
   decision: ask_picto
   required_scope: "git.push:main"

@@ -1,0 +1,6 @@
+{
+  "name": "git-add-update-is-denied-with-corrective-rule",
+  "call": { "tool": "Bash", "input": { "command": "git add -u" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}
+

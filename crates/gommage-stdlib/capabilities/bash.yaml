@@ -53,6 +53,13 @@
   emit:
     - "git.reset.hard:<any>"
 
+- name: bash-git-add-bulk
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+add\\s+(?:--all|-A|--update|-u|\\.)(?:\\s|$)"
+  emit:
+    - "git.stage:bulk"
+
 # --- Package managers -------------------------------------------------------
 - name: bash-bun-install
   tool: Bash

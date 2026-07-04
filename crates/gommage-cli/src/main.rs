@@ -38,6 +38,7 @@ mod sandbox;
 mod self_update;
 mod smoke;
 mod state;
+mod stats;
 mod tui;
 mod tui_actions;
 mod tui_app;
@@ -70,6 +71,7 @@ use sandbox::{SandboxCmd, cmd_sandbox};
 use self_update::{UpdateOptions, UpgradeOptions, cmd_update, cmd_upgrade};
 use smoke::cmd_smoke;
 use state::{StateCmd, cmd_state};
+use stats::{StatsOptions, cmd_stats};
 use tui::{TuiOptions, cmd_tui};
 use tui_views::TuiView;
 use uninstall::{UninstallOptions, cmd_uninstall};
@@ -317,6 +319,16 @@ enum Cmd {
         /// Emit a stable machine-readable smoke-test report.
         #[arg(long)]
         json: bool,
+    },
+
+    /// Aggregate audit, approval, friction, and deny-loop telemetry.
+    Stats {
+        /// Emit stable machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+        /// Reporting window, in days, for recent friction counts.
+        #[arg(long, default_value_t = 7)]
+        window_days: u32,
     },
 
     /// Manage the rebuildable local SQLite state index.
@@ -621,6 +633,9 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Release(sub) => return cmd_release(sub),
         Cmd::Report(sub) => return cmd_report(sub, layout),
         Cmd::Smoke { json } => return cmd_smoke(layout, json),
+        Cmd::Stats { json, window_days } => {
+            return cmd_stats(layout, StatsOptions { json, window_days });
+        }
         Cmd::State(sub) => return cmd_state(sub, layout),
         Cmd::Sandbox(sub) => return cmd_sandbox(sub, layout),
         Cmd::Tui {

@@ -556,6 +556,7 @@ Stable automation contracts:
 | `repair agent <agent> --dry-run` | Inspect legacy/broken Gommage hook repair before mutating host config. |
 | `map --json` | Capability mapper debugging without policy evaluation or audit writes. |
 | `smoke --json` | Built-in semantic post-install checks. |
+| `stats --json` | Audit, approval, friction, and deny-loop telemetry from local logs. |
 | `sandbox advise --json` | Advisory native sandbox bridge guidance for Codex, bwrap, macOS Seatbelt, and AppArmor. This is not enforcement. |
 | `policy test --json` | Project-owned policy regression fixtures. |
 | `policy layers --json` | Active policy layer order, per-layer rule counts, and effective policy version hash. |

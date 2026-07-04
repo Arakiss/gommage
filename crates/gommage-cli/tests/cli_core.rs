@@ -303,6 +303,49 @@ fn map_json_reports_capabilities_without_policy_files() {
 }
 
 #[test]
+fn decide_teaches_explicit_paths_for_bulk_git_stage() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let mut child = gommage(&home)
+        .args(["decide", "--pretty"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"tool":"Bash","input":{"command":"git add -A"}}"#)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["decision"]["kind"].as_str(), Some("gommage"));
+    assert_eq!(
+        report["matched_rule"]["name"].as_str(),
+        Some("deny-bulk-git-stage")
+    );
+    let reason = report["decision"]["reason"].as_str().unwrap();
+    assert!(reason.contains("Stage explicit paths"));
+    assert!(reason.contains("git add path/to/file.rs path/to/test.rs"));
+}
+
+#[test]
 fn map_hook_json_reports_codex_apply_patch_and_mcp_capabilities() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

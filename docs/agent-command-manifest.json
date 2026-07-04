@@ -154,6 +154,12 @@
       "argv": ["smoke", "--json"]
     },
     {
+      "id": "stats_json",
+      "purpose": "Aggregate audit, approval, friction, and deny-loop telemetry.",
+      "stdin_mode": "none",
+      "argv": ["stats", "--json"]
+    },
+    {
       "id": "sandbox_advise_json",
       "purpose": "Print advisory native sandbox bridge guidance.",
       "stdin_mode": "none",
