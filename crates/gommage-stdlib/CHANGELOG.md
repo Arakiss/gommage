@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.13.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.12.0-alpha.1...gommage-stdlib-v0.13.0-alpha.1) (2026-07-04)
+
+
+### Features
+
+* add operational watchlist cleanup ([db41128](https://github.com/Arakiss/gommage/commit/db4112843e9d3acadae0995215b6936c8ecc5563))
+
 ## [0.12.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.11.0-alpha.1...gommage-stdlib-v0.12.0-alpha.1) (2026-07-04)
 
 

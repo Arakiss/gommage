@@ -1,5 +1,13 @@
 # Changelog — gommage-cli
 
+## [0.49.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.48.0-beta.1...gommage-cli-v0.49.0-beta.1) (2026-07-04)
+
+
+### Features
+
+* add operational watchlist cleanup ([db41128](https://github.com/Arakiss/gommage/commit/db4112843e9d3acadae0995215b6936c8ecc5563))
+* clarify audit and stale approval output ([d22666c](https://github.com/Arakiss/gommage/commit/d22666cf842463431311f5bdd72624a7f7bd52f7))
+
 ## [0.48.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.47.2-beta.1...gommage-cli-v0.48.0-beta.1) (2026-07-04)
 
 
