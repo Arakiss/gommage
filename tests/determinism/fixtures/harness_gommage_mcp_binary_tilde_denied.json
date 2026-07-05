@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-mcp-binary-tilde-denied",
+  "note": "A literal-tilde Bash redirect to gommage-mcp must hit deny-gommage-binary-tamper.",
+  "call": { "tool": "Bash", "input": { "command": "cat > ~/.local/bin/gommage-mcp << 'EOF'\n#!/bin/sh\nEOF" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-binary-tamper" }
+}

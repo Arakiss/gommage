@@ -1,0 +1,6 @@
+{
+  "name": "harness-claude-settings-tilde-denied",
+  "note": "A literal-tilde Bash redirect to Claude settings is the same harness config write as the absolute HOME form.",
+  "call": { "tool": "Bash", "input": { "command": "printf '{}' > ~/.claude/settings.json" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-agent-hook-config-tamper" }
+}

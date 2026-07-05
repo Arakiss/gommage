@@ -54,22 +54,15 @@
 # --- Shell-rc persistence: deny writes to login/shell rc files --------------
 # A write to a login/shell rc file is how an agent makes code run on every new
 # shell. R2 already emits fs.write from tee/cp/redirect, so `echo x >> ~/.zshrc`
-# and `tee ~/.bashrc` reach this deny. Both the literal-tilde form (the mapper
-# captures `~/.zshrc` verbatim — the shell never expands it in the string) and
-# the ${HOME}-prefixed and absolute /etc forms are covered. A write to a normal
-# project file under EXPEDITION_ROOT is unaffected. Placed before the allow
-# rules so it wins even if an rc path sits under the project root.
+# and `tee ~/.bashrc` reach this deny after the policy evaluator normalizes
+# leading `~/`, `$HOME/`, and `${HOME}/` aliases to the same HOME prefix used
+# by these patterns. A write to a normal project file under EXPEDITION_ROOT is
+# unaffected. Placed before the allow rules so it wins even if an rc path sits
+# under the project root.
 - name: deny-shell-rc-write
   decision: gommage
   match:
     any_capability:
-      - "fs.write:~/.bashrc"
-      - "fs.write:~/.zshrc"
-      - "fs.write:~/.bash_profile"
-      - "fs.write:~/.zshenv"
-      - "fs.write:~/.profile"
-      - "fs.write:~/.zprofile"
-      - "fs.write:~/.config/fish/config.fish"
       - "fs.write:${HOME}/.bashrc"
       - "fs.write:${HOME}/.zshrc"
       - "fs.write:${HOME}/.bash_profile"
