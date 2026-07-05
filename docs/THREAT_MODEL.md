@@ -64,6 +64,12 @@ and escapes), strips leading wrappers from each segment (`VAR=value`, `env`,
 `$(...)` / backtick command substitutions, and surfaces genuine output-redirect
 targets. Each resulting candidate is run through the stdlib capability rules.
 
+Before policy matching, path-shaped filesystem capabilities (`fs.read`,
+`fs.search`, `fs.write`) normalize leading `~`, `~/`, `$HOME/`, and `${HOME}/`
+to the `HOME` value used when loading policy. That is a lexical alias rewrite,
+not `realpath`: relative paths, `..`, symlinks, `~user`, and other variables are
+left untouched.
+
 The effect: a policy gate cannot be evaded by command **shape**. These all
 surface `fs.read:/etc/shadow` and are gated like a `Read`:
 

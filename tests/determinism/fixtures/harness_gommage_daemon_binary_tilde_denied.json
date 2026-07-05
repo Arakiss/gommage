@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-daemon-binary-tilde-denied",
+  "note": "A literal-tilde Bash redirect to gommage-daemon must hit deny-gommage-binary-tamper.",
+  "call": { "tool": "Bash", "input": { "command": "cat > ~/.local/bin/gommage-daemon << 'EOF'\n#!/bin/sh\nEOF" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-binary-tamper" }
+}

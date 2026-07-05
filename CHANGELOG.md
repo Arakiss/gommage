@@ -17,6 +17,14 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
 
+### Fixed
+
+- Filesystem policy evaluation now normalizes leading home aliases (`~/`,
+  `$HOME/`, `${HOME}/`) for `fs.read`, `fs.search`, and `fs.write`
+  capabilities before matching rules. Bash redirects such as
+  `cat >> ~/.gommage/policy.d/x.yaml` now hit the same harness-integrity rules
+  as native absolute-path writes to `${HOME}/.gommage/...`.
+
 ### Added
 
 - `gommage daemon reload` reloads policy and capability mappers in the running

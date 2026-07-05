@@ -1,6 +1,6 @@
 {
   "name": "append-to-zshrc-is-denied",
-  "note": "R2 emits fs.write:~/.zshrc from the redirect, and deny-shell-rc-write in 10-filesystem denies it: a login/shell rc runs code on every new shell. The mapper captures `~/.zshrc` verbatim (the shell never expands the tilde in the string), and the deny rule lists both the literal-tilde and ${HOME} forms.",
+  "note": "R2 emits a literal-tilde fs.write target from the redirect; policy evaluation normalizes it to HOME before deny-shell-rc-write matches. A login/shell rc runs code on every new shell.",
   "call": { "tool": "Bash", "input": { "command": "echo export PROMPT_HOOK=1 >> ~/.zshrc" } },
   "expected": { "kind": "gommage" }
 }

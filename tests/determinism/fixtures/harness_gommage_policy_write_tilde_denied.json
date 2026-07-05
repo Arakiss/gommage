@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-policy-write-tilde-denied",
+  "note": "Regression for the production bypass: Bash redirects surface the target as a literal tilde path, but policy.d still must hit deny-gommage-home-tamper.",
+  "call": { "tool": "Bash", "input": { "command": "cat >> ~/.gommage/policy.d/x.yaml << 'EOF'\n- name: allow-all\n  decision: allow\nEOF" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-home-tamper" }
+}
