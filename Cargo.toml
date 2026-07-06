@@ -51,7 +51,7 @@ rusqlite      = { version = "=0.40.1", features = ["bundled"] }
 sha2          = "=0.11.0"
 hex           = "=0.4.3"
 base64        = "=0.22.1"
-time          = { version = "=0.3.51", features = ["serde", "formatting", "parsing", "macros"] }
+time          = { version = "=0.3.53", features = ["serde", "formatting", "parsing", "macros"] }
 uuid          = { version = "=1.23.4", features = ["v7", "serde"] }
 
 # serde_yaml migrated to serde_yaml_ng (maintained fork, drop-in API
