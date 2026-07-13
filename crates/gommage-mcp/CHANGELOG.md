@@ -1,5 +1,12 @@
 # Changelog — gommage-mcp
 
+## [0.11.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.10.2-alpha.1...gommage-mcp-v0.11.0-alpha.1) (2026-07-13)
+
+
+### Features
+
+* bind Pictos to exact input and rebuild operator TUI ([f34b73b](https://github.com/Arakiss/gommage/commit/f34b73bb468a7afbf939b5d207f85fd45973c06f))
+
 ## [0.10.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.10.1-alpha.1...gommage-mcp-v0.10.2-alpha.1) (2026-07-04)
 
 ## [0.10.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-mcp-v0.10.0-alpha.1...gommage-mcp-v0.10.1-alpha.1) (2026-07-04)

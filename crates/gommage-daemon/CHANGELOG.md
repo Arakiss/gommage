@@ -1,5 +1,12 @@
 # Changelog — gommage-daemon
 
+## [0.9.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.8.2-alpha.1...gommage-daemon-v0.9.0-alpha.1) (2026-07-13)
+
+
+### Features
+
+* bind Pictos to exact input and rebuild operator TUI ([f34b73b](https://github.com/Arakiss/gommage/commit/f34b73bb468a7afbf939b5d207f85fd45973c06f))
+
 ## [0.8.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.8.1-alpha.1...gommage-daemon-v0.8.2-alpha.1) (2026-07-04)
 
 ## [0.8.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-daemon-v0.8.0-alpha.1...gommage-daemon-v0.8.1-alpha.1) (2026-07-04)

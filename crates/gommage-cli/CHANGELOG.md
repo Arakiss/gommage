@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.50.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.49.0-beta.1...gommage-cli-v0.50.0-beta.1) (2026-07-13)
+
+
+### Features
+
+* bind Pictos to exact input and rebuild operator TUI ([f34b73b](https://github.com/Arakiss/gommage/commit/f34b73bb468a7afbf939b5d207f85fd45973c06f))
+
 ## [0.49.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.48.0-beta.1...gommage-cli-v0.49.0-beta.1) (2026-07-04)
 
 
