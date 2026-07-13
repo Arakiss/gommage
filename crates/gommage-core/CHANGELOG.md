@@ -3,6 +3,13 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.17.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.16.1-alpha.1...gommage-core-v0.17.0-alpha.1) (2026-07-13)
+
+
+### Features
+
+* bind Pictos to exact input and rebuild operator TUI ([f34b73b](https://github.com/Arakiss/gommage/commit/f34b73bb468a7afbf939b5d207f85fd45973c06f))
+
 ## [0.16.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.16.0-alpha.1...gommage-core-v0.16.1-alpha.1) (2026-07-04)
 
 ## [0.16.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.15.0-alpha.1...gommage-core-v0.16.0-alpha.1) (2026-07-04)
