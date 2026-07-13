@@ -220,6 +220,35 @@ impl Expedition {
     }
 }
 
+/// Policy and capability data loaded without initializing a Gommage home.
+///
+/// This is intentionally separate from [`Runtime`]. It is safe for diagnostic
+/// and reporting paths: it reads existing policy, mapper, and expedition files
+/// but never creates directories, keys, databases, or sockets.
+#[derive(Debug)]
+pub struct PolicyReadModel {
+    pub mapper: CapabilityMapper,
+    pub policy: Policy,
+    pub expedition: Option<Expedition>,
+}
+
+impl PolicyReadModel {
+    pub fn load(layout: &HomeLayout) -> Result<Self, GommageError> {
+        let expedition = Expedition::load(&layout.expedition_file)?;
+        let env = expedition
+            .as_ref()
+            .map(Expedition::policy_env)
+            .unwrap_or_else(default_policy_env);
+        let mapper = CapabilityMapper::load_from_dir(&layout.capabilities_dir)?;
+        let policy = load_active_policy(layout, expedition.as_ref(), &env)?;
+        Ok(Self {
+            mapper,
+            policy,
+            expedition,
+        })
+    }
+}
+
 /// Everything needed to evaluate a tool call: policy + mapper + picto store.
 ///
 /// Construct with `Runtime::open(layout)` after `layout.ensure()`.
@@ -235,34 +264,25 @@ pub struct Runtime {
 impl Runtime {
     pub fn open(layout: HomeLayout) -> Result<Self, GommageError> {
         layout.ensure()?;
-        let expedition = Expedition::load(&layout.expedition_file)?;
-        let env = expedition
-            .as_ref()
-            .map(Expedition::policy_env)
-            .unwrap_or_else(default_policy_env);
-        let mapper = CapabilityMapper::load_from_dir(&layout.capabilities_dir)?;
-        let policy = load_active_policy(&layout, expedition.as_ref(), &env)?;
+        let read_model = PolicyReadModel::load(&layout)?;
         let pictos = PictoStore::open(&layout.pictos_db)?;
         let approvals = ApprovalStore::open(&layout.approvals_log);
         Ok(Runtime {
-            mapper,
-            policy,
+            mapper: read_model.mapper,
+            policy: read_model.policy,
             pictos,
             approvals,
-            expedition,
+            expedition: read_model.expedition,
             layout,
         })
     }
 
     /// Reload policy + capability mappers from disk. Use on SIGHUP.
     pub fn reload_policy(&mut self) -> Result<(), GommageError> {
-        let env = self
-            .expedition
-            .as_ref()
-            .map(Expedition::policy_env)
-            .unwrap_or_else(default_policy_env);
-        self.mapper = CapabilityMapper::load_from_dir(&self.layout.capabilities_dir)?;
-        self.policy = load_active_policy(&self.layout, self.expedition.as_ref(), &env)?;
+        let read_model = PolicyReadModel::load(&self.layout)?;
+        self.mapper = read_model.mapper;
+        self.policy = read_model.policy;
+        self.expedition = read_model.expedition;
         Ok(())
     }
 }
@@ -281,6 +301,20 @@ mod tests {
         assert!(layout.capabilities_dir.exists());
         assert!(layout.key_file.exists());
         let _ = layout.load_key().unwrap();
+    }
+
+    #[test]
+    fn policy_read_model_never_initializes_layout() {
+        let td = tempdir().unwrap();
+        let layout = HomeLayout::at(&td.path().join("missing-home"));
+
+        let model = PolicyReadModel::load(&layout).unwrap();
+
+        assert_eq!(model.mapper.rule_count(), 0);
+        assert!(model.policy.rules.is_empty());
+        assert!(model.expedition.is_none());
+        assert!(!layout.root.exists());
+        assert!(!layout.key_file.exists());
     }
 
     #[test]

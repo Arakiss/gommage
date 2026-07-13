@@ -182,6 +182,7 @@ pub fn approval_webhook_generic_payload(request: &ApprovalRequest) -> serde_json
         "tool": request.tool,
         "input_hash": request.input_hash,
         "required_scope": request.required_scope,
+        "bind_input": request.bind_input,
         "reason": request.reason,
         "capabilities": request.capabilities,
         "matched_rule": request.matched_rule,
@@ -215,6 +216,9 @@ pub fn approval_callback_nonce(request: &ApprovalRequest) -> String {
     h.update(request.required_scope.as_bytes());
     h.update(b"\0");
     h.update(request.policy_version.as_bytes());
+    if request.bind_input {
+        h.update(b"\0bind_input=1");
+    }
     format!("nonce_{}", hex::encode(h.finalize()))
 }
 

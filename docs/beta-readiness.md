@@ -51,9 +51,9 @@ issue:
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
 | Launch demo | `sh scripts/launch-demo.sh` completes in an isolated home and captures ask-picto, one-use picto allow, hard-stop deny, audit verification, state-index verification, policy fixtures, beta check, and TUI snapshot evidence. |
 | Operator TUI | `gommage tui --snapshot --view all` shows summary, focus, readiness rows, approvals, policy, audit, capability, recovery, onboarding, local metrics, daemon health, active pictos, and next actions on a clean pre-init home and after quickstart. `gommage tui --snapshot --view onboarding` gives a first-minute setup/recovery path. `gommage tui --snapshot --view metrics` shows local counters, webhook DLQ count, audit anomaly count, daemon reachability, and picto inventory. `gommage tui --watch --watch-ticks 2 --view approvals` produces bounded plain-text refreshes without ANSI escapes. `gommage tui --stream --stream-ticks 1` shows recent decision/event rows through daemon IPC when available and falls back to signed audit log reads while still showing daemon/picto/metrics context. |
-| Approval flow | An `ask_picto` decision creates an approval request; `gommage tui --view approvals` can tune TTL/use-count presets and approve/deny with confirmation; `gommage approval approve <id>` mints an exact-scope picto; the next matching call consumes it; `audit-verify --explain` verifies the signed evidence. |
+| Approval flow | An `ask_picto` decision creates an approval request; `gommage tui --view approvals` can tune TTL/use-count presets and approve/deny with confirmation; `gommage approval approve <id>` mints an exact-scope picto by default or an exact-input picto for `bind_input: true`; the matching call consumes it; `audit-verify --explain` verifies the signed evidence. |
 | Approval replay/evidence | `gommage approval replay <id> --json` compares stored request semantics with current policy; `gommage approval evidence <id> --redact` exports request state, relevant audit lines, verification summary, and next commands. |
-| Webhook flow | `gommage approval webhook --provider generic|slack|discord --dry-run --json` renders pending provider payloads in `requests[].payload`; `--signing-secret` adds `requests[].body` plus HMAC `requests[].signature`; a fake or test endpoint proves signed success, retry-exhausted failure, and `approval dlq --json` visibility. |
+| Webhook flow | `gommage approval webhook --provider generic|slack|discord --dry-run --json` renders pending provider payloads in `requests[].payload`; `--signing-secret` adds `requests[].body` plus HMAC `requests[].signature`; callback tests prove signature, timestamp, nonce, and binding-mode validation before a local approve/deny action; a fake or test endpoint proves signed success, retry-exhausted failure, and `approval dlq --json` visibility. |
 | Host wiring | `gommage agent status claude --json` and `gommage agent status codex --json` are documented for supported states. |
 | Harness context | `gommage harness diagnose --json`, `gommage harness explain --json`, and `gommage harness write-context --dry-run` describe host hooks, local coverage boundaries, native permission imports, context file paths, and next commands without requiring source-code inspection. |
 | Agent-facing evals | The `agent-facing evals` CI job and `GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write` pass for agent contract changes. |
@@ -97,9 +97,12 @@ These can remain open for beta if they are clearly documented:
   Code and Codex.
 - crates.io source installs do not provide the signed, prebuilt all-binary
   bundle; GitHub Releases remain the supported binary install path.
-- Signed remote approval callbacks and native ntfy sending can stay on the
-  v1.x roadmap as long as the generic webhook payload, Slack/Discord payload
-  shapes, local approval commands, and TUI approval confirmation are verified.
+- Gommage does not host an inbound approval receiver. `approval callback`
+  verifies a signed callback when a local process supplies it; provider key
+  lifecycle, delivery, and receiver hosting remain operator-owned concerns.
+- Native ntfy sending can stay on the v1.x roadmap while the generic webhook
+  payload, Slack/Discord payload shapes, local approval commands, and TUI
+  approval confirmation remain verified.
 
 ## Operator Smoke
 

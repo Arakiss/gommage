@@ -262,18 +262,24 @@ fn write_eval_decision(eval: &gommage_core::EvalResult, agent: HookAgent) -> Res
         Decision::AskPicto {
             reason,
             required_scope,
+            bind_input,
         } if agent == HookAgent::Codex => (
             "deny",
             format!(
-                "gommage: requires picto scope {required_scope:?} — {reason} (Codex PreToolUse does not support ask yet; denied instead.)"
+                "gommage: requires {} for scope {required_scope:?} — {reason} (Codex PreToolUse does not support ask yet; denied instead.)",
+                picto_requirement(*bind_input)
             ),
         ),
         Decision::AskPicto {
             reason,
             required_scope,
+            bind_input,
         } => (
             "ask",
-            format!("gommage: requires picto scope {required_scope:?} — {reason}"),
+            format!(
+                "gommage: requires {} for scope {required_scope:?} — {reason}",
+                picto_requirement(*bind_input)
+            ),
         ),
     };
     let out = serde_json::json!({
@@ -285,6 +291,14 @@ fn write_eval_decision(eval: &gommage_core::EvalResult, agent: HookAgent) -> Res
     });
     println!("{}", serde_json::to_string(&out)?);
     Ok(ExitCode::SUCCESS)
+}
+
+fn picto_requirement(bind_input: bool) -> &'static str {
+    if bind_input {
+        "an exact-input picto"
+    } else {
+        "a picto"
+    }
 }
 
 fn write_allow_decision(agent: HookAgent, decision: &str, reason: &str) -> Result<ExitCode> {

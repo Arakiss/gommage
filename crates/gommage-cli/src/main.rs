@@ -47,6 +47,7 @@ mod stats;
 mod tui;
 mod tui_actions;
 mod tui_app;
+mod tui_data;
 mod tui_stream;
 mod tui_views;
 mod uninstall;
@@ -757,8 +758,9 @@ fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
 }
 
 /// Warn (to stderr) when a grant scope matches no `ask_picto` rule in the loaded
-/// policy. A picto is consumed only by exact-scope match against a rule's
-/// `required_scope`, so an unknown scope produces a picto that can never unlock
+/// policy. A scope-only picto is consumed only by exact-scope match against a
+/// rule's `required_scope`; input-bound rules also require the exact canonical
+/// tool-call hash. An unknown scope produces a picto that can never unlock
 /// anything — the failure mode a field report hit (scope `git.force-push`,
 /// which matches no rule, instead of the real `git.push.force`).
 fn warn_if_scope_unknown(rt: &Runtime, scope: &str) {
@@ -795,17 +797,31 @@ pub(crate) fn decide_with_pictos(
     if let Decision::AskPicto {
         required_scope,
         reason,
+        bind_input,
     } = eval.decision.clone()
     {
         let now = OffsetDateTime::now_utc();
-        match rt
-            .pictos
-            .find_verified_match(&required_scope, now, verifying_key)?
-        {
+        let input_hash = call.input_hash();
+        let lookup = if bind_input {
+            rt.pictos.find_verified_match_for_input(
+                &required_scope,
+                &input_hash,
+                now,
+                verifying_key,
+            )?
+        } else {
+            rt.pictos
+                .find_verified_match(&required_scope, now, verifying_key)?
+        };
+        match lookup {
             PictoLookup::None => {
-                let request =
-                    rt.approvals
-                        .request_for_ask(call, &eval, &required_scope, &reason)?;
+                let request = rt.approvals.request_for_ask(
+                    call,
+                    &eval,
+                    &required_scope,
+                    bind_input,
+                    &reason,
+                )?;
                 events.push(AuditEvent::ApprovalRequested {
                     id: request.id.clone(),
                     tool: request.tool.clone(),
@@ -817,6 +833,7 @@ pub(crate) fn decide_with_pictos(
                 eval.decision = Decision::AskPicto {
                     required_scope,
                     reason: approval_reason(&reason, &request.id),
+                    bind_input,
                 };
             }
             PictoLookup::BadSignature { id, scope } => {
@@ -827,7 +844,17 @@ pub(crate) fn decide_with_pictos(
                 });
             }
             PictoLookup::Verified { picto } => {
-                match rt.pictos.consume_verified(&picto.id, now, verifying_key)? {
+                let consume = if bind_input {
+                    rt.pictos.consume_verified_for_input(
+                        &picto.id,
+                        &input_hash,
+                        now,
+                        verifying_key,
+                    )?
+                } else {
+                    rt.pictos.consume_verified(&picto.id, now, verifying_key)?
+                };
+                match consume {
                     PictoConsume::Consumed { picto } => {
                         events.push(AuditEvent::PictoConsumed {
                             id: picto.id,

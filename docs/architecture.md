@@ -171,11 +171,20 @@ Treat this as adapter plumbing, not as the canonical Gommage control path. Use
 it only for deliberately wrapped stdio MCP servers where the native hook layer
 does not give enough coverage.
 
-## Picto scope matching
+## Picto matching
 
-V0.1 uses **exact equality** between the required scope and the stored scope. No globbing, no hierarchy. Rationale: over-broad pictos are a security smell; we'd rather surface a second `ask` than silently auto-grant too much.
+Every picto uses **exact equality** between the required scope and the stored
+scope. There is no globbing or hierarchy. Rules may add `bind_input: true` to
+require a matching canonical `ToolCall::input_hash` as well. The signature,
+lookup, and atomic consume path all use that same hash, so a scope-only picto
+cannot satisfy an input-bound rule.
 
-V1.0 may relax this to scoped wildcards (e.g. `git.push:release/*`). That is an opt-in feature, not a default.
+Input binding is opt-in to preserve existing scope-bound policies and direct
+`gommage grant` behavior. A request approved under an input-bound rule mints the
+bound form; a regular approval or direct grant mints the scope-only form.
+
+Future scoped wildcards (for example `git.push:release/*`) would be opt-in, not
+a default.
 
 ## Why Rust
 

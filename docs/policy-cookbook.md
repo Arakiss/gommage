@@ -89,6 +89,29 @@ Note `hard_stop: true` — even a picto can't bypass this.
 
 Then, when you want to push: `gommage grant --scope git.push:main --uses 1 --ttl 5m`.
 
+### Bind a picto to one observed tool call
+
+Use `bind_input: true` when approving one command is meant to authorize that
+exact tool call, rather than another call with the same scope. The canonical
+tool-call hash is signed into the resulting picto and checked again when it is
+consumed.
+
+```yaml
+- name: gate-exact-main-push
+  decision: ask_picto
+  required_scope: "git.push:main"
+  bind_input: true
+  match:
+    any_capability:
+      - "git.push:refs/heads/main"
+      - "git.push:refs/heads/master"
+  reason: "review the exact main push before it runs"
+```
+
+`bind_input` defaults to `false` and is valid only with `decision: ask_picto`.
+Direct `gommage grant --scope …` remains scope-bound; approve the pending
+request from an input-bound rule to mint the exact-input form.
+
 ### Allow pushes on feature branches
 
 ```yaml

@@ -1,6 +1,6 @@
 mod support;
 
-use std::{io::Write, process::Stdio};
+use std::{fs, io::Write, process::Stdio};
 use support::gommage;
 use tempfile::tempdir;
 
@@ -72,6 +72,131 @@ fn tui_snapshot_is_plain_and_actionable_preinit() {
     assert!(stdout.contains("- agent codex [fail]"));
     assert!(stdout.contains("gommage quickstart --agent claude --daemon --self-test"));
     assert!(!stdout.contains("\x1b["));
+}
+
+#[test]
+fn tui_snapshot_all_never_creates_a_clean_home() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let claude_settings = temp.path().join("claude-settings.json");
+    let codex_hooks = temp.path().join("codex-hooks.json");
+    let codex_config = temp.path().join("codex-config.toml");
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &claude_settings)
+        .env("GOMMAGE_CODEX_HOOKS", &codex_hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &codex_config)
+        .args(["tui", "--snapshot", "--view", "all"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("onboarding:")
+    );
+    assert!(!home.exists(), "snapshot created {}", home.display());
+}
+
+#[test]
+fn tui_watch_all_never_creates_a_clean_home() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    let claude_settings = temp.path().join("claude-settings.json");
+    let codex_hooks = temp.path().join("codex-hooks.json");
+    let codex_config = temp.path().join("codex-config.toml");
+
+    let output = gommage(&home)
+        .env("GOMMAGE_CLAUDE_SETTINGS", &claude_settings)
+        .env("GOMMAGE_CODEX_HOOKS", &codex_hooks)
+        .env("GOMMAGE_CODEX_CONFIG", &codex_config)
+        .args([
+            "tui",
+            "--watch",
+            "--watch-ticks",
+            "2",
+            "--refresh-ms",
+            "250",
+            "--view",
+            "all",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home.exists(), "watch created {}", home.display());
+}
+
+#[test]
+fn tui_snapshot_never_migrates_existing_picto_database() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    fs::create_dir_all(&home).unwrap();
+    let database = home.join("pictos.sqlite");
+    let conn = rusqlite::Connection::open(&database).unwrap();
+    conn.execute_batch(
+        r#"
+        CREATE TABLE pictos (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL,
+            max_uses INTEGER NOT NULL,
+            uses INTEGER NOT NULL,
+            ttl_expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            signature_b64 TEXT NOT NULL
+        );
+        "#,
+    )
+    .unwrap();
+    let before_bytes = fs::read(&database).unwrap();
+    let before_columns = table_columns(&conn, "pictos");
+    drop(conn);
+
+    let output = gommage(&home)
+        .args(["tui", "--snapshot", "--view", "metrics"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let conn = rusqlite::Connection::open_with_flags(
+        &database,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    assert_eq!(table_columns(&conn, "pictos"), before_columns);
+    drop(conn);
+    assert_eq!(fs::read(&database).unwrap(), before_bytes);
+    assert!(!home.join("pictos.sqlite-wal").exists());
+    assert!(!home.join("pictos.sqlite-shm").exists());
+    assert!(!home.join("key.ed25519").exists());
+    assert!(!home.join("policy.d").exists());
+    assert!(!home.join("capabilities.d").exists());
+}
+
+fn table_columns(conn: &rusqlite::Connection, table: &str) -> Vec<String> {
+    let mut statement = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .unwrap();
+    statement
+        .query_map([], |row| row.get(1))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
 }
 
 #[test]
@@ -300,7 +425,12 @@ fn tui_snapshot_metrics_reports_daemon_pictos_and_local_counters() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("operator:"));
+    assert!(
+        stdout.starts_with("metrics:"),
+        "unexpected output: {stdout}"
+    );
+    assert!(!stdout.contains("Gommage dashboard"));
+    assert!(!stdout.contains("readiness:"));
     assert!(stdout.contains("daemon: warn - not reachable"));
     assert!(stdout.contains("pictos: 1 active"));
     assert!(stdout.contains("next active picto: picto_"));

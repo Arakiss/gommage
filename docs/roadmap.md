@@ -11,9 +11,10 @@ installer line.
 
 ## Roadmap principles
 
-- Runtime decisions stay deterministic. Advisory generators may use richer
-  context, but `allow` / `deny` / `ask` must remain a pure function of mapped
-  capabilities and policy.
+- Capability mapping and policy decisions stay deterministic. Advisory
+  generators may use richer context, but the evaluator's `allow` / `deny` /
+  `ask_picto` result must remain a pure function of mapped capabilities and
+  policy. Picto authorization state is evaluated afterward.
 - Every feature that mutates a user's system needs a dry-run, adjacent backup,
   and rollback story.
 - Human-facing output can be beautiful; agent-facing output must be stable

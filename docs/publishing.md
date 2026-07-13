@@ -4,7 +4,7 @@ Gommage has two distribution channels with different maturity levels.
 
 ## Prerelease install path
 
-The supported alpha install path is the GitHub Release binary installer:
+The supported public beta install path is the GitHub Release binary installer:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
@@ -69,7 +69,7 @@ same script without reinstalling binaries. Installer-managed destinations are:
 - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
 
 Remote skill installs read from `GOMMAGE_SKILL_REF` / `--skill-ref`, defaulting
-to `main`. This keeps old binary tags installable while the alpha skill evolves.
+to `main`. This keeps old binary tags installable while the current skill evolves.
 
 ## crates.io status
 

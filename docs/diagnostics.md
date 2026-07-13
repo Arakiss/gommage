@@ -28,16 +28,15 @@ summary, mapper inventory, recovery shortcuts, and local metrics. `gommage tui
 IPC when the daemon is reachable and the signed audit log otherwise. Stream and
 snapshot output include daemon reachability, active picto counts, pending
 approval counters, webhook DLQ counts, decision counters, and audit anomaly
-counts when verification is available. Interactive mode switches views with
-`1`-`8`. In the approvals view, `t/T` changes the TTL preset, `u/U` changes the
-use-count preset, and `A` / `D` stage an approve/deny action for the selected
-request. The selected approval preview includes request time, input hash,
-capabilities, stored rule, and current-policy replay context. `y` is still
-required before mutating state.
-The README embeds a sanitized animated demo at `docs/assets/tui-dashboard.gif`
-and keeps `docs/assets/tui-dashboard.svg` as a static fallback; update both
-assets whenever the TUI's primary sections or vocabulary change.
-
+counts when verification is available. Interactive mode uses `1` for
+Overview, `2` for Approvals, and `3` for Inspect. Keys `3`-`8` jump
+directly to an inspection section, while `[` and `]` move between those
+sections. In the approvals view, `t/T` changes the TTL preset, `u/U` changes
+the use-count preset, `i` reveals technical request context, and `A` /
+`D` stage an approve/deny action for the selected request. The preview shows
+the tool, scope, Picto binding, reason, and proposed grant; technical context
+adds the request ID, input hash, policy version, and matched rule. `y` is
+required only from a visible confirmation dialog before mutating state.
 `gommage doctor` is the lower-level operator installation health check. Use the default text output for humans and `gommage doctor --json` when you need only filesystem/runtime diagnostics.
 
 `gommage agent status <claude|codex>` is the host-agent integration check. Use
@@ -235,6 +234,12 @@ gommage approval webhook --url "$GOMMAGE_APPROVAL_WEBHOOK_URL" \
 gommage approval webhook --provider slack --url "$SLACK_WEBHOOK_URL" --dry-run
 gommage approval webhook --provider discord --url "$DISCORD_WEBHOOK_URL" --dry-run
 gommage approval template --provider ntfy
+gommage approval callback \
+  --body callback.json \
+  --signature "$X_GOMMAGE_SIGNATURE" \
+  --timestamp "$X_GOMMAGE_SIGNATURE_TIMESTAMP" \
+  --signing-secret "$GOMMAGE_APPROVAL_CALLBACK_SECRET" \
+  --dry-run --json
 ```
 
 `approval list` defaults to pending work. Use `--status all` when reviewing
@@ -247,11 +252,13 @@ clear the pending queue while preserving history. Human output prints a summary
 plus the first matched requests by default; use `--show-all` or `--verbose` for
 full terminal detail. JSON output always includes every processed request.
 
-Approving a request mints an exact-scope picto and writes signed
-`picto_created` plus `approval_resolved` events. Human approval output is a
-plain, scannable summary; `approval approve <id> --json` keeps the stable action
-report with `status`, `request_id`, `scope`, `picto_id`, nested `picto` details,
-and `next_action` for agents. Denying a request writes a signed
+Approving a normal request mints an exact-scope picto. A request created by a
+`bind_input: true` rule mints an exact-input picto that only matches the same
+canonical tool call. Both paths write signed `picto_created` plus
+`approval_resolved` events. Human approval output is a plain, scannable summary;
+`approval approve <id> --json` keeps the stable action report with `status`,
+`request_id`, `scope`, `picto_id`, nested `picto` details including
+`kind` / `input_bound`, and `next_action` for agents. Denying a request writes a signed
 `approval_resolved` event with `status: denied`. Webhook delivery uses bounded
 retries; exhausted failures are written to
 `~/.gommage/approval-webhook-dlq.jsonl`, exposed through `approval dlq`, and
@@ -265,7 +272,9 @@ without sending. When `--signing-secret` or
 `HMAC-SHA256(secret, timestamp + "." + raw_http_body)` and covers the exact
 bytes sent to the receiver. Audit events store only non-secret signature
 metadata: algorithm, optional key id, timestamp, body SHA-256, and a signature
-prefix.
+prefix. `approval callback` is a local import command: it verifies the HMAC,
+timestamp, pending request, and request-bound nonce before it can apply an
+approve or deny action. Gommage does not host an inbound callback endpoint.
 Replay compares the stored request capabilities against the current policy;
 evidence bundles collect request state, relevant signed audit lines,
 verification summary, and next commands for issue reports.

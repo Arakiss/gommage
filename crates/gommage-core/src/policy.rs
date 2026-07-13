@@ -25,6 +25,10 @@ pub struct RawRule {
     pub hard_stop: bool,
     #[serde(default)]
     pub required_scope: Option<String>,
+    /// Require a Picto signed for the exact canonical tool-call input hash.
+    /// Scope-only direct grants remain valid only when this is false.
+    #[serde(default)]
+    pub bind_input: bool,
     #[serde(default = "default_match")]
     pub r#match: RawMatch,
     #[serde(default)]
@@ -52,6 +56,7 @@ pub struct Rule {
     pub decision: RuleDecision,
     pub hard_stop: bool,
     pub required_scope: Option<String>,
+    pub bind_input: bool,
     pub r#match: Match,
     pub reason: String,
     /// Source file + index, so `gommage explain` can point at exactly
@@ -324,6 +329,12 @@ fn compile_rule(raw: RawRule, file: PathBuf, index: usize) -> Result<Rule, Gomma
             raw.name
         )));
     }
+    if raw.decision != RuleDecision::AskPicto && raw.bind_input {
+        return Err(GommageError::Policy(format!(
+            "rule {:?}: bind_input=true only valid with decision=ask_picto",
+            raw.name
+        )));
+    }
 
     let r#match = Match {
         any_capability: compile_globs(&raw.r#match.any_capability)?,
@@ -336,6 +347,7 @@ fn compile_rule(raw: RawRule, file: PathBuf, index: usize) -> Result<Rule, Gomma
         decision: raw.decision,
         hard_stop: raw.hard_stop,
         required_scope: raw.required_scope,
+        bind_input: raw.bind_input,
         r#match,
         reason: raw.reason,
         source: RuleSource { file, index },
@@ -566,6 +578,32 @@ mod tests {
   decision: ask_picto
   match: { any_capability: ["git.push:*"] }
   reason: "bad"
+"#;
+        let err = Policy::from_yaml_string(yaml, &HashMap::new(), "t").unwrap_err();
+        assert!(matches!(err, GommageError::Policy(_)));
+    }
+
+    #[test]
+    fn ask_picto_can_require_an_exact_input_binding() {
+        let yaml = r#"
+- name: exact-deployment
+  decision: ask_picto
+  required_scope: "deploy.production"
+  bind_input: true
+  match: { any_capability: ["deploy.production"] }
+  reason: "exact reviewed deployment required"
+"#;
+        let policy = Policy::from_yaml_string(yaml, &HashMap::new(), "t").unwrap();
+        assert!(policy.rules[0].bind_input);
+    }
+
+    #[test]
+    fn input_binding_is_rejected_for_non_picto_rules() {
+        let yaml = r#"
+- name: invalid
+  decision: allow
+  bind_input: true
+  match: { any_capability: ["fs.read:*"] }
 "#;
         let err = Policy::from_yaml_string(yaml, &HashMap::new(), "t").unwrap_err();
         assert!(matches!(err, GommageError::Policy(_)));
