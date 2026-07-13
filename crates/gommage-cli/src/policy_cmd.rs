@@ -667,6 +667,7 @@ fn advisory_rule_from_audit(entry: &gommage_audit::AuditEntry, line: usize) -> R
         decision,
         hard_stop,
         required_scope,
+        bind_input: false,
         r#match: RawMatch {
             all_capability: capability_patterns,
             ..RawMatch::default()

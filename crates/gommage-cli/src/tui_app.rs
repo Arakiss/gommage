@@ -1,60 +1,84 @@
-//! Interactive operator dashboard rendered with ratatui.
+//! Interactive Gommage operator console.
 //!
-//! This module owns ONLY the full-screen interactive path. The non-interactive
-//! `--snapshot` / `--watch` / `--stream` contract lives in `tui.rs` and is byte
-//! identical; nothing here is reachable from those code paths.
+//! The full-screen path renders a captured TuiSnapshot. It deliberately has no
+//! filesystem or database reads in draw functions: refresh is the only point
+//! where the visible state changes.
 
 use anyhow::Result;
-use gommage_core::runtime::HomeLayout;
-use std::time::{Duration, Instant};
-
+use gommage_core::{ApprovalState, runtime::HomeLayout};
 use ratatui::{
     Frame,
     crossterm::event::{KeyCode, KeyEvent},
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{
-        Block, Clear, Gauge, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Tabs, Wrap,
-    },
+    text::{Line, Span},
+    widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Tabs, Wrap},
 };
+use std::time::{Duration, Instant};
 
 use crate::{
     agent::AgentKind,
     gestral::{UiTone, color_enabled},
-    tui::{Dashboard, build_dashboard, normalize_interactive_view},
-    tui_actions::{ApprovalDraft, PendingTuiAction, execute_tui_action},
-    tui_views::{TuiView, build_approvals_report, build_view_report, pending_approval_ids},
+    tui::{Dashboard, StatusRow},
+    tui_actions::{ApprovalActionPreview, ApprovalDraft, PendingTuiAction, execute_tui_action},
+    tui_data::TuiSnapshot,
+    tui_views::TuiView,
 };
 
-const TAB_TITLES: [&str; 8] = [
-    "1 readiness",
-    "2 approvals",
-    "3 policies",
-    "4 audit",
-    "5 capabilities",
-    "6 recovery",
-    "7 onboarding",
-    "8 metrics",
+mod approvals;
+
+use approvals::{render_approvals, render_confirm, render_help, render_inspect};
+
+const MIN_WIDTH: u16 = 80;
+const MIN_HEIGHT: u16 = 24;
+const PAGE_STEP: u16 = 10;
+const WHEEL_STEP: u16 = 3;
+const INSPECT_VIEWS: [TuiView; 6] = [
+    TuiView::Policies,
+    TuiView::Audit,
+    TuiView::Capabilities,
+    TuiView::Recovery,
+    TuiView::Onboarding,
+    TuiView::Metrics,
 ];
 
-/// Lines moved per PageUp/PageDown.
-const PAGE_STEP: u16 = 10;
-/// Lines moved per mouse-wheel notch.
-const WHEEL_STEP: u16 = 3;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrimaryView {
+    Overview,
+    Approvals,
+    Inspect,
+}
 
-/// Interactive dashboard state. Owns a reconstructed `HomeLayout` and the agent
-/// filter so `draw`/`handle_key` stay self-contained and unit-testable without a
-/// terminal.
+impl PrimaryView {
+    fn index(self) -> usize {
+        match self {
+            Self::Overview => 0,
+            Self::Approvals => 1,
+            Self::Inspect => 2,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "overview",
+            Self::Approvals => "approvals",
+            Self::Inspect => "inspect",
+        }
+    }
+}
+
+/// State that changes through operator input. The data itself stays inside a
+/// TuiSnapshot and is only replaced in rebuild.
 pub(crate) struct App {
     layout: HomeLayout,
     agents: Vec<AgentKind>,
-    dashboard: Dashboard,
-    selected: usize,
-    selected_approval: usize,
-    view: TuiView,
+    snapshot: TuiSnapshot,
+    primary: PrimaryView,
+    inspect_view: TuiView,
+    selected_check: usize,
+    selected_approval_id: Option<String>,
     approval_draft: ApprovalDraft,
+    show_technical: bool,
     notice: Option<String>,
     confirm: Option<PendingTuiAction>,
     scroll: u16,
@@ -62,6 +86,7 @@ pub(crate) struct App {
     last_refresh: Instant,
     refresh: Duration,
     colors: bool,
+    viewport: (u16, u16),
     quit: bool,
 }
 
@@ -72,16 +97,24 @@ impl App {
         initial_view: TuiView,
         refresh: Duration,
     ) -> Result<Self> {
-        let dashboard = build_dashboard(layout, agents)?;
-        let selected = dashboard.primary_row_index().unwrap_or(0);
+        let snapshot = TuiSnapshot::capture(layout, agents)?;
+        let (primary, inspect_view) = initial_destination(initial_view);
+        let selected_check = snapshot.dashboard.primary_row_index().unwrap_or(0);
+        let selected_approval_id = snapshot
+            .approvals
+            .pending_ids()
+            .first()
+            .map(|id| (*id).to_string());
         Ok(Self {
             layout: HomeLayout::at(&layout.root),
             agents: agents.to_vec(),
-            dashboard,
-            selected,
-            selected_approval: 0,
-            view: normalize_interactive_view(initial_view),
+            snapshot,
+            primary,
+            inspect_view,
+            selected_check,
+            selected_approval_id,
             approval_draft: ApprovalDraft::default(),
+            show_technical: false,
             notice: None,
             confirm: None,
             scroll: 0,
@@ -89,38 +122,125 @@ impl App {
             last_refresh: Instant::now(),
             refresh,
             colors: color_enabled(),
+            viewport: (u16::MAX, u16::MAX),
             quit: false,
         })
     }
 
-    /// Rebuild the dashboard and re-clamp the selections. Leaves `notice` and
-    /// `scroll` untouched so callers decide their own messaging.
     fn rebuild(&mut self) -> Result<()> {
-        self.dashboard = build_dashboard(&self.layout, &self.agents)?;
-        self.selected = self
-            .selected
-            .min(self.dashboard.rows.len().saturating_sub(1));
-        self.selected_approval = clamp_approval_selection(&self.layout, self.selected_approval);
+        let selected_approval_id = self.selected_approval_id.clone();
+        self.snapshot = TuiSnapshot::capture(&self.layout, &self.agents)?;
+        self.selected_check = self
+            .selected_check
+            .min(self.snapshot.dashboard.rows.len().saturating_sub(1));
+        self.selected_approval_id = selected_approval_id
+            .filter(|id| self.snapshot.approvals.selected(id).is_some())
+            .or_else(|| {
+                self.snapshot
+                    .approvals
+                    .pending_ids()
+                    .first()
+                    .map(|id| (*id).to_string())
+            });
         self.last_refresh = Instant::now();
         Ok(())
     }
 
+    fn selected_approval(&self) -> Option<&ApprovalState> {
+        self.selected_approval_id
+            .as_deref()
+            .and_then(|id| self.snapshot.approvals.selected(id))
+    }
+
+    fn pending_count(&self) -> usize {
+        self.snapshot.approvals.pending().len()
+    }
+
     fn move_selection(&mut self, down: bool) {
-        if self.view == TuiView::Approvals {
-            let max = pending_approval_max(&self.layout);
-            self.selected_approval = step(self.selected_approval, down, max);
-        } else {
-            let max = self.dashboard.rows.len().saturating_sub(1);
-            self.selected = step(self.selected, down, max);
+        match self.primary {
+            PrimaryView::Overview => {
+                let max = self.snapshot.dashboard.rows.len().saturating_sub(1);
+                self.selected_check = step(self.selected_check, down, max);
+            }
+            PrimaryView::Approvals => self.move_approval_selection(down),
+            PrimaryView::Inspect => {
+                self.scroll = if down {
+                    self.scroll.saturating_add(1)
+                } else {
+                    self.scroll.saturating_sub(1)
+                };
+            }
         }
         self.notice = None;
     }
 
-    fn set_view(&mut self, view: TuiView) {
-        if self.view != view {
-            self.view = view;
+    fn move_approval_selection(&mut self, down: bool) {
+        let ids = self.snapshot.approvals.pending_ids();
+        let Some(current) = self.selected_approval_id.as_deref() else {
+            self.selected_approval_id = ids.first().map(|id| (*id).to_string());
+            return;
+        };
+        let current_index = ids.iter().position(|id| *id == current).unwrap_or(0);
+        let next = step(current_index, down, ids.len().saturating_sub(1));
+        self.selected_approval_id = ids.get(next).map(|id| (*id).to_string());
+    }
+
+    fn set_primary(&mut self, primary: PrimaryView) {
+        if self.primary != primary {
+            self.primary = primary;
             self.scroll = 0;
+            self.notice = None;
         }
+    }
+
+    fn set_inspect(&mut self, view: TuiView) {
+        self.primary = PrimaryView::Inspect;
+        self.inspect_view = view;
+        self.scroll = 0;
+        self.notice = None;
+    }
+
+    fn cycle_inspect(&mut self, reverse: bool) {
+        let index = INSPECT_VIEWS
+            .iter()
+            .position(|view| *view == self.inspect_view)
+            .unwrap_or(0);
+        let next = if reverse {
+            index.checked_sub(1).unwrap_or(INSPECT_VIEWS.len() - 1)
+        } else {
+            (index + 1) % INSPECT_VIEWS.len()
+        };
+        self.set_inspect(INSPECT_VIEWS[next]);
+    }
+
+    fn dashboard(&self) -> &Dashboard {
+        &self.snapshot.dashboard
+    }
+
+    fn is_modal(&self) -> bool {
+        self.confirm.is_some() || self.show_help
+    }
+
+    fn update_viewport(&mut self, width: u16, height: u16) {
+        let was_compact = self.is_compact();
+        self.viewport = (width, height);
+        if !was_compact && self.is_compact() && self.confirm.take().is_some() {
+            self.notice = Some(format!(
+                "confirmation cancelled: terminal is smaller than {MIN_WIDTH}x{MIN_HEIGHT}"
+            ));
+        }
+    }
+
+    fn is_compact(&self) -> bool {
+        self.viewport.0 < MIN_WIDTH || self.viewport.1 < MIN_HEIGHT
+    }
+}
+
+fn initial_destination(view: TuiView) -> (PrimaryView, TuiView) {
+    match view {
+        TuiView::Dashboard | TuiView::All => (PrimaryView::Overview, TuiView::Policies),
+        TuiView::Approvals => (PrimaryView::Approvals, TuiView::Policies),
+        other => (PrimaryView::Inspect, other),
     }
 }
 
@@ -133,7 +253,7 @@ fn step(current: usize, down: bool, max: usize) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// Event loop + terminal lifecycle (Unix only — matches the daemon posture).
+// Event loop and terminal lifecycle.
 // ---------------------------------------------------------------------------
 
 #[cfg(unix)]
@@ -149,7 +269,6 @@ pub(crate) fn run_interactive(
     let mut app = App::new(layout, agents, initial_view, refresh)?;
     let mut guard = TerminalGuard::enter()?;
     let result = run_loop(&mut guard, &mut app);
-    // `guard` restores the terminal on drop; surface the loop error afterwards.
     drop(guard);
     result.context("interactive event loop")
 }
@@ -172,13 +291,14 @@ fn run_loop(guard: &mut TerminalGuard, app: &mut App) -> Result<()> {
     guard.terminal.draw(|frame| draw(frame, app))?;
     while !app.quit {
         if event::poll(app.refresh).context("polling terminal events")? {
-            match event::read().context("reading terminal event")? {
+            match event::read().context("reading terminal events")? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => handle_key(app, key)?,
                 Event::Mouse(mouse) => handle_mouse(app, mouse),
+                Event::Resize(width, height) => app.update_viewport(width, height),
                 _ => {}
             }
         }
-        if app.last_refresh.elapsed() >= app.refresh {
+        if !app.is_modal() && app.last_refresh.elapsed() >= app.refresh {
             app.rebuild()?;
         }
         guard.terminal.draw(|frame| draw(frame, app))?;
@@ -223,8 +343,6 @@ impl Drop for TerminalGuard {
     }
 }
 
-/// Best-effort terminal restore. Idempotent, so the panic hook and `Drop` can
-/// both fire without corrupting the terminal.
 #[cfg(unix)]
 fn restore_terminal() -> std::io::Result<()> {
     use ratatui::crossterm::{
@@ -238,9 +356,6 @@ fn restore_terminal() -> std::io::Result<()> {
     disable_raw_mode()
 }
 
-/// The release profile is `panic = "abort"`, so `Drop` never runs on panic.
-/// This hook is the real safety net: restore the terminal, then chain whatever
-/// hook was installed before us (so the default panic message still prints).
 #[cfg(unix)]
 fn install_panic_hook() {
     let previous = std::panic::take_hook();
@@ -254,7 +369,7 @@ fn install_panic_hook() {
 fn handle_mouse(app: &mut App, mouse: ratatui::crossterm::event::MouseEvent) {
     use ratatui::crossterm::event::MouseEventKind;
 
-    if app.confirm.is_some() || app.show_help {
+    if app.is_modal() || app.primary != PrimaryView::Inspect {
         return;
     }
     match mouse.kind {
@@ -265,11 +380,22 @@ fn handle_mouse(app: &mut App, mouse: ratatui::crossterm::event::MouseEvent) {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard protocol — preserved exactly, plus additive help/scroll bindings.
+// Keyboard protocol.
 // ---------------------------------------------------------------------------
 
 fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    // Help overlay swallows input; only its own keys close it.
+    if app.is_compact() {
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => app.quit = true,
+            _ => {
+                app.notice = Some(format!(
+                    "resize to at least {MIN_WIDTH}x{MIN_HEIGHT} before using the operator TUI"
+                ));
+            }
+        }
+        return Ok(());
+    }
+
     if app.show_help {
         if matches!(
             key.code,
@@ -280,20 +406,18 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         return Ok(());
     }
 
-    // Confirm popup: y/n/Esc, identical notice strings to the old renderer.
     if let Some(action) = app.confirm.take() {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                let message = execute_tui_action(&app.layout, action);
-                app.notice = Some(message);
+                app.notice = Some(execute_tui_action(&app.layout, action));
                 app.rebuild()?;
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 app.notice = Some("cancelled approval action".to_string());
             }
             other => {
-                app.confirm = Some(action);
                 app.notice = Some(ignored_confirm_message(other));
+                app.confirm = Some(action);
             }
         }
         return Ok(());
@@ -308,50 +432,69 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
             app.scroll = 0;
             app.notice = Some("refreshed".to_string());
         }
-        KeyCode::Char('1') => app.set_view(TuiView::Dashboard),
-        KeyCode::Char('2') => app.set_view(TuiView::Approvals),
-        KeyCode::Char('3') => app.set_view(TuiView::Policies),
-        KeyCode::Char('4') => app.set_view(TuiView::Audit),
-        KeyCode::Char('5') => app.set_view(TuiView::Capabilities),
-        KeyCode::Char('6') => app.set_view(TuiView::Recovery),
-        KeyCode::Char('7') => app.set_view(TuiView::Onboarding),
-        KeyCode::Char('8') => app.set_view(TuiView::Metrics),
-        KeyCode::Char('?') => app.show_help = !app.show_help,
-        KeyCode::PageDown => app.scroll = app.scroll.saturating_add(PAGE_STEP),
-        KeyCode::PageUp => app.scroll = app.scroll.saturating_sub(PAGE_STEP),
-        KeyCode::Char('t') if app.view == TuiView::Approvals => {
+        KeyCode::Char('1') => app.set_primary(PrimaryView::Overview),
+        KeyCode::Char('2') => app.set_primary(PrimaryView::Approvals),
+        KeyCode::Char('3') => app.set_inspect(TuiView::Policies),
+        KeyCode::Char('4') => app.set_inspect(TuiView::Audit),
+        KeyCode::Char('5') => app.set_inspect(TuiView::Capabilities),
+        KeyCode::Char('6') => app.set_inspect(TuiView::Recovery),
+        KeyCode::Char('7') => app.set_inspect(TuiView::Onboarding),
+        KeyCode::Char('8') => app.set_inspect(TuiView::Metrics),
+        KeyCode::Char('[') => app.cycle_inspect(true),
+        KeyCode::Char(']') => app.cycle_inspect(false),
+        KeyCode::Char('?') => app.show_help = true,
+        KeyCode::PageDown if app.primary == PrimaryView::Inspect => {
+            app.scroll = app.scroll.saturating_add(PAGE_STEP);
+        }
+        KeyCode::PageUp if app.primary == PrimaryView::Inspect => {
+            app.scroll = app.scroll.saturating_sub(PAGE_STEP);
+        }
+        KeyCode::Char('i') | KeyCode::Char('I') if app.primary == PrimaryView::Approvals => {
+            app.show_technical = !app.show_technical;
+            app.notice = Some(if app.show_technical {
+                "technical approval context shown".to_string()
+            } else {
+                "technical approval context hidden".to_string()
+            });
+        }
+        KeyCode::Char('t') if app.primary == PrimaryView::Approvals => {
             app.approval_draft.cycle_ttl(false);
             app.notice = Some(format!(
                 "approval ttl set to {}",
                 app.approval_draft.ttl_label()
             ));
         }
-        KeyCode::Char('T') if app.view == TuiView::Approvals => {
+        KeyCode::Char('T') if app.primary == PrimaryView::Approvals => {
             app.approval_draft.cycle_ttl(true);
             app.notice = Some(format!(
                 "approval ttl set to {}",
                 app.approval_draft.ttl_label()
             ));
         }
-        KeyCode::Char('u') if app.view == TuiView::Approvals => {
+        KeyCode::Char('u') if app.primary == PrimaryView::Approvals => {
             app.approval_draft.cycle_uses(false);
             app.notice = Some(format!("approval uses set to {}", app.approval_draft.uses));
         }
-        KeyCode::Char('U') if app.view == TuiView::Approvals => {
+        KeyCode::Char('U') if app.primary == PrimaryView::Approvals => {
             app.approval_draft.cycle_uses(true);
             app.notice = Some(format!("approval uses set to {}", app.approval_draft.uses));
         }
-        KeyCode::Char('A') if app.view == TuiView::Approvals => {
-            if let Some(id) = selected_approval_id(&app.layout, app.selected_approval) {
-                app.confirm = Some(PendingTuiAction::Approve(id, app.approval_draft.clone()));
+        KeyCode::Char('A') if app.primary == PrimaryView::Approvals => {
+            if let Some(state) = app.selected_approval() {
+                app.confirm = Some(PendingTuiAction::Approve {
+                    preview: ApprovalActionPreview::from_state(state),
+                    draft: app.approval_draft.clone(),
+                });
                 app.notice = None;
             } else {
                 app.notice = Some("no pending approval selected".to_string());
             }
         }
-        KeyCode::Char('D') if app.view == TuiView::Approvals => {
-            if let Some(id) = selected_approval_id(&app.layout, app.selected_approval) {
-                app.confirm = Some(PendingTuiAction::Deny(id));
+        KeyCode::Char('D') if app.primary == PrimaryView::Approvals => {
+            if let Some(state) = app.selected_approval() {
+                app.confirm = Some(PendingTuiAction::Deny {
+                    preview: ApprovalActionPreview::from_state(state),
+                });
                 app.notice = None;
             } else {
                 app.notice = Some("no pending approval selected".to_string());
@@ -370,37 +513,27 @@ fn ignored_confirm_message(code: KeyCode) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Approval-selection helpers (moved out of tui.rs).
-// ---------------------------------------------------------------------------
-
-fn selected_approval_id(layout: &HomeLayout, selected: usize) -> Option<String> {
-    pending_approval_ids(layout).into_iter().nth(selected)
-}
-
-fn pending_approval_max(layout: &HomeLayout) -> usize {
-    pending_approval_ids(layout).len().saturating_sub(1)
-}
-
-fn clamp_approval_selection(layout: &HomeLayout, selected: usize) -> usize {
-    selected.min(pending_approval_max(layout))
-}
-
-// ---------------------------------------------------------------------------
 // Rendering.
 // ---------------------------------------------------------------------------
 
 fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+    app.update_viewport(area.width, area.height);
+    if app.is_compact() {
+        render_compact_guard(frame, app, area);
+        return;
+    }
+
     let chunks = Layout::vertical([
-        Constraint::Length(4), // header
-        Constraint::Length(3), // tabs
-        Constraint::Min(3),    // body
-        Constraint::Length(4), // footer
+        Constraint::Length(3),
+        Constraint::Length(1),
+        Constraint::Min(8),
+        Constraint::Length(3),
     ])
     .split(area);
 
     render_header(frame, app, chunks[0]);
-    render_tabs(frame, app, chunks[1]);
+    render_primary_nav(frame, app, chunks[1]);
     render_body(frame, app, chunks[2]);
     render_footer(frame, app, chunks[3]);
 
@@ -411,145 +544,208 @@ fn draw(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn render_header(frame: &mut Frame, app: &App, area: Rect) {
-    let dashboard = &app.dashboard;
-    let overall = dashboard.overall_status();
-    let summary = dashboard.summary();
-    let title = Line::from(vec![
-        Span::styled(" GOMMAGE ", tone_bold(UiTone::Teal, app.colors)),
-        Span::styled("operator dashboard ", tone_style(UiTone::Muted, app.colors)),
-    ]);
-    let line_one = Line::from(vec![
-        Span::styled("version ", tone_style(UiTone::Muted, app.colors)),
-        Span::styled(dashboard.version, tone_style(UiTone::Teal, app.colors)),
-        Span::raw("   "),
-        Span::styled("home ", tone_style(UiTone::Muted, app.colors)),
-        Span::raw(dashboard.home.clone()),
-    ]);
-    let line_two = Line::from(vec![
-        Span::styled("status ", tone_style(UiTone::Muted, app.colors)),
-        Span::styled(overall.marker(), tone_bold(overall.tone(), app.colors)),
-        Span::raw("   "),
-        Span::styled("ready ", tone_style(UiTone::Muted, app.colors)),
-        Span::styled(
-            format!("{}%", summary.ready_percent()),
-            tone_style(UiTone::Gold, app.colors),
+fn render_compact_guard(frame: &mut Frame, app: &App, area: Rect) {
+    let mut text = vec![
+        Line::styled(" GOMMAGE ", tone_bold(UiTone::Teal, app.colors)),
+        Line::raw(""),
+        Line::styled(
+            "Terminal too small for the operator TUI.",
+            tone_bold(UiTone::Gold, app.colors),
         ),
-        Span::raw("   "),
-        Span::styled("updated ", tone_style(UiTone::Muted, app.colors)),
-        Span::raw(dashboard.updated.clone()),
+        Line::raw(format!(
+            "Resize to at least {MIN_WIDTH}x{MIN_HEIGHT}; current size is {}x{}.",
+            area.width, area.height
+        )),
+        Line::raw(""),
+    ];
+    if let Some(notice) = app.notice.as_deref() {
+        text.push(Line::styled(
+            shorten(notice, area.width.saturating_sub(4) as usize),
+            tone_style(UiTone::Gold, app.colors),
+        ));
+        text.push(Line::raw(""));
+    }
+    text.extend([
+        Line::styled("Alternative", tone_bold(UiTone::Teal, app.colors)),
+        Line::raw("gommage tui --snapshot"),
+        Line::raw(""),
+        Line::raw("q / Esc  quit"),
     ]);
-    let paragraph = Paragraph::new(vec![line_one, line_two]).block(
-        Block::bordered()
-            .title(title)
-            .border_style(tone_style(UiTone::Teal, app.colors)),
+    frame.render_widget(
+        Paragraph::new(text)
+            .block(Block::bordered().title(" compact mode "))
+            .wrap(Wrap { trim: false }),
+        area,
     );
-    frame.render_widget(paragraph, area);
 }
 
-fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
-    let titles: Vec<Line> = TAB_TITLES.iter().map(|title| Line::from(*title)).collect();
+fn render_header(frame: &mut Frame, app: &App, area: Rect) {
+    let dashboard = app.dashboard();
+    let summary = dashboard.summary();
+    let overall = dashboard.overall_status();
+    let pending = app.pending_count();
+    let mut spans = vec![
+        Span::styled(" GOMMAGE ", tone_bold(UiTone::Teal, app.colors)),
+        Span::styled(app.primary.label(), tone_style(UiTone::Muted, app.colors)),
+        Span::raw("   "),
+        Span::styled(overall.marker(), tone_bold(overall.tone(), app.colors)),
+        Span::raw(format!(" {}%", summary.ready_percent())),
+        Span::raw("   "),
+        Span::styled(
+            format!(
+                "{pending} pending approval{}",
+                if pending == 1 { "" } else { "s" }
+            ),
+            tone_style(
+                if pending > 0 {
+                    UiTone::Gold
+                } else {
+                    UiTone::Muted
+                },
+                app.colors,
+            ),
+        ),
+    ];
+    if area.width >= 112 {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled("home ", tone_style(UiTone::Muted, app.colors)));
+        spans.push(Span::raw(shorten(&dashboard.home, 46)));
+    }
+    let detail = if app.primary == PrimaryView::Inspect {
+        format!(
+            "Inspecting {}  ·  [ / ] changes section  ·  r refresh",
+            app.inspect_view.label()
+        )
+    } else {
+        format!("updated {}", dashboard.updated)
+    };
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(spans),
+            Line::styled(detail, tone_style(UiTone::Muted, app.colors)),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(tone_style(UiTone::Teal, app.colors)),
+        ),
+        area,
+    );
+}
+
+fn render_primary_nav(frame: &mut Frame, app: &App, area: Rect) {
+    let titles = [
+        nav_title("1 Overview", app.primary == PrimaryView::Overview),
+        nav_title("2 Approvals", app.primary == PrimaryView::Approvals),
+        nav_title("3 Inspect", app.primary == PrimaryView::Inspect),
+    ];
     let tabs = Tabs::new(titles)
-        .select(tab_index(app.view))
-        .block(Block::bordered().border_style(tone_style(UiTone::Teal, app.colors)))
+        .select(app.primary.index())
         .style(tone_style(UiTone::Muted, app.colors))
         .highlight_style(tone_bold(UiTone::Gold, app.colors))
-        .divider(" ");
+        .divider("  ");
     frame.render_widget(tabs, area);
 }
 
-fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
-    let mut legend: Vec<Span> = Vec::new();
-    for (index, (key, desc)) in [
-        ("q", "quit"),
-        ("r", "refresh"),
-        ("j/k", "move"),
-        ("1-8", "views"),
-        ("A/D", "approve/deny"),
-        ("t/T u/U", "draft"),
-        ("?", "help"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if index > 0 {
-            legend.push(Span::raw("   "));
-        }
-        legend.push(Span::styled(key, tone_bold(UiTone::Gold, app.colors)));
-        legend.push(Span::raw(format!(" {desc}")));
-    }
-
-    let status = if let Some(action) = app.confirm.as_ref() {
-        Line::from(vec![
-            Span::styled("confirm ", tone_bold(UiTone::Gold, app.colors)),
-            Span::raw(action.prompt()),
-        ])
-    } else if let Some(notice) = app.notice.as_ref() {
-        Line::from(vec![
-            Span::styled("notice ", tone_bold(UiTone::Gold, app.colors)),
-            Span::raw(notice.clone()),
-        ])
+fn nav_title(label: &str, selected: bool) -> Line<'static> {
+    if selected {
+        Line::from(format!("[ {label} ]"))
     } else {
-        Line::raw("")
-    };
+        Line::from(format!("  {label}  "))
+    }
+}
 
-    let paragraph = Paragraph::new(vec![Line::from(legend), status])
-        .block(Block::bordered().border_style(tone_style(UiTone::Teal, app.colors)));
-    frame.render_widget(paragraph, area);
+fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
+    let controls = match (app.primary, area.width < 100) {
+        (PrimaryView::Overview, false) => {
+            "q quit  ·  r refresh  ·  j/k focus  ·  1-3 navigate  ·  ? help"
+        }
+        (PrimaryView::Overview, true) => "q quit  ·  r refresh  ·  j/k focus  ·  1-3  ·  ? help",
+        (PrimaryView::Approvals, false) => {
+            "j/k select  ·  t/T TTL  ·  u/U uses  ·  i details  ·  A approve  ·  D deny  ·  ? help"
+        }
+        (PrimaryView::Approvals, true) => {
+            "j/k select  ·  t/T ttl  ·  u/U uses  ·  i detail  ·  A/D decide  ·  ? help"
+        }
+        (PrimaryView::Inspect, false) => {
+            "[ / ] section  ·  j/k or PgUp/PgDn scroll  ·  r refresh  ·  ? help"
+        }
+        (PrimaryView::Inspect, true) => "[ / ] inspect  ·  j/k scroll  ·  r refresh  ·  ? help",
+    };
+    let status = app
+        .notice
+        .as_deref()
+        .unwrap_or("Actions are explicit; approval changes require confirmation.");
+    let text = vec![
+        Line::styled(controls, tone_style(UiTone::Muted, app.colors)),
+        Line::styled(status, tone_style(UiTone::Gold, app.colors)),
+    ];
+    frame.render_widget(
+        Paragraph::new(text).block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(tone_style(UiTone::Teal, app.colors)),
+        ),
+        area,
+    );
 }
 
 fn render_body(frame: &mut Frame, app: &mut App, area: Rect) {
-    match app.view {
-        TuiView::Dashboard | TuiView::All => render_dashboard_view(frame, app, area),
-        TuiView::Approvals => render_approvals_view(frame, app, area),
-        other => render_report_view(frame, app, other, area),
+    match app.primary {
+        PrimaryView::Overview => render_overview(frame, app, area),
+        PrimaryView::Approvals => render_approvals(frame, app, area),
+        PrimaryView::Inspect => render_inspect(frame, app, area),
     }
 }
 
-fn render_dashboard_view(frame: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).split(area);
-    render_gauge(frame, app, rows[0]);
+fn render_overview(frame: &mut Frame, app: &App, area: Rect) {
+    if area.width >= 100 {
+        let columns = Layout::horizontal([Constraint::Percentage(42), Constraint::Percentage(58)])
+            .split(area);
+        let left = Layout::vertical([Constraint::Length(3), Constraint::Min(5)]).split(columns[0]);
+        render_readiness_gauge(frame, app, left[0]);
+        render_check_list(frame, app, left[1]);
+        render_primary_action(frame, app, columns[1]);
+        return;
+    }
 
-    let lower =
-        Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).split(rows[1]);
-    render_rows_list(frame, app, lower[0]);
-
-    let right =
-        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).split(lower[1]);
-    render_focus(frame, app, right[0]);
-    render_next(frame, app, &app.dashboard.next_actions, right[1]);
+    let rows = Layout::vertical([Constraint::Length(8), Constraint::Min(6)]).split(area);
+    render_primary_action(frame, app, rows[0]);
+    render_check_list(frame, app, rows[1]);
 }
 
-fn render_gauge(frame: &mut Frame, app: &App, area: Rect) {
-    let summary = app.dashboard.summary();
+fn render_readiness_gauge(frame: &mut Frame, app: &App, area: Rect) {
+    let summary = app.dashboard().summary();
     let percent = summary.ready_percent().min(100) as u16;
-    let overall = app.dashboard.overall_status();
-    let gauge = Gauge::default()
-        .block(
-            Block::bordered()
-                .title(" readiness ")
-                .border_style(tone_style(UiTone::Teal, app.colors)),
-        )
-        .gauge_style(tone_style(overall.tone(), app.colors))
-        .percent(percent)
-        .label(format!("{percent}%  {}", summary.describe()));
-    frame.render_widget(gauge, area);
+    let overall = app.dashboard().overall_status();
+    frame.render_widget(
+        Gauge::default()
+            .block(
+                Block::bordered()
+                    .title(" health ")
+                    .border_style(tone_style(UiTone::Teal, app.colors)),
+            )
+            .gauge_style(tone_style(overall.tone(), app.colors))
+            .percent(percent)
+            .label(format!("{percent}%  {}", summary.describe())),
+        area,
+    );
 }
 
-fn render_rows_list(frame: &mut Frame, app: &App, area: Rect) {
+fn render_check_list(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
-        .dashboard
+        .dashboard()
         .rows
         .iter()
         .map(|row| {
             ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!("{:<4}", row.status.marker()),
+                    format!("{} ", row.status.marker()),
                     tone_bold(row.status.tone(), app.colors),
                 ),
                 Span::styled(
-                    format!(" {:<14}", row.label),
-                    tone_style(UiTone::Gold, app.colors),
+                    format!("{:<13}", row.label),
+                    tone_bold(UiTone::Gold, app.colors),
                 ),
                 Span::raw(row.summary.clone()),
             ]))
@@ -558,270 +754,110 @@ fn render_rows_list(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(
             Block::bordered()
-                .title(" checks ")
+                .title(" health checks ")
                 .border_style(tone_style(UiTone::Teal, app.colors)),
         )
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-        .highlight_symbol("> ");
+        .highlight_symbol("› ");
     let mut state = ListState::default();
-    if !app.dashboard.rows.is_empty() {
-        state.select(Some(app.selected.min(app.dashboard.rows.len() - 1)));
+    if !app.dashboard().rows.is_empty() {
+        state.select(Some(
+            app.selected_check
+                .min(app.dashboard().rows.len().saturating_sub(1)),
+        ));
     }
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_focus(frame: &mut Frame, app: &App, area: Rect) {
-    let text = if let Some(row) = app.dashboard.rows.get(app.selected) {
-        Text::from(vec![
-            Line::from(vec![
-                Span::styled(
-                    format!("{} ", row.label),
-                    tone_bold(UiTone::Gold, app.colors),
-                ),
-                Span::styled(
-                    format!("[{}]", row.status.label()),
-                    tone_style(row.status.tone(), app.colors),
-                ),
-            ]),
-            Line::raw(row.summary.clone()),
+fn render_primary_action(frame: &mut Frame, app: &App, area: Rect) {
+    let lines = if let Some(request) = app.snapshot.approvals.pending().first() {
+        let preview = ApprovalActionPreview::from_state(request);
+        vec![
+            Line::styled("NEXT SAFE ACTION", tone_bold(UiTone::Gold, app.colors)),
             Line::raw(""),
-            Line::raw(row.detail.clone()),
-        ])
+            Line::styled(
+                "Review the pending approval",
+                tone_bold(UiTone::Teal, app.colors),
+            ),
+            Line::raw(format!("{}  ·  {}", preview.tool, preview.scope)),
+            Line::from(vec![
+                Span::styled("binding ", tone_style(UiTone::Muted, app.colors)),
+                Span::styled(preview.binding_label(), tone_bold(UiTone::Gold, app.colors)),
+            ]),
+            Line::styled(
+                preview.binding_explanation(),
+                tone_style(UiTone::Muted, app.colors),
+            ),
+            Line::raw(""),
+            Line::styled(
+                "Press 2 to open approvals.",
+                tone_bold(UiTone::Teal, app.colors),
+            ),
+        ]
     } else {
-        Text::raw("no checks available")
-    };
-    let paragraph = Paragraph::new(text)
-        .block(
-            Block::bordered()
-                .title(" focus ")
-                .border_style(tone_style(UiTone::Teal, app.colors)),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, area);
-}
-
-fn render_next(frame: &mut Frame, app: &App, actions: &[String], area: Rect) {
-    let items: Vec<ListItem> = actions
-        .iter()
-        .enumerate()
-        .map(|(index, action)| {
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{}. ", index + 1),
-                    tone_bold(UiTone::Gold, app.colors),
-                ),
-                Span::raw(action.clone()),
-            ]))
-        })
-        .collect();
-    let list = List::new(items).block(
-        Block::bordered()
-            .title(" next ")
-            .border_style(tone_style(UiTone::Teal, app.colors)),
-    );
-    frame.render_widget(list, area);
-}
-
-fn render_approvals_view(frame: &mut Frame, app: &mut App, area: Rect) {
-    let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(3)]).split(area);
-
-    let draft = Line::from(vec![
-        Span::styled("ttl ", tone_style(UiTone::Muted, app.colors)),
-        Span::styled(
-            app.approval_draft.ttl_label(),
-            tone_bold(UiTone::Gold, app.colors),
-        ),
-        Span::raw("    "),
-        Span::styled("uses ", tone_style(UiTone::Muted, app.colors)),
-        Span::styled(
-            app.approval_draft.uses.to_string(),
-            tone_bold(UiTone::Gold, app.colors),
-        ),
-        Span::raw("    "),
-        Span::styled(
-            "t/T ttl   u/U uses   A approve   D deny",
-            tone_style(UiTone::Muted, app.colors),
-        ),
-    ]);
-    let header = Paragraph::new(draft).block(
-        Block::bordered()
-            .title(" approval draft ")
-            .border_style(tone_style(UiTone::Teal, app.colors)),
-    );
-    frame.render_widget(header, chunks[0]);
-
-    let report = build_approvals_report(&app.layout, Some(app.selected_approval));
-    render_report_inner(
-        frame,
-        app,
-        &report.title,
-        &report.lines,
-        &report.next_actions,
-        chunks[1],
-    );
-}
-
-fn render_report_view(frame: &mut Frame, app: &mut App, view: TuiView, area: Rect) {
-    match build_view_report(&app.layout, view) {
-        Ok(report) => render_report_inner(
-            frame,
-            app,
-            &report.title,
-            &report.lines,
-            &report.next_actions,
-            area,
-        ),
-        Err(error) => {
-            let paragraph = Paragraph::new(format!("could not render {}: {error}", view.label()))
-                .block(
-                    Block::bordered()
-                        .title(format!(" {} ", view.label()))
-                        .border_style(tone_style(UiTone::Red, app.colors)),
-                )
-                .wrap(Wrap { trim: false });
-            frame.render_widget(paragraph, area);
+        let row = app
+            .dashboard()
+            .rows
+            .get(app.selected_check)
+            .or_else(|| app.dashboard().rows.first());
+        match row {
+            Some(row) => focus_lines(row, app.colors),
+            None => vec![Line::raw("No health checks are available.")],
         }
-    }
+    };
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::bordered()
+                    .title(" operator focus ")
+                    .border_style(tone_style(UiTone::Teal, app.colors)),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
-/// Shared scrollable body + numbered "next" panel. Writes the clamped scroll
-/// offset back into `app` so PageUp/PageDown/wheel can never run away.
-fn render_report_inner(
-    frame: &mut Frame,
-    app: &mut App,
-    title: &str,
-    lines: &[String],
-    next: &[String],
-    area: Rect,
-) {
-    let next_height = next_panel_height(next.len(), area.height);
-    let chunks =
-        Layout::vertical([Constraint::Min(3), Constraint::Length(next_height)]).split(area);
-    let body_area = chunks[0];
-
-    let total = lines.len();
-    let inner_height = body_area.height.saturating_sub(2) as usize;
-    let max_scroll = total.saturating_sub(inner_height) as u16;
-    app.scroll = app.scroll.min(max_scroll);
-
-    let body: Vec<Line> = lines.iter().map(|line| Line::raw(line.clone())).collect();
-    let paragraph = Paragraph::new(body)
-        .block(
-            Block::bordered()
-                .title(format!(" {title} "))
-                .border_style(tone_style(UiTone::Teal, app.colors)),
-        )
-        .scroll((app.scroll, 0));
-    frame.render_widget(paragraph, body_area);
-
-    if total > inner_height {
-        let mut scrollbar_state = ScrollbarState::new(total).position(app.scroll as usize);
-        frame.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("^"))
-                .end_symbol(Some("v")),
-            body_area,
-            &mut scrollbar_state,
-        );
-    }
-
-    render_next(frame, app, next, chunks[1]);
-}
-
-fn next_panel_height(count: usize, total_height: u16) -> u16 {
-    let want = (count as u16).saturating_add(2).max(3);
-    let cap = (total_height / 2).max(3);
-    want.min(cap)
-}
-
-fn render_confirm(frame: &mut Frame, app: &App, area: Rect, action: &PendingTuiAction) {
-    let popup = popup_area(area, 72, 7);
-    frame.render_widget(Clear, popup);
-    let lines = vec![
-        Line::styled("Confirm action", tone_bold(UiTone::Gold, app.colors)),
+fn focus_lines(row: &StatusRow, colors: bool) -> Vec<Line<'static>> {
+    vec![
+        Line::styled("NEXT SAFE ACTION", tone_bold(UiTone::Gold, colors)),
         Line::raw(""),
-        Line::raw(action.prompt()),
+        Line::from(vec![
+            Span::styled(row.label.clone(), tone_bold(UiTone::Teal, colors)),
+            Span::raw("  "),
+            Span::styled(
+                format!("[{}]", row.status.label()),
+                tone_style(row.status.tone(), colors),
+            ),
+        ]),
+        Line::raw(row.summary.clone()),
         Line::raw(""),
-        Line::styled(
-            "press y to confirm, n to cancel",
-            tone_style(UiTone::Muted, app.colors),
-        ),
-    ];
-    let paragraph = Paragraph::new(lines)
-        .block(
-            Block::bordered()
-                .title(" confirm ")
-                .border_style(tone_style(UiTone::Gold, app.colors)),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, popup);
+        Line::styled(row.detail.clone(), tone_style(UiTone::Muted, colors)),
+    ]
 }
 
-fn render_help(frame: &mut Frame, app: &App, area: Rect) {
-    let popup = popup_area(area, 56, 20);
-    frame.render_widget(Clear, popup);
-    let lines = vec![
-        Line::styled(
-            "Gommage operator TUI — keys",
-            tone_bold(UiTone::Gold, app.colors),
-        ),
-        Line::raw(""),
-        Line::raw("q / Esc       quit"),
-        Line::raw("j / k / Up/Dn move selection"),
-        Line::raw("1 - 8         switch view"),
-        Line::raw("r             refresh now"),
-        Line::raw("PgUp / PgDn   scroll body"),
-        Line::raw("wheel         scroll body"),
-        Line::raw(""),
-        Line::styled("Approvals view", tone_bold(UiTone::Gold, app.colors)),
-        Line::raw("t / T         cycle ttl"),
-        Line::raw("u / U         cycle uses"),
-        Line::raw("A             approve selected"),
-        Line::raw("D             deny selected"),
-        Line::raw("y / n         confirm / cancel"),
-        Line::raw(""),
-        Line::raw("?             close this help"),
-    ];
-    let paragraph = Paragraph::new(lines)
-        .block(
-            Block::bordered()
-                .title(" help ")
-                .border_style(tone_style(UiTone::Gold, app.colors)),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, popup);
-}
-
-fn tab_index(view: TuiView) -> usize {
-    match view {
-        TuiView::Dashboard | TuiView::All => 0,
-        TuiView::Approvals => 1,
-        TuiView::Policies => 2,
-        TuiView::Audit => 3,
-        TuiView::Capabilities => 4,
-        TuiView::Recovery => 5,
-        TuiView::Onboarding => 6,
-        TuiView::Metrics => 7,
-    }
-}
-
-/// Centered fixed-size rect, clamped so it always fits the frame.
 fn popup_area(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
-    let x = area.x + area.width.saturating_sub(width) / 2;
-    let y = area.y + area.height.saturating_sub(height) / 2;
     Rect {
-        x,
-        y,
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
         width,
         height,
     }
 }
 
-/// Foreground color for a `UiTone`, honoring `NO_COLOR`: returns
-/// `Style::default()` when color is disabled (matching the old renderer). All
-/// styling lives in ratatui here — we reuse only the tone/status enums.
+fn shorten(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut truncated = value
+        .chars()
+        .take(max_chars.saturating_sub(1))
+        .collect::<String>();
+    truncated.push('…');
+    truncated
+}
+
 fn tone_style(tone: UiTone, colors: bool) -> Style {
     if !colors {
         return Style::default();
@@ -840,25 +876,56 @@ fn tone_bold(tone: UiTone, colors: bool) -> Style {
     if colors {
         tone_style(tone, colors).add_modifier(Modifier::BOLD)
     } else {
-        Style::default()
+        Style::default().add_modifier(Modifier::BOLD)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gommage_core::{ApprovalRequest, ApprovalStatus, ApprovalStore};
     use ratatui::{
         Terminal,
         backend::TestBackend,
         crossterm::event::{KeyEvent, KeyModifiers},
     };
     use tempfile::tempdir;
+    use time::OffsetDateTime;
 
     fn test_app(view: TuiView) -> (tempfile::TempDir, App) {
         let temp = tempdir().unwrap();
         let layout = HomeLayout::at(&temp.path().join(".gommage"));
         let agents = [AgentKind::Claude, AgentKind::Codex];
         let app = App::new(&layout, &agents, view, Duration::from_millis(1500)).unwrap();
+        (temp, app)
+    }
+
+    fn approval_app(bind_input: bool) -> (tempfile::TempDir, App) {
+        let temp = tempdir().unwrap();
+        let layout = HomeLayout::at(&temp.path().join(".gommage"));
+        let request = ApprovalRequest {
+            id: "apr_tui_decision".to_string(),
+            created_at: OffsetDateTime::now_utc(),
+            tool: "mcp__db__write_row".to_string(),
+            input_hash: format!("sha256:{}", "a".repeat(64)),
+            required_scope: "mcp.write".to_string(),
+            bind_input,
+            reason: "database write requires review".to_string(),
+            capabilities: Vec::new(),
+            matched_rule: None,
+            policy_version: "sha256:test".to_string(),
+        };
+        ApprovalStore::open(&layout.approvals_log)
+            .record_request(request)
+            .unwrap();
+        let agents = [AgentKind::Claude, AgentKind::Codex];
+        let app = App::new(
+            &layout,
+            &agents,
+            TuiView::Approvals,
+            Duration::from_millis(1500),
+        )
+        .unwrap();
         (temp, app)
     }
 
@@ -872,70 +939,155 @@ mod tests {
             .collect()
     }
 
+    fn render(app: &mut App, width: u16, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| draw(frame, app)).unwrap();
+        buffer_text(&terminal)
+    }
+
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
     #[test]
-    fn dashboard_renders_core_chrome() {
+    fn overview_renders_operator_focus_at_normal_width() {
         let (_temp, mut app) = test_app(TuiView::Dashboard);
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-        let text = buffer_text(&terminal);
-        assert!(text.contains("GOMMAGE"), "header title missing: {text}");
-        assert!(text.contains("version"), "version label missing");
-        assert!(text.contains("doctor"), "doctor row missing");
-        assert!(text.contains('%'), "readiness percent missing");
+        let text = render(&mut app, 100, 30);
+        assert!(text.contains("GOMMAGE"), "header missing: {text}");
+        assert!(text.contains("Overview"), "primary navigation missing");
+        assert!(text.contains("NEXT SAFE ACTION"), "focus missing");
+        assert!(text.contains("health checks"), "check list missing");
     }
 
     #[test]
-    fn approvals_view_renders() {
-        let (_temp, mut app) = test_app(TuiView::Approvals);
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
-        let text = buffer_text(&terminal);
-        assert!(text.contains("approval"), "approvals body missing: {text}");
+    fn approvals_show_exact_input_boundary_at_normal_and_narrow_width() {
+        let (_temp, mut app) = approval_app(true);
+        let wide = render(&mut app, 100, 30);
+        assert!(wide.contains("mcp__db__write_row"), "tool missing: {wide}");
+        assert!(wide.contains("queue"), "wide queue missing: {wide}");
+        assert!(wide.contains("decision"), "wide detail missing: {wide}");
+        assert!(wide.contains("EXACT INPUT"), "binding missing: {wide}");
+        assert!(wide.contains("A approve"), "action missing: {wide}");
+
+        let narrow = render(&mut app, 80, 24);
+        assert!(
+            narrow.contains("mcp__db__write_row"),
+            "tool missing: {narrow}"
+        );
+        assert!(narrow.contains("mcp.write"), "scope missing: {narrow}");
+        assert!(narrow.contains("EXACT INPUT"), "binding missing: {narrow}");
+        assert!(narrow.contains("10m"), "draft missing: {narrow}");
+        assert!(narrow.contains("? help"), "footer help missing: {narrow}");
+        assert!(
+            narrow.contains("updated"),
+            "header detail missing: {narrow}"
+        );
     }
 
     #[test]
-    fn tiny_terminal_does_not_panic() {
+    fn chrome_keeps_header_detail_and_notice_visible() {
         let (_temp, mut app) = test_app(TuiView::Dashboard);
-        let mut terminal = Terminal::new(TestBackend::new(20, 6)).unwrap();
-        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        handle_key(&mut app, press(KeyCode::Char('r'))).unwrap();
+        let text = render(&mut app, 80, 24);
+        assert!(text.contains("updated"), "header detail missing: {text}");
+        assert!(text.contains("refreshed"), "notice missing: {text}");
     }
 
     #[test]
-    fn key_j_advances_selection() {
+    fn compact_terminal_explains_the_alternative() {
         let (_temp, mut app) = test_app(TuiView::Dashboard);
-        let before = app.selected;
-        let max = app.dashboard.rows.len().saturating_sub(1);
-        handle_key(&mut app, press(KeyCode::Char('j'))).unwrap();
-        assert_eq!(app.selected, (before + 1).min(max));
+        let text = render(&mut app, 60, 18);
+        assert!(text.contains("Terminal too small"), "guard missing: {text}");
+        assert!(text.contains("80x24"), "minimum size missing: {text}");
+        assert!(
+            text.contains("gommage tui --snapshot"),
+            "fallback missing: {text}"
+        );
     }
 
     #[test]
-    fn key_two_switches_to_approvals() {
-        let (_temp, mut app) = test_app(TuiView::Dashboard);
-        handle_key(&mut app, press(KeyCode::Char('2'))).unwrap();
-        assert_eq!(app.view, TuiView::Approvals);
+    fn compact_resize_cancels_an_unseen_confirmation() {
+        let (temp, mut app) = approval_app(true);
+        let _ = render(&mut app, 80, 24);
+        handle_key(&mut app, press(KeyCode::Char('A'))).unwrap();
+        assert!(app.confirm.is_some(), "approval should be staged");
+
+        let compact = render(&mut app, 60, 18);
+        assert!(
+            app.confirm.is_none(),
+            "hidden confirmation must be cancelled"
+        );
+        assert!(
+            compact.contains("confirmation cancelled"),
+            "cancellation notice missing: {compact}"
+        );
+        handle_key(&mut app, press(KeyCode::Char('y'))).unwrap();
+
+        let layout = HomeLayout::at(&temp.path().join(".gommage"));
+        let states = ApprovalStore::open(&layout.approvals_log).list().unwrap();
+        assert_eq!(states[0].status, ApprovalStatus::Pending);
     }
 
     #[test]
-    fn key_question_toggles_help() {
+    fn confirmation_describes_the_approval_boundary_and_cancel_is_safe() {
+        let (temp, mut app) = approval_app(true);
+        handle_key(&mut app, press(KeyCode::Char('A'))).unwrap();
+        let text = render(&mut app, 100, 30);
+        assert!(
+            text.contains("Approve this approval?"),
+            "verb missing: {text}"
+        );
+        assert!(text.contains("mcp__db__write_row"), "tool missing: {text}");
+        assert!(text.contains("mcp.write"), "scope missing: {text}");
+        assert!(text.contains("EXACT INPUT"), "binding missing: {text}");
+        assert!(
+            text.contains("Only this observed tool input"),
+            "binding explanation missing: {text}"
+        );
+        assert!(text.contains("10m"), "ttl missing: {text}");
+        assert!(text.contains("1 use"), "use count missing: {text}");
+
+        handle_key(&mut app, press(KeyCode::Char('n'))).unwrap();
+        let layout = HomeLayout::at(&temp.path().join(".gommage"));
+        let states = ApprovalStore::open(&layout.approvals_log).list().unwrap();
+        assert_eq!(states[0].status, ApprovalStatus::Pending);
+    }
+
+    #[test]
+    fn confirmation_keeps_controls_visible_for_long_fields() {
+        let (_temp, mut app) = approval_app(true);
+        handle_key(&mut app, press(KeyCode::Char('A'))).unwrap();
+        let Some(PendingTuiAction::Approve { preview, .. }) = app.confirm.as_mut() else {
+            panic!("approval should be staged");
+        };
+        preview.tool = "mcp__very_long_tool_name_".repeat(4);
+        preview.scope = "scope.with.a.long.nested.segment.".repeat(4);
+        preview.reason =
+            "a long reason that should be shortened in the confirmation dialog ".repeat(3);
+
+        let text = render(&mut app, 80, 24);
+        assert!(
+            text.contains("y confirm   n cancel"),
+            "confirmation controls missing: {text}"
+        );
+        assert!(text.contains("…"), "long fields were not shortened: {text}");
+    }
+
+    #[test]
+    fn legacy_numeric_inspect_shortcuts_remain_available() {
         let (_temp, mut app) = test_app(TuiView::Dashboard);
-        assert!(!app.show_help);
+        handle_key(&mut app, press(KeyCode::Char('4'))).unwrap();
+        assert_eq!(app.primary, PrimaryView::Inspect);
+        assert_eq!(app.inspect_view, TuiView::Audit);
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn question_toggles_help() {
+        let (_temp, mut app) = test_app(TuiView::Dashboard);
         handle_key(&mut app, press(KeyCode::Char('?'))).unwrap();
         assert!(app.show_help);
         handle_key(&mut app, press(KeyCode::Char('?'))).unwrap();
         assert!(!app.show_help);
-    }
-
-    #[test]
-    fn view_change_resets_scroll() {
-        let (_temp, mut app) = test_app(TuiView::Policies);
-        app.scroll = 7;
-        handle_key(&mut app, press(KeyCode::Char('4'))).unwrap();
-        assert_eq!(app.view, TuiView::Audit);
-        assert_eq!(app.scroll, 0);
     }
 }

@@ -2,9 +2,9 @@ use anyhow::Result;
 use clap::ValueEnum;
 use gommage_audit::explain_log;
 use gommage_core::{
-    ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetterStore, CapabilityMapper, Decision,
-    RuleDecision, ToolCall, evaluate,
-    runtime::{HomeLayout, Runtime},
+    ApprovalState, ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetter,
+    ApprovalWebhookDeadLetterStore, CapabilityMapper, Decision, RuleDecision, ToolCall, evaluate,
+    runtime::{HomeLayout, PolicyReadModel},
 };
 use std::{fs, path::Path};
 
@@ -61,6 +61,49 @@ pub(crate) struct ViewReport {
     pub(crate) next_actions: Vec<String>,
 }
 
+/// The approval data captured for one TUI refresh.
+///
+/// It is loaded once before render so selection stays stable even if another
+/// process resolves a request while the operator is reviewing it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ApprovalInbox {
+    pub(crate) states: Vec<ApprovalState>,
+    pub(crate) dead_letters: Vec<ApprovalWebhookDeadLetter>,
+}
+
+impl ApprovalInbox {
+    pub(crate) fn pending(&self) -> Vec<&ApprovalState> {
+        self.states
+            .iter()
+            .filter(|state| state.status == ApprovalStatus::Pending)
+            .collect()
+    }
+
+    pub(crate) fn pending_ids(&self) -> Vec<&str> {
+        self.pending()
+            .into_iter()
+            .map(|state| state.request.id.as_str())
+            .collect()
+    }
+
+    pub(crate) fn selected(&self, id: &str) -> Option<&ApprovalState> {
+        self.states
+            .iter()
+            .find(|state| state.status == ApprovalStatus::Pending && state.request.id == id)
+    }
+}
+
+pub(crate) fn load_approval_inbox(layout: &HomeLayout) -> ApprovalInbox {
+    ApprovalInbox {
+        states: ApprovalStore::open(&layout.approvals_log)
+            .list()
+            .unwrap_or_default(),
+        dead_letters: ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
+            .list()
+            .unwrap_or_default(),
+    }
+}
+
 pub(crate) fn build_view_report(layout: &HomeLayout, view: TuiView) -> Result<ViewReport> {
     Ok(match view {
         TuiView::Dashboard | TuiView::All => ViewReport {
@@ -78,38 +121,16 @@ pub(crate) fn build_view_report(layout: &HomeLayout, view: TuiView) -> Result<Vi
     })
 }
 
-pub(crate) fn build_approvals_report(
-    layout: &HomeLayout,
-    selected_pending: Option<usize>,
-) -> ViewReport {
-    approvals_report(layout, selected_pending)
-}
-
-pub(crate) fn pending_approval_ids(layout: &HomeLayout) -> Vec<String> {
-    ApprovalStore::open(&layout.approvals_log)
-        .pending()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|state| state.request.id)
-        .collect()
-}
-
 fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> ViewReport {
-    let states = ApprovalStore::open(&layout.approvals_log)
-        .list()
-        .unwrap_or_default();
-    let dead_letters = ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
-        .list()
-        .unwrap_or_default();
-    let pending = states
-        .iter()
-        .filter(|state| state.status == ApprovalStatus::Pending)
-        .collect::<Vec<_>>();
-    let approved = states
+    let inbox = load_approval_inbox(layout);
+    let pending = inbox.pending();
+    let approved = inbox
+        .states
         .iter()
         .filter(|state| state.status == ApprovalStatus::Approved)
         .count();
-    let denied = states
+    let denied = inbox
+        .states
         .iter()
         .filter(|state| state.status == ApprovalStatus::Denied)
         .count();
@@ -120,11 +141,11 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
             pending.len(),
             approved,
             denied,
-            states.len()
+            inbox.states.len()
         ),
-        format!("webhook dead letters: {}", dead_letters.len()),
+        format!("webhook dead letters: {}", inbox.dead_letters.len()),
     ];
-    if let Some(entry) = dead_letters.last() {
+    if let Some(entry) = inbox.dead_letters.last() {
         lines.push(format!(
             "latest dead letter: {} request={} source={} attempts={}",
             entry.id, entry.request_id, entry.source, entry.attempts
@@ -141,11 +162,12 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
                 "-"
             };
             lines.push(format!(
-                "{} {} tool={} scope={} input={}",
+                "{} {} tool={} scope={} binding={} input={}",
                 cursor,
                 state.request.id,
                 state.request.tool,
                 state.request.required_scope,
+                request_binding_label(state.request.bind_input),
                 short_hash(&state.request.input_hash)
             ));
         }
@@ -157,6 +179,10 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
             lines.push(format!("  id: {}", state.request.id));
             lines.push(format!("  tool: {}", state.request.tool));
             lines.push(format!("  scope: {}", state.request.required_scope));
+            lines.push(format!(
+                "  binding: {}",
+                request_binding_label(state.request.bind_input)
+            ));
             lines.push(format!("  created: {}", state.request.created_at));
             lines.push(format!("  input: {}", state.request.input_hash));
             lines.push(format!("  reason: {}", state.request.reason));
@@ -205,15 +231,15 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
 
 fn policies_report(layout: &HomeLayout) -> ViewReport {
     let files = yaml_files(&layout.policy_dir);
-    match gommage_core::runtime::Runtime::open(HomeLayout::at(&layout.root)) {
-        Ok(rt) => {
+    match PolicyReadModel::load(layout) {
+        Ok(model) => {
             let mut lines = vec![
                 format!("policy files: {}", files.len()),
-                format!("rules: {}", rt.policy.rules.len()),
-                format!("version: {}", rt.policy.version_hash),
+                format!("rules: {}", model.policy.rules.len()),
+                format!("version: {}", model.policy.version_hash),
             ];
             lines.push("first rules:".to_string());
-            for rule in rt.policy.rules.iter().take(8) {
+            for rule in model.policy.rules.iter().take(8) {
                 lines.push(format!(
                     "- {} [{}] {}:{}",
                     rule.name,
@@ -410,7 +436,7 @@ fn onboarding_report(layout: &HomeLayout) -> ViewReport {
         "safe first minute: dry-run setup, install with self-test, run beta gate, capture report"
             .to_string(),
         "rollback: uninstall dry-run first; purge home only with explicit --yes".to_string(),
-        "agent rule: keep native Claude/Codex sandboxing enabled during alpha".to_string(),
+        "agent rule: keep native Claude/Codex sandboxing enabled during beta".to_string(),
         "evidence: beta check JSON, TUI snapshot, report bundle, audit explain".to_string(),
     ];
     ViewReport {
@@ -522,9 +548,9 @@ fn approval_policy_context(
     layout: &HomeLayout,
     state: &gommage_core::ApprovalState,
 ) -> Vec<String> {
-    match Runtime::open(HomeLayout::at(&layout.root)) {
-        Ok(rt) => {
-            let eval = evaluate(&state.request.capabilities, &rt.policy);
+    match PolicyReadModel::load(layout) {
+        Ok(model) => {
+            let eval = evaluate(&state.request.capabilities, &model.policy);
             let mut lines = vec![
                 format!("  current policy: {}", decision_summary(&eval.decision)),
                 format!("  current version: {}", eval.policy_version),
@@ -552,7 +578,19 @@ fn decision_summary(decision: &Decision) -> String {
         Decision::AskPicto {
             required_scope,
             reason,
-        } => format!("ask_picto scope={required_scope} reason={reason}"),
+            bind_input,
+        } => format!(
+            "ask_picto scope={required_scope} binding={} reason={reason}",
+            request_binding_label(*bind_input)
+        ),
+    }
+}
+
+fn request_binding_label(bind_input: bool) -> &'static str {
+    if bind_input {
+        "exact_input"
+    } else {
+        "scope_only"
     }
 }
 

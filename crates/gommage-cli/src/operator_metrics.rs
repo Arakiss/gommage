@@ -1,7 +1,7 @@
 use gommage_audit::explain_log;
 use gommage_core::{
-    ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetterStore, Picto, PictoStatus, PictoStore,
-    runtime::HomeLayout,
+    ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetterStore, Picto, PictoReadStore,
+    PictoStatus, runtime::HomeLayout,
 };
 use time::OffsetDateTime;
 
@@ -276,7 +276,7 @@ fn picto_inventory(layout: &HomeLayout) -> PictoInventory {
     let now = OffsetDateTime::now_utc();
     let soon = now + time::Duration::minutes(15);
     let mut inventory = PictoInventory::default();
-    let pictos = match PictoStore::open(&layout.pictos_db).and_then(|store| store.list()) {
+    let pictos = match PictoReadStore::open(&layout.pictos_db).and_then(|store| store.list()) {
         Ok(pictos) => pictos,
         Err(error) => {
             inventory.error = Some(format!("picto metrics unavailable: {error}"));

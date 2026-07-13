@@ -5,9 +5,15 @@ A **picto** is a signed grant that converts an `ask_picto` decision into an `all
 ## Properties
 
 - **Scope.** Exact string match against the `required_scope` of the policy rule. No wildcards.
+- **Optional input binding.** A rule with `bind_input: true` requires the same
+  canonical `ToolCall::input_hash` as well as the exact scope. A scope-only
+  picto cannot satisfy such a rule.
 - **TTL.** Mandatory. Max 24 h. No ambient, long-lived grants.
 - **`max_uses`.** Mandatory. Consumed atomically; once spent, the picto transitions to `spent` and cannot be revived.
-- **Signature.** ed25519 over `{id, scope, max_uses, ttl, created_at, reason}` using the daemon's keypair. Gommage verifies the signature before lookup/consume can turn an `ask_picto` into `allow`, so a tampered SQLite row is rejected and audited.
+- **Signature.** ed25519 over `{id, scope, max_uses, ttl, created_at, reason}`
+  using the daemon's keypair. For an input-bound picto, the canonical input hash
+  is also signed. Gommage verifies the signature before lookup/consume can turn
+  an `ask_picto` into `allow`, so a tampered SQLite row is rejected and audited.
 - **Revocable.** `gommage revoke <id>` marks the picto revoked in O(1). Audit log records the revocation.
 - **`--require-confirmation`.** Optional. Picto is created in `pending_confirmation`; must be activated via `gommage confirm <id>` (e.g., by a second human) before first use.
 
@@ -16,10 +22,10 @@ A **picto** is a signed grant that converts an `ask_picto` decision into an `all
 When an `ask_picto` rule matches and no usable picto exists, Gommage creates a
 durable approval request in `~/.gommage/approvals.jsonl` and writes a signed
 `approval_requested` audit event. The request ID is deterministic for the tuple
-`(input_hash, required_scope, policy_version)`, so repeating the same blocked
-tool call does not spam duplicate pending requests. If a previous request for
-that same tuple was already approved or denied, the next matching ask opens a
-new suffixed request ID instead of reviving resolved state.
+`(input_hash, required_scope, bind_input, policy_version)`, so repeating the
+same blocked tool call does not spam duplicate pending requests. If a previous
+request for that same tuple was already approved or denied, the next matching
+ask opens a new suffixed request ID instead of reviving resolved state.
 
 Human approval is explicit:
 
@@ -31,11 +37,13 @@ gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 ```
 
-Approval mints an exact-scope picto for the request's `required_scope`; the next
-matching tool call consumes that picto and writes `picto_consumed`. The default
-approval output is a plain operator summary; add `--json` for the stable agent
-contract with request, scope, picto, TTL, uses, and `next_action` fields. A
-human can deny instead:
+Approval mints an exact-scope picto for a normal request. When the matching
+policy rule has `bind_input: true`, it mints an exact-input picto instead; only
+the same canonical tool call can consume it. The JSON action report exposes this
+as `picto.kind: "exact_scope" | "exact_input"` and `picto.input_bound`.
+The default approval output is a plain operator summary; add `--json` for the
+stable agent contract with request, scope, picto, TTL, uses, and `next_action`
+fields. A human can deny instead:
 
 ```sh
 gommage approval deny <approval-id> --reason "not enough context"
@@ -98,6 +106,7 @@ Webhook payloads also include a callback envelope:
 
 ```json
 {
+  "bind_input": true,
   "callback": {
     "kind": "gommage_approval_callback",
     "request_id": "apr_...",
@@ -107,9 +116,12 @@ Webhook payloads also include a callback envelope:
 }
 ```
 
-The nonce is bound to the pending request id, input hash, required scope, and
-policy version. A remote approval provider must echo that nonce in a signed
-callback body:
+The generic payload exposes `bind_input` so an approval receiver can show
+whether approval covers the scope or the exact observed tool input.
+
+The nonce is bound to the pending request id, input hash, required scope,
+policy version, and whether the request requires input binding. A remote
+approval provider must echo that nonce in a signed callback body:
 
 ```json
 {
@@ -124,8 +136,8 @@ callback body:
 ```
 
 Gommage verifies the HMAC signature, timestamp freshness, pending request
-state, and nonce before delegating to the same local approve/deny path used by
-the CLI and TUI:
+state, nonce, and binding mode before delegating to the same local approve/deny
+path used by the CLI and TUI:
 
 ```sh
 gommage approval callback \
@@ -136,6 +148,11 @@ gommage approval callback \
   --dry-run \
   --json
 ```
+
+Callback processing is local. The receiver supplies the exact callback body,
+signature, and timestamp to `gommage approval callback`; Gommage does not run an
+inbound HTTP listener or make a remote provider an authorization authority by
+itself.
 
 Real delivery uses bounded retries. When all attempts fail, Gommage keeps the
 permission decision as `ask`, appends a dead-letter entry to
@@ -179,6 +196,28 @@ MCP fallback paths attempt best-effort webhook delivery at request time. Deliver
 success/failure is signed in audit when a home/key exists, including
 dead-lettered failures after retries are exhausted. A webhook outage never turns
 `ask` into `allow`.
+
+## Exact-input grants
+
+Use input binding when approval must cover one exact observed tool call instead
+of any call in a policy scope:
+
+```yaml
+- name: gate-reviewed-deploy
+  decision: ask_picto
+  required_scope: "deploy.example:production"
+  bind_input: true
+  match:
+    any_capability:
+      - "deploy.example:production"
+  reason: "production deploy requires approval of the exact request"
+```
+
+`bind_input` defaults to `false` and is valid only with `decision: ask_picto`.
+Existing picto rows and direct `gommage grant --scope …` grants remain
+scope-only. To mint an exact-input picto, approve the pending request created by
+an input-bound rule. A database opened by a newer Gommage version retains old
+scope-only pictos; they cannot unlock an input-bound rule.
 
 ## Lifecycle
 

@@ -314,8 +314,14 @@ fn decision_summary(decision: &Decision) -> String {
         Decision::AskPicto {
             required_scope,
             reason,
-        } => {
-            format!("ask_picto scope={required_scope} reason={reason:?}")
-        }
+            bind_input,
+        } => format!(
+            "ask_picto scope={required_scope} binding={} reason={reason:?}",
+            if *bind_input {
+                "exact_input"
+            } else {
+                "scope_only"
+            }
+        ),
     }
 }

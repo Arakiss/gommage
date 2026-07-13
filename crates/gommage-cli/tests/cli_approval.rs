@@ -220,10 +220,119 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
 }
 
 #[test]
+fn input_bound_approval_does_not_unlock_a_different_mcp_write() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    fs::write(
+        home.join("policy.d/00-input-bound-mcp.yaml"),
+        r#"
+- name: input-bound-mcp-write
+  decision: ask_picto
+  required_scope: "mcp.write"
+  bind_input: true
+  match:
+    any_capability:
+      - "mcp.write:*"
+  reason: "this write needs approval for its exact input"
+"#,
+    )
+    .unwrap();
+
+    let approved_payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let different_payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"accounts"}}"#;
+    let ask = run_mcp(&home, approved_payload);
+    assert_eq!(
+        ask.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("ask")
+    );
+
+    let output = gommage(&home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    let approvals: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let request_id = approvals[0]["request"]["id"].as_str().unwrap();
+    let approved = gommage(&home)
+        .args([
+            "approval", "approve", request_id, "--ttl", "10m", "--uses", "1", "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(approved.status.success());
+    let approved: serde_json::Value = serde_json::from_slice(&approved.stdout).unwrap();
+    assert_eq!(
+        approved
+            .pointer("/picto/kind")
+            .and_then(|value| value.as_str()),
+        Some("exact_input")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/input_bound")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+
+    let different = run_mcp(&home, different_payload);
+    assert_eq!(
+        different
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("ask")
+    );
+
+    let webhook = gommage(&home)
+        .args([
+            "approval",
+            "webhook",
+            "--url",
+            "https://approval.example.invalid/hook",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(webhook.status.success());
+    let webhook: serde_json::Value = serde_json::from_slice(&webhook.stdout).unwrap();
+    assert_eq!(
+        webhook
+            .pointer("/requests/0/payload/bind_input")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+
+    let allowed = run_mcp(&home, approved_payload);
+    assert_eq!(
+        allowed
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("allow")
+    );
+}
+
+#[test]
 fn signed_approval_callback_dry_run_and_apply_approve_pending_request() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     setup_home(&home);
+    fs::write(
+        home.join("policy.d/00-input-bound-mcp.yaml"),
+        r#"
+- name: input-bound-mcp-write
+  decision: ask_picto
+  required_scope: "mcp.write"
+  bind_input: true
+  match:
+    any_capability:
+      - "mcp.write:*"
+  reason: "this write needs approval for its exact input"
+"#,
+    )
+    .unwrap();
 
     let payload =
         br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
@@ -248,6 +357,7 @@ fn signed_approval_callback_dry_run_and_apply_approve_pending_request() {
     );
     let rendered: serde_json::Value = serde_json::from_slice(&webhook.stdout).unwrap();
     let request = &rendered["requests"][0]["payload"];
+    assert_eq!(request["bind_input"].as_bool(), Some(true));
     let request_id = request["id"].as_str().unwrap();
     let nonce = request["callback"]["nonce"].as_str().unwrap();
     let body = serde_json::to_vec(&serde_json::json!({
@@ -316,6 +426,18 @@ fn signed_approval_callback_dry_run_and_apply_approve_pending_request() {
     assert_eq!(applied["status"].as_str(), Some("applied"));
     assert_eq!(applied["outcome"]["status"].as_str(), Some("approved"));
     assert_eq!(applied["outcome"]["request_id"].as_str(), Some(request_id));
+    assert_eq!(
+        applied["outcome"]["picto"]["kind"].as_str(),
+        Some("exact_input")
+    );
+
+    let allowed = run_mcp(&home, payload);
+    assert_eq!(
+        allowed
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("allow")
+    );
 }
 
 #[test]
@@ -922,6 +1044,20 @@ fn approval_webhook_can_shape_slack_payloads() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     setup_home(&home);
+    fs::write(
+        home.join("policy.d/00-input-bound-mcp.yaml"),
+        r#"
+- name: input-bound-mcp-write
+  decision: ask_picto
+  required_scope: "mcp.write"
+  bind_input: true
+  match:
+    any_capability:
+      - "mcp.write:*"
+  reason: "this write needs approval for its exact input"
+"#,
+    )
+    .unwrap();
 
     let payload =
         br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
@@ -961,6 +1097,7 @@ fn approval_webhook_can_shape_slack_payloads() {
     let captured = fs::read_to_string(capture).unwrap();
     assert!(captured.contains(r#""text":"Gommage approval required"#));
     assert!(captured.contains(r#""blocks""#));
+    assert!(captured.contains("exact tool input"));
 }
 
 #[test]

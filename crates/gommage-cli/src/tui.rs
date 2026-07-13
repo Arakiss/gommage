@@ -80,8 +80,7 @@ pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCod
         return Ok(ExitCode::SUCCESS);
     }
     if options.snapshot || !io::stdout().is_terminal() || !io::stdin().is_terminal() {
-        let dashboard = build_dashboard(&layout, &agents)?;
-        print_snapshot(&layout, &dashboard, options.view)?;
+        print_requested_snapshot(&layout, &agents, options.view)?;
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -95,8 +94,7 @@ pub(crate) fn cmd_tui(layout: HomeLayout, options: TuiOptions) -> Result<ExitCod
         Err(error) => {
             eprintln!("gommage tui: interactive mode unavailable: {error:#}");
             eprintln!("gommage tui: printing snapshot instead.");
-            let dashboard = build_dashboard(&layout, &agents)?;
-            print_snapshot(&layout, &dashboard, options.view)?;
+            print_requested_snapshot(&layout, &agents, options.view)?;
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -198,7 +196,28 @@ fn first_agent_detail(value: &serde_json::Value) -> String {
         .to_string()
 }
 
-fn print_snapshot(layout: &HomeLayout, dashboard: &Dashboard, view: TuiView) -> Result<()> {
+fn print_requested_snapshot(
+    layout: &HomeLayout,
+    agents: &[AgentKind],
+    view: TuiView,
+) -> Result<()> {
+    match view {
+        TuiView::Dashboard => {
+            let dashboard = build_dashboard(layout, agents)?;
+            print_dashboard_snapshot(layout, &dashboard);
+        }
+        TuiView::All => {
+            let dashboard = build_dashboard(layout, agents)?;
+            print_dashboard_snapshot(layout, &dashboard);
+            println!();
+            print_view_snapshot(layout, TuiView::All)?;
+        }
+        _ => print_view_snapshot(layout, view)?,
+    }
+    Ok(())
+}
+
+fn print_dashboard_snapshot(layout: &HomeLayout, dashboard: &Dashboard) {
     println!("Gommage dashboard");
     println!("version: {}", dashboard.version);
     println!("home: {}", dashboard.home);
@@ -234,11 +253,6 @@ fn print_snapshot(layout: &HomeLayout, dashboard: &Dashboard, view: TuiView) -> 
     for (index, action) in dashboard.next_actions.iter().enumerate() {
         println!("{}. {action}", index + 1);
     }
-    if view != TuiView::Dashboard {
-        println!();
-        print_view_snapshot(layout, view)?;
-    }
-    Ok(())
 }
 
 fn print_view_snapshot(layout: &HomeLayout, view: TuiView) -> Result<()> {
@@ -279,14 +293,13 @@ fn print_watch(
             thread::sleep(refresh);
             writeln!(stdout)?;
         }
-        let dashboard = build_dashboard(layout, agents)?;
         writeln!(
             stdout,
             "--- gommage tui frame {} at {} ---",
             frame + 1,
-            dashboard.updated
+            time::OffsetDateTime::now_utc()
         )?;
-        print_snapshot(layout, &dashboard, view)?;
+        print_requested_snapshot(layout, agents, view)?;
         stdout.flush()?;
     }
     Ok(())
@@ -333,14 +346,6 @@ fn normalize_agents(agents: Vec<AgentKind>) -> Vec<AgentKind> {
         }
     }
     normalized
-}
-
-pub(crate) fn normalize_interactive_view(view: TuiView) -> TuiView {
-    if view == TuiView::All {
-        TuiView::Dashboard
-    } else {
-        view
-    }
 }
 
 fn from_doctor_status(status: DoctorStatus) -> UiStatus {

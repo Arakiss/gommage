@@ -16,9 +16,11 @@ agent decides to run a tool — `Bash`, `Read`, `Write`, `Edit`, a `WebFetch`, a
 maps it to capabilities, evaluates declarative YAML policy, and emits
 `allow` / `deny` / `ask`, recording every decision in a signed audit log.
 
-The decision is a pure function of `(tool_call, policy)`: same input → same
-decision, every time, on every OS. No classifier, no transcript state, no clock.
-The contract is frozen in [`input-schema.md`](input-schema.md).
+Capability mapping and policy evaluation are pure functions of `(tool_call,
+policy)`: the same input produces the same policy decision on every OS. Picto
+lookup is separate authorization state, so an active, expired, or spent grant
+can intentionally change the final outcome of an `ask_picto` rule. The mapping
+and evaluation contract is frozen in [`input-schema.md`](input-schema.md).
 
 Within that scope, gommage gives you:
 

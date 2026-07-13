@@ -58,7 +58,11 @@ pub(crate) fn approval_replay(layout: HomeLayout, id: &str, json: bool) -> Resul
         .with_context(|| format!("approval request {id:?} not found"))?;
     let rt = Runtime::open(HomeLayout::at(&layout.root)).context("opening current runtime")?;
     let eval = evaluate(&state.request.capabilities, &rt.policy);
-    let conclusion = replay_conclusion(&state.request.required_scope, &eval.decision);
+    let conclusion = replay_conclusion(
+        &state.request.required_scope,
+        state.request.bind_input,
+        &eval.decision,
+    );
     let report = ReplayReport {
         schema_version: 1,
         request_id: id.to_string(),
@@ -67,6 +71,7 @@ pub(crate) fn approval_replay(layout: HomeLayout, id: &str, json: bool) -> Resul
         current_policy_version: eval.policy_version.clone(),
         policy_changed: state.request.policy_version != eval.policy_version,
         required_scope: state.request.required_scope.clone(),
+        bind_input: state.request.bind_input,
         capabilities: state
             .request
             .capabilities
@@ -202,7 +207,8 @@ fn slack_payload(request: &ApprovalRequest) -> serde_json::Value {
                 {"type": "mrkdwn", "text": format!("*ID*\\n`{}`", request.id)},
                 {"type": "mrkdwn", "text": format!("*Scope*\\n`{}`", request.required_scope)},
                 {"type": "mrkdwn", "text": format!("*Tool*\\n`{}`", request.tool)},
-                {"type": "mrkdwn", "text": format!("*Input*\\n`{}`", request.input_hash)}
+                {"type": "mrkdwn", "text": format!("*Input*\\n`{}`", request.input_hash)},
+                {"type": "mrkdwn", "text": format!("*Binding*\\n{}", picto_binding_label(request))}
             ]},
             {"type": "section", "text": {"type": "mrkdwn", "text": format!("Approve: `gommage approval approve {} --ttl 10m --uses 1`\\nDeny: `gommage approval deny {} --reason <reason>`", request.id, request.id)}}
         ]
@@ -221,6 +227,7 @@ fn discord_payload(request: &ApprovalRequest) -> serde_json::Value {
                 {"name": "Scope", "value": format!("`{}`", request.required_scope), "inline": true},
                 {"name": "Tool", "value": format!("`{}`", request.tool), "inline": true},
                 {"name": "Input", "value": format!("`{}`", request.input_hash), "inline": false},
+                {"name": "Binding", "value": picto_binding_label(request), "inline": true},
                 {"name": "Approve", "value": format!("`gommage approval approve {} --ttl 10m --uses 1`", request.id), "inline": false},
                 {"name": "Deny", "value": format!("`gommage approval deny {} --reason <reason>`", request.id), "inline": false}
             ]
@@ -235,12 +242,27 @@ fn approval_message(request: &ApprovalRequest) -> String {
     )
 }
 
+fn picto_binding_label(request: &ApprovalRequest) -> &'static str {
+    if request.bind_input {
+        "exact tool input"
+    } else {
+        "scope only"
+    }
+}
+
 fn format_timestamp(value: OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
-fn replay_conclusion(required_scope: &str, decision: &Decision) -> String {
+fn replay_conclusion(required_scope: &str, bind_input: bool, decision: &Decision) -> String {
     match decision {
+        Decision::AskPicto {
+            required_scope: current,
+            bind_input: current_binding,
+            ..
+        } if current == required_scope && *current_binding != bind_input => {
+            "ask_binding_changed".to_string()
+        }
         Decision::AskPicto {
             required_scope: current,
             ..
@@ -261,6 +283,14 @@ fn print_replay_report(report: &ReplayReport) {
     println!("  current policy: {}", report.current_policy_version);
     println!("  policy changed: {}", report.policy_changed);
     println!("  scope:         {}", report.required_scope);
+    println!(
+        "  binding:       {}",
+        if report.bind_input {
+            "exact tool input"
+        } else {
+            "scope only"
+        }
+    );
     println!("  conclusion:    {}", report.conclusion);
     println!("  commands:");
     println!("    approve: {}", report.commands.approve);
@@ -354,6 +384,7 @@ fn provider_example_payload(provider: WebhookTemplateProvider) -> serde_json::Va
         tool: "Bash".to_string(),
         input_hash: "sha256:example".to_string(),
         required_scope: "git.push:main".to_string(),
+        bind_input: false,
         reason: "main branch push requires a picto".to_string(),
         capabilities: Vec::new(),
         matched_rule: None,
@@ -407,6 +438,7 @@ struct ReplayReport {
     current_policy_version: String,
     policy_changed: bool,
     required_scope: String,
+    bind_input: bool,
     capabilities: Vec<String>,
     stored_matched_rule: Option<gommage_core::MatchedRule>,
     current_decision: Decision,
