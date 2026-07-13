@@ -16,9 +16,19 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Bumped determinism-critical dependency pins for `regex`, `rusqlite`,
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
+- `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
+  instead of an eight-tab information dump. The approval workbench keeps the
+  selected request, scope, Picto boundary, draft, confirmation, and result in
+  view; terminals below 80x24 safely fall back to a compact guide.
+- Snapshot and watch inspection no longer initialize Gommage homes or migrate
+  Picto databases. Read-only operator views load a captured inspection model,
+  while commands that need runtime state retain the explicit initialization
+  path.
 
 ### Added
 
+- `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes
+  only the canonical observed tool input as well as its scope.
 - `gommage daemon reload` reloads policy and capability mappers in the running
   daemon over its socket, with no restart — so the daemon's in-memory policy
   stops diverging from what `gommage decide` reads fresh after a policy edit.
@@ -129,9 +139,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   asks de-duplicate while pending, and create a new suffixed request after a
   prior request has been approved or denied.
 - `gommage approval list|show|approve|deny|webhook` manages out-of-band
-  approval requests. Approving a request mints an exact-scope signed picto;
-  denying it removes the request from pending work; both paths emit signed
-  audit events.
+  approval requests. Approving a normal request mints an exact-scope signed
+  picto; an input-bound request mints a picto tied to the canonical tool input.
+  Denying removes the request from pending work; both paths emit signed audit
+  events.
 - `gommage approval webhook` can dry-run or POST pending approval payloads via
   a fixed `curl` invocation, and `GOMMAGE_APPROVAL_WEBHOOK_URL` enables
   best-effort hook-time webhook delivery without changing the permission
@@ -139,6 +150,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage approval webhook --dry-run --json` now includes the shaped provider
   payload under `requests[].payload`, so generic, Slack, and Discord endpoint
   payloads can be inspected or piped without sending network traffic.
+- Generic approval webhook payloads expose whether the request requires exact
+  input binding, so a receiver can present the true approval boundary.
 - `gommage approval webhook` can sign outbound approval requests with
   HMAC-SHA256 via `--signing-secret` or `GOMMAGE_APPROVAL_WEBHOOK_SECRET`.
   Dry-run JSON includes the exact signed body and signature headers; delivered
@@ -359,9 +372,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 - `gommage tui` is still keyboard-driven and dependency-free; approval
   resolution is confirmation-based, not a full editable form for TTL/uses/reason.
-- Signed remote approval callbacks and native ntfy sending remain roadmap
-  items. Slack/Discord support is provider-shaped notification payloads, not a
-  remote approval protocol.
+- Native ntfy sending and an inbound callback receiver remain roadmap items.
+  Signed callback application is available through the local `gommage approval
+  callback` command; Slack/Discord support remains provider-shaped notification
+  payloads rather than a hosted approval protocol.
 
 ## [0.1.0-alpha.1] — 2026-04-21
 

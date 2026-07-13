@@ -1,9 +1,9 @@
 # Agent compatibility matrix
 
 What Gommage sees, what it does not, and what can bypass it per agent. This
-page is written against the Gommage beta line and upstream agent behavior known
-on **2026-05-12**. If an agent changes its hook surface, this page moves
-accordingly; the packaged capability mapper stdlib in
+page documents the tested Gommage beta integration. Confirm current upstream
+host behavior and capture real hook payloads before widening coverage; the
+packaged capability mapper stdlib in
 `crates/gommage-stdlib/capabilities/` is agent-agnostic and usually does not
 need code changes. The repository-root `capabilities/` directory is a
 review-friendly mirror kept in sync by CI.
@@ -150,8 +150,9 @@ Codex ships OS-level confinement as a first-class feature — **use it**:
 Gommage + Codex is a layered posture: Codex's OS-level sandbox covers file and
 network boundaries that are below, outside, or not yet mapped by Gommage;
 Gommage governs the installed hook surface declaratively and audits it. In the
-current Gommage alpha, that installed Codex surface is Bash unless the operator
-adds custom hook/mapping coverage.
+current beta, the default matcher covers Bash, `apply_patch`, and emitted Codex
+MCP tool names. Other hook families still need captured payloads, mapper rules,
+and policy fixtures before they become supported coverage.
 
 For MCP tools that can be routed through a stdio proxy, the optional legacy
 gateway `gommage-mcp --gateway --server-name <name> -- <upstream-command>`

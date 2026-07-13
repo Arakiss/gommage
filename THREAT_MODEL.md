@@ -22,7 +22,7 @@ Gommage denies via policy (`gommage`) or escalates out-of-band (`ask_picto`). Th
 
 ### 1.2 Host-agent classifier drift
 
-The agent's built-in permission layer (e.g. Claude Code's transcript-aware classifier) starts flipping on trivial operations mid-session because of accumulated prior. Gommage gives you a stable, declarative second layer whose behaviour cannot drift — same `(mapper, policy, capabilities)` triple → same decision, every time.
+The agent's built-in permission layer (e.g. Claude Code's transcript-aware classifier) starts flipping on trivial operations mid-session because of accumulated prior. Gommage gives you a stable, declarative second layer: the same `(mapper, policy, capabilities)` triple produces the same policy decision every time. Picto lookup is separate authorization state, so an active, expired, or spent grant can intentionally change the final result of an `ask_picto` rule.
 
 ### 1.3 Grant misuse (pictos)
 
@@ -31,6 +31,9 @@ A one-shot break-glass grant must not become an ambient capability.
 - Pictos have mandatory `max_uses`, TTL ≤ 24 h, ed25519 signature bound to the daemon keypair.
 - Revocation is O(1) and visible in the audit log.
 - Exact-scope match only — no wildcarding on the picto side.
+- Rules can opt into `bind_input: true`, which requires a picto signed for the
+  exact canonical tool-call hash as well as the required scope. A scope-only
+  picto cannot satisfy an input-bound rule.
 - `pending_confirmation` status exists for delegated grants that a second human must activate.
 
 ### 1.4 Audit gaps
@@ -128,25 +131,32 @@ This is intentional: Gommage is a decision + audit harness, not an execution med
 
 ### 2.6 Replayed approval via out-of-band channel
 
-When a `ask_picto` decision has no matching picto, Gommage creates a local
+When an `ask_picto` decision has no matching picto, Gommage creates a local
 approval request and can notify an out-of-band channel (webhook or TUI). If an
 attacker intercepts a notification and convinces a human or script to replay a
 past approval command, they could try to authorize an unintended action.
 
-- **Mitigation today**: approval requests are scoped to the request's
-  `input_hash`, required scope, and policy version. Approving mints an
-  exact-scope picto, and one-shot pictos are consumed atomically. A replayed
-  picto that references a spent ID fails on consume. The TUI requires an
-  explicit confirmation keystroke before approve/deny. Approval request,
-  resolution, webhook delivery, and picto lifecycle events are signed in the
-  audit log.
-- **Current limit**: generic, Slack-shaped, and Discord-shaped webhooks are
-  notification channels only. They do not accept remote callbacks, so approval
-  still happens locally through `gommage approval approve`, `gommage approval
-  deny`, or the confirmed TUI action.
-- **Future mitigation**: signed remote callbacks will include a nonce bound to
-  the specific pending request and policy version, and the daemon will reject
-  callbacks whose nonce does not match current pending state.
+- **Scope-only requests.** The compatibility default remains a picto matched by
+  exact scope, TTL, and use count. It prevents broad wildcard grants but can
+  authorize a different tool call in that same scope. Use it only where scope
+  is the intended approval boundary.
+- **Input-bound requests.** A rule with `bind_input: true` includes the
+  canonical input hash and binding mode in the request identity. Approval mints
+  a picto whose signature covers that input hash; lookup and atomic consumption
+  require the same scope and input hash. A grant for one call therefore cannot
+  authorize another call in the same scope.
+- **Callbacks.** `gommage approval callback` verifies the HMAC signature,
+  timestamp freshness, pending state, and a nonce bound to request id, input
+  hash, scope, policy version, and binding mode before it can apply a local
+  approve or deny action. A callback for a different request or binding mode
+  fails closed.
+- **Audit and confirmation.** One-shot pictos are consumed atomically. The TUI
+  requires an explicit confirmation keystroke. Approval request, resolution,
+  webhook delivery, and picto lifecycle events are signed in the audit log.
+- **Current limit.** Gommage does not host an inbound callback receiver. A
+  local process must provide the callback body, signature, timestamp, and
+  shared-secret configuration to `gommage approval callback`. Outbound generic,
+  Slack-shaped, and Discord-shaped webhooks remain notification transports.
 
 ### 2.7 Clock skew / backdated TTL
 

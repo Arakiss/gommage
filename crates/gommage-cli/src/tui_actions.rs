@@ -1,11 +1,59 @@
-use gommage_core::runtime::HomeLayout;
+use gommage_core::{ApprovalState, runtime::HomeLayout};
 
 use crate::approval_cmd::{approve_request, deny_request};
 
 #[derive(Debug, Clone)]
 pub(crate) enum PendingTuiAction {
-    Approve(String, ApprovalDraft),
-    Deny(String),
+    Approve {
+        preview: ApprovalActionPreview,
+        draft: ApprovalDraft,
+    },
+    Deny {
+        preview: ApprovalActionPreview,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ApprovalActionPreview {
+    pub(crate) id: String,
+    pub(crate) tool: String,
+    pub(crate) scope: String,
+    pub(crate) bind_input: bool,
+    pub(crate) input_hash: String,
+    pub(crate) reason: String,
+}
+
+impl ApprovalActionPreview {
+    pub(crate) fn from_state(state: &ApprovalState) -> Self {
+        Self {
+            id: state.request.id.clone(),
+            tool: state.request.tool.clone(),
+            scope: state.request.required_scope.clone(),
+            bind_input: state.request.bind_input,
+            input_hash: state.request.input_hash.clone(),
+            reason: state.request.reason.clone(),
+        }
+    }
+
+    pub(crate) fn binding_label(&self) -> &'static str {
+        if self.bind_input {
+            "EXACT INPUT"
+        } else {
+            "SCOPE ONLY"
+        }
+    }
+
+    pub(crate) fn binding_explanation(&self) -> &'static str {
+        if self.bind_input {
+            "Only this observed tool input can use the Picto."
+        } else {
+            "Any matching call within this exact scope can use the Picto."
+        }
+    }
+
+    pub(crate) fn short_input_hash(&self) -> String {
+        self.input_hash.chars().take(19).collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -15,14 +63,25 @@ pub(crate) struct ApprovalDraft {
 }
 
 impl PendingTuiAction {
-    pub(crate) fn prompt(&self) -> String {
+    pub(crate) fn preview(&self) -> &ApprovalActionPreview {
         match self {
-            PendingTuiAction::Approve(id, draft) => format!(
-                "approve {id} with ttl={} uses={} from the TUI?",
-                draft.ttl_label(),
-                draft.uses
-            ),
-            PendingTuiAction::Deny(id) => format!("deny {id} from the TUI?"),
+            PendingTuiAction::Approve { preview, .. } | PendingTuiAction::Deny { preview } => {
+                preview
+            }
+        }
+    }
+
+    pub(crate) fn draft(&self) -> Option<&ApprovalDraft> {
+        match self {
+            PendingTuiAction::Approve { draft, .. } => Some(draft),
+            PendingTuiAction::Deny { .. } => None,
+        }
+    }
+
+    pub(crate) fn verb(&self) -> &'static str {
+        match self {
+            PendingTuiAction::Approve { .. } => "Approve",
+            PendingTuiAction::Deny { .. } => "Deny",
         }
     }
 }
@@ -76,9 +135,9 @@ impl ApprovalDraft {
 
 pub(crate) fn execute_tui_action(layout: &HomeLayout, action: PendingTuiAction) -> String {
     match action {
-        PendingTuiAction::Approve(id, draft) => match approve_request(
+        PendingTuiAction::Approve { preview, draft } => match approve_request(
             layout,
-            &id,
+            &preview.id,
             draft.uses,
             draft.ttl_seconds,
             "approved from gommage tui",
@@ -86,10 +145,12 @@ pub(crate) fn execute_tui_action(layout: &HomeLayout, action: PendingTuiAction) 
             Ok(report) => report.message,
             Err(error) => format!("approval failed: {error:#}"),
         },
-        PendingTuiAction::Deny(id) => match deny_request(layout, &id, "denied from gommage tui") {
-            Ok(report) => report.message,
-            Err(error) => format!("deny failed: {error:#}"),
-        },
+        PendingTuiAction::Deny { preview } => {
+            match deny_request(layout, &preview.id, "denied from gommage tui") {
+                Ok(report) => report.message,
+                Err(error) => format!("deny failed: {error:#}"),
+            }
+        }
     }
 }
 

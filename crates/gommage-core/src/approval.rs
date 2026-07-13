@@ -1,7 +1,8 @@
 //! Local out-of-band approval inbox.
 //!
 //! Approval requests are operational state: they let a human review an
-//! `ask_picto` decision and mint an exact-scope picto without editing policy.
+//! `ask_picto` decision and mint a scope- or input-bound picto without editing
+//! policy.
 //! Forensics live in the signed audit log; this store is append-only JSONL so
 //! it remains easy for agents and humans to inspect.
 
@@ -45,6 +46,8 @@ pub struct ApprovalRequest {
     pub tool: String,
     pub input_hash: String,
     pub required_scope: String,
+    #[serde(default)]
+    pub bind_input: bool,
     pub reason: String,
     pub capabilities: Vec<Capability>,
     pub matched_rule: Option<MatchedRule>,
@@ -94,16 +97,18 @@ impl ApprovalStore {
         tool: &str,
         input_hash: &str,
         required_scope: &str,
+        bind_input: bool,
         reason: &str,
         eval: &EvalResult,
     ) -> ApprovalRequest {
-        let id = request_id(input_hash, required_scope, &eval.policy_version);
+        let id = request_id(input_hash, required_scope, bind_input, &eval.policy_version);
         ApprovalRequest {
             id,
             created_at: OffsetDateTime::now_utc(),
             tool: tool.to_string(),
             input_hash: input_hash.to_string(),
             required_scope: required_scope.to_string(),
+            bind_input,
             reason: reason.to_string(),
             capabilities: eval.capabilities.clone(),
             matched_rule: eval.matched_rule.clone(),
@@ -135,10 +140,17 @@ impl ApprovalStore {
         call: &ToolCall,
         eval: &EvalResult,
         required_scope: &str,
+        bind_input: bool,
         reason: &str,
     ) -> Result<ApprovalRequest, GommageError> {
-        let request =
-            Self::request_from_eval(&call.tool, &call.input_hash(), required_scope, reason, eval);
+        let request = Self::request_from_eval(
+            &call.tool,
+            &call.input_hash(),
+            required_scope,
+            bind_input,
+            reason,
+            eval,
+        );
         self.record_request(request)
     }
 
@@ -236,12 +248,24 @@ impl ApprovalStore {
     }
 }
 
-fn request_id(input_hash: &str, required_scope: &str, policy_version: &str) -> String {
+fn request_id(
+    input_hash: &str,
+    required_scope: &str,
+    bind_input: bool,
+    policy_version: &str,
+) -> String {
     use sha2::Digest as _;
     let mut h = sha2::Sha256::new();
     h.update(input_hash.as_bytes());
     h.update(b"\0");
     h.update(required_scope.as_bytes());
+    h.update(b"\0");
+    let binding: &[u8] = if bind_input {
+        b"input-bound"
+    } else {
+        b"scope-only"
+    };
+    h.update(binding);
     h.update(b"\0");
     h.update(policy_version.as_bytes());
     let digest = hex::encode(h.finalize());
@@ -256,6 +280,7 @@ fn reopened_request_id(base: &str) -> String {
 fn same_request(a: &ApprovalRequest, b: &ApprovalRequest) -> bool {
     a.input_hash == b.input_hash
         && a.required_scope == b.required_scope
+        && a.bind_input == b.bind_input
         && a.policy_version == b.policy_version
 }
 
@@ -337,6 +362,7 @@ mod tests {
             decision: Decision::AskPicto {
                 required_scope: "git.push:main".to_string(),
                 reason: "main push requires approval".to_string(),
+                bind_input: false,
             },
             matched_rule: Some(MatchedRule {
                 name: "gate-main".to_string(),
@@ -354,6 +380,7 @@ mod tests {
             "Bash",
             "sha256:input",
             "git.push:main",
+            false,
             "reason",
             &eval(),
         );
@@ -361,6 +388,7 @@ mod tests {
             "Bash",
             "sha256:input",
             "git.push:main",
+            false,
             "reason",
             &eval(),
         );
@@ -375,6 +403,7 @@ mod tests {
             "Bash",
             "sha256:input",
             "git.push:main",
+            false,
             "reason",
             &eval(),
         );
@@ -397,6 +426,7 @@ mod tests {
             "Bash",
             "sha256:input",
             "git.push:main",
+            false,
             "reason",
             &eval(),
         );
@@ -428,6 +458,7 @@ mod tests {
             "Bash",
             "sha256:input",
             "git.push:main",
+            false,
             "reason",
             &eval(),
         );
@@ -473,6 +504,7 @@ mod tests {
             tool: "Bash".to_string(),
             input_hash: "sha256:test".to_string(),
             required_scope: "proc.exec:echo".to_string(),
+            bind_input: false,
             reason: "test".to_string(),
             capabilities: Vec::new(),
             matched_rule: None,
@@ -496,5 +528,28 @@ mod tests {
         assert_eq!(decoded.created_at.year(), 2026);
         assert_eq!(decoded.created_at.ordinal(), 113);
         assert_eq!(decoded.created_at.nanosecond(), 811_654_143);
+        assert!(!decoded.bind_input);
+    }
+
+    #[test]
+    fn input_bound_requests_have_a_distinct_identity() {
+        let scope_only = ApprovalStore::request_from_eval(
+            "Bash",
+            "sha256:input",
+            "git.push:main",
+            false,
+            "reason",
+            &eval(),
+        );
+        let input_bound = ApprovalStore::request_from_eval(
+            "Bash",
+            "sha256:input",
+            "git.push:main",
+            true,
+            "reason",
+            &eval(),
+        );
+        assert_ne!(scope_only.id, input_bound.id);
+        assert!(input_bound.bind_input);
     }
 }

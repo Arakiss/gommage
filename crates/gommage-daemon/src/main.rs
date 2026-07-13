@@ -288,18 +288,31 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
     if let Decision::AskPicto {
         required_scope,
         reason,
+        bind_input,
     } = eval.decision.clone()
     {
         let now = OffsetDateTime::now_utc();
-        match s
-            .rt
-            .pictos
-            .find_verified_match(&required_scope, now, &s.verifying_key)?
-        {
+        let input_hash = call.input_hash();
+        let lookup = if bind_input {
+            s.rt.pictos.find_verified_match_for_input(
+                &required_scope,
+                &input_hash,
+                now,
+                &s.verifying_key,
+            )?
+        } else {
+            s.rt.pictos
+                .find_verified_match(&required_scope, now, &s.verifying_key)?
+        };
+        match lookup {
             PictoLookup::None => {
-                let request =
-                    s.rt.approvals
-                        .request_for_ask(call, &eval, &required_scope, &reason)?;
+                let request = s.rt.approvals.request_for_ask(
+                    call,
+                    &eval,
+                    &required_scope,
+                    bind_input,
+                    &reason,
+                )?;
                 s.writer.append_event(AuditEvent::ApprovalRequested {
                     id: request.id.clone(),
                     tool: request.tool.clone(),
@@ -312,6 +325,7 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
                 eval.decision = Decision::AskPicto {
                     required_scope,
                     reason: approval_reason(&reason, &request.id),
+                    bind_input,
                 };
             }
             PictoLookup::BadSignature { id, scope } => {
@@ -322,11 +336,18 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
                 })?;
             }
             PictoLookup::Verified { picto } => {
-                match s
-                    .rt
-                    .pictos
-                    .consume_verified(&picto.id, now, &s.verifying_key)?
-                {
+                let consume = if bind_input {
+                    s.rt.pictos.consume_verified_for_input(
+                        &picto.id,
+                        &input_hash,
+                        now,
+                        &s.verifying_key,
+                    )?
+                } else {
+                    s.rt.pictos
+                        .consume_verified(&picto.id, now, &s.verifying_key)?
+                };
+                match consume {
                     PictoConsume::Consumed { picto } => {
                         s.writer.append_event(AuditEvent::PictoConsumed {
                             id: picto.id,

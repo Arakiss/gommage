@@ -28,7 +28,7 @@ Written for each policy decision. Fields, in this order:
 | `tool` | string | The agent tool handle (`"Bash"`, `"Read"`, …). |
 | `input_hash` | string | `sha256:<hex>` over the canonical tool input. |
 | `capabilities` | array of string | Capabilities the mapper emitted. |
-| `decision` | object | The `Decision` enum, internally tagged on `kind` (`{"kind":"allow"}`, `{"kind":"gommage","reason":…,"hard_stop":…}`, `{"kind":"ask_picto","required_scope":…,"reason":…}`). |
+| `decision` | object | The `Decision` enum, internally tagged on `kind` (`{"kind":"allow"}`, `{"kind":"gommage","reason":…,"hard_stop":…}`, `{"kind":"ask_picto","required_scope":…,"reason":…,"bind_input":true}`). `bind_input` is omitted when false. |
 | `matched_rule` | object \| null | `{ name, file, index }` of the rule that fired, or null. |
 | `policy_version` | string | `sha256:<hex>` policy version hash in effect. |
 | `expedition` | string \| null | Active expedition name, if any. |

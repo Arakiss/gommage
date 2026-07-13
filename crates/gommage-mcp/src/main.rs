@@ -115,9 +115,13 @@ async fn run_hook() -> Result<()> {
         Decision::AskPicto {
             reason,
             required_scope,
+            bind_input,
         } => (
             "ask",
-            format!("gommage: requires picto scope {required_scope:?} — {reason}"),
+            format!(
+                "gommage: requires {} for scope {required_scope:?} — {reason}",
+                picto_requirement(*bind_input)
+            ),
         ),
     };
     write_hook_response(decision_str, &reason)?;
@@ -294,11 +298,13 @@ async fn gate_mcp_tool_call(
         Decision::AskPicto {
             reason,
             required_scope,
+            bind_input,
         } => Ok(Some(gateway_ask_response(
             id,
             &call.tool,
             reason,
             required_scope,
+            *bind_input,
             &eval,
         ))),
     }
@@ -350,14 +356,26 @@ fn gateway_ask_response(
     tool: &str,
     reason: &str,
     required_scope: &str,
+    bind_input: bool,
     eval: &EvalResult,
 ) -> Value {
     mcp_tool_error_response(
         id,
-        format!("gommage requires picto scope {required_scope:?}: {reason}"),
+        format!(
+            "gommage requires {} for scope {required_scope:?}: {reason}",
+            picto_requirement(bind_input)
+        ),
         tool,
         eval,
     )
+}
+
+fn picto_requirement(bind_input: bool) -> &'static str {
+    if bind_input {
+        "an exact-input picto"
+    } else {
+        "a picto"
+    }
 }
 
 fn mcp_tool_error_response(id: Value, text: String, tool: &str, eval: &EvalResult) -> Value {
@@ -755,14 +773,26 @@ fn decide_in_process_and_audit(
     if let Decision::AskPicto {
         required_scope,
         reason,
+        bind_input,
     } = eval.decision.clone()
     {
         let now = time::OffsetDateTime::now_utc();
-        match rt.pictos.find_verified_match(&required_scope, now, &vk)? {
+        let input_hash = call.input_hash();
+        let lookup = if bind_input {
+            rt.pictos
+                .find_verified_match_for_input(&required_scope, &input_hash, now, &vk)?
+        } else {
+            rt.pictos.find_verified_match(&required_scope, now, &vk)?
+        };
+        match lookup {
             PictoLookup::None => {
-                let request =
-                    rt.approvals
-                        .request_for_ask(call, &eval, &required_scope, &reason)?;
+                let request = rt.approvals.request_for_ask(
+                    call,
+                    &eval,
+                    &required_scope,
+                    bind_input,
+                    &reason,
+                )?;
                 events.push(AuditEvent::ApprovalRequested {
                     id: request.id.clone(),
                     tool: request.tool.clone(),
@@ -777,6 +807,7 @@ fn decide_in_process_and_audit(
                 eval.decision = Decision::AskPicto {
                     required_scope,
                     reason: approval_reason(&reason, &request.id),
+                    bind_input,
                 };
             }
             PictoLookup::BadSignature { id, scope } => {
@@ -787,7 +818,13 @@ fn decide_in_process_and_audit(
                 });
             }
             PictoLookup::Verified { picto } => {
-                match rt.pictos.consume_verified(&picto.id, now, &vk)? {
+                let consume = if bind_input {
+                    rt.pictos
+                        .consume_verified_for_input(&picto.id, &input_hash, now, &vk)?
+                } else {
+                    rt.pictos.consume_verified(&picto.id, now, &vk)?
+                };
+                match consume {
                     PictoConsume::Consumed { picto } => {
                         events.push(AuditEvent::PictoConsumed {
                             id: picto.id,

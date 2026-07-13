@@ -39,7 +39,7 @@ pub(crate) enum ApprovalCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Approve a request by minting an exact-scope signed picto.
+    /// Approve a request by minting a signed scope- or input-bound picto.
     Approve {
         id: String,
         #[arg(long, default_value_t = 1)]
@@ -232,6 +232,7 @@ pub(crate) struct ApprovalPictoReport {
     pub(crate) kind: String,
     pub(crate) id: String,
     pub(crate) scope: String,
+    pub(crate) input_bound: bool,
     pub(crate) max_uses: u32,
     pub(crate) uses_remaining: u32,
     pub(crate) expires_at: String,
@@ -710,20 +711,34 @@ pub(crate) fn approve_request(
     let sk = layout.load_key()?;
     let pictos = PictoStore::open(&layout.pictos_db)?;
     let picto_id = format!("picto_{}", uuid::Uuid::now_v7());
+    let input_bound = state.request.bind_input;
     let approval_reason = if reason.trim().is_empty() {
         format!("approved request {id}")
     } else {
         reason.to_string()
     };
-    let picto = pictos.create(
-        &picto_id,
-        &state.request.required_scope,
-        uses,
-        ttl,
-        &approval_reason,
-        &sk,
-        false,
-    )?;
+    let picto = if input_bound {
+        pictos.create_for_input(
+            &picto_id,
+            &state.request.required_scope,
+            &state.request.input_hash,
+            uses,
+            ttl,
+            &approval_reason,
+            &sk,
+            false,
+        )?
+    } else {
+        pictos.create(
+            &picto_id,
+            &state.request.required_scope,
+            uses,
+            ttl,
+            &approval_reason,
+            &sk,
+            false,
+        )?
+    };
     let resolution = store.resolve(
         id,
         ApprovalStatus::Approved,
@@ -761,18 +776,24 @@ pub(crate) fn approve_request(
         reason: approval_reason,
         picto_id: Some(picto_id.clone()),
         picto: Some(ApprovalPictoReport {
-            kind: "exact_scope".to_string(),
+            kind: if input_bound {
+                "exact_input".to_string()
+            } else {
+                "exact_scope".to_string()
+            },
             id: picto_id,
             scope: picto_scope.clone(),
+            input_bound,
             max_uses: picto_max_uses,
             uses_remaining,
             expires_at: picto_expires_at,
         }),
         next_action: "retry_blocked_call".to_string(),
-        message: format!(
-            "approved {id}; minted exact-scope picto for {}",
-            picto_scope
-        ),
+        message: if input_bound {
+            format!("approved {id}; minted input-bound picto for {picto_scope}")
+        } else {
+            format!("approved {id}; minted exact-scope picto for {picto_scope}")
+        },
     })
 }
 
@@ -1222,6 +1243,9 @@ fn print_action_human(report: &ApprovalActionReport) {
         println!("{}", paint("Picto minted", UiTone::Gold, true, colors));
         println!("id:      {}", picto.id);
         println!("kind:    {}", picto.kind.replace('_', "-"));
+        if picto.input_bound {
+            println!("binding: exact tool input");
+        }
         println!(
             "uses:    {}/{} remaining",
             picto.uses_remaining, picto.max_uses
@@ -1232,7 +1256,13 @@ fn print_action_human(report: &ApprovalActionReport) {
     println!();
     match report.next_action.as_str() {
         "retry_blocked_call" => {
-            println!("next:    retry the blocked tool call; the picto matches this exact scope")
+            if report.picto.as_ref().is_some_and(|picto| picto.input_bound) {
+                println!(
+                    "next:    retry the blocked tool call; the picto matches its exact scope and input"
+                )
+            } else {
+                println!("next:    retry the blocked tool call; the picto matches this exact scope")
+            }
         }
         "none" => println!("next:    no picto minted"),
         other => println!("next:    {other}"),
@@ -1273,6 +1303,10 @@ fn print_state_summary(state: &ApprovalState, colors: bool) {
     );
     println!("  tool:   {}", state.request.tool);
     println!("  scope:  {}", state.request.required_scope);
+    println!(
+        "  binding: {}",
+        request_binding_label(state.request.bind_input)
+    );
     println!("  input:  {}", state.request.input_hash);
     println!("  reason: {}", state.request.reason);
     if state.status == ApprovalStatus::Pending {
@@ -1296,6 +1330,10 @@ fn print_state_detail(state: &ApprovalState) {
     println!("created: {}", format_timestamp(state.request.created_at));
     println!("tool:    {}", state.request.tool);
     println!("scope:   {}", state.request.required_scope);
+    println!(
+        "binding: {}",
+        request_binding_label(state.request.bind_input)
+    );
     println!("input:   {}", state.request.input_hash);
     println!("reason:  {}", state.request.reason);
     println!("policy:  {}", state.request.policy_version);
@@ -1320,6 +1358,14 @@ fn print_state_detail(state: &ApprovalState) {
             "deny:    gommage approval deny {} --reason <reason>",
             state.request.id
         );
+    }
+}
+
+fn request_binding_label(bind_input: bool) -> &'static str {
+    if bind_input {
+        "exact tool input"
+    } else {
+        "scope only"
     }
 }
 

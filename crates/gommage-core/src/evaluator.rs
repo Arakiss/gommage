@@ -22,7 +22,15 @@ pub enum Decision {
     AskPicto {
         required_scope: String,
         reason: String,
+        /// When true, only a Picto bound to this exact canonical tool-call
+        /// input hash may turn this decision into an allow.
+        #[serde(default, skip_serializing_if = "is_false")]
+        bind_input: bool,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 /// A summary of which rule produced the decision. Written to the audit log.
@@ -147,6 +155,7 @@ fn decision_from_rule(rule: &Rule) -> Decision {
                 .clone()
                 .expect("ask_picto rule without required_scope survived compilation; bug"),
             reason: rule.reason.clone(),
+            bind_input: rule.bind_input,
         },
     }
 }
@@ -229,9 +238,32 @@ mod tests {
   reason: "main requires picto"
 "#);
         let res = evaluate(&[Capability::new("git.push:refs/heads/main")], &pol);
-        let Decision::AskPicto { required_scope, .. } = res.decision else {
+        let Decision::AskPicto {
+            required_scope,
+            bind_input,
+            ..
+        } = res.decision
+        else {
             panic!("expected ask_picto");
         };
         assert_eq!(required_scope, "git.push:main");
+        assert!(!bind_input);
+    }
+
+    #[test]
+    fn ask_picto_surfaces_input_binding() {
+        let pol = p(r#"
+- name: gate-exact-production
+  decision: ask_picto
+  required_scope: "deploy.production"
+  bind_input: true
+  match: { any_capability: ["deploy.production"] }
+  reason: "production requires exact approval"
+"#);
+        let res = evaluate(&[Capability::new("deploy.production")], &pol);
+        let Decision::AskPicto { bind_input, .. } = res.decision else {
+            panic!("expected ask_picto");
+        };
+        assert!(bind_input);
     }
 }
