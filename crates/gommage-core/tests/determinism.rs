@@ -45,6 +45,8 @@ enum Expected {
     AskPicto {
         required_scope: String,
         #[serde(default)]
+        bind_input: Option<bool>,
+        #[serde(default)]
         matched_rule: Option<String>,
     },
 }
@@ -137,9 +139,14 @@ fn assert_matches_expected(path: &Path, fx: &Fixture, eval: &EvalResult) {
         (
             Expected::AskPicto {
                 required_scope: expected_scope,
+                bind_input: expected_bind_input,
                 matched_rule,
             },
-            Decision::AskPicto { required_scope, .. },
+            Decision::AskPicto {
+                required_scope,
+                bind_input,
+                ..
+            },
         ) => {
             assert_eq!(
                 expected_scope,
@@ -148,6 +155,15 @@ fn assert_matches_expected(path: &Path, fx: &Fixture, eval: &EvalResult) {
                 fx.name,
                 path.display()
             );
+            if let Some(expected) = expected_bind_input {
+                assert_eq!(
+                    expected,
+                    bind_input,
+                    "fixture {:?} at {}: input-binding mismatch",
+                    fx.name,
+                    path.display()
+                );
+            }
             assert_expected_rule(path, fx, eval, matched_rule.as_deref());
         }
         (exp, got) => panic!(

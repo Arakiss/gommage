@@ -130,6 +130,20 @@ pub(crate) enum GitPushEffect {
     Network,
 }
 
+/// Security-sensitive mutations exposed by the Gommage operator CLI.
+///
+/// The operation classes are deliberately closed and payload-free. A selected
+/// home mutation carries only its normalized path, so policy can bind approval
+/// to the exact authority root without treating the whole tree as a generic
+/// filesystem write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GommageAdminEffect {
+    Authorize,
+    Reconfigure,
+    Disable,
+    HomeMutate(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EffectSet<T> {
     pub(crate) effects: Vec<T>,
@@ -942,6 +956,769 @@ fn shell_c_payload(words: &[ShellWord]) -> Option<Result<String, Ambiguity>> {
     None
 }
 
+/// Derive Gommage administration effects from parsed argv, not command text.
+///
+/// `effective_words` already unwraps transparent process wrappers and the AST
+/// collector recursively adds static `sh -c` payloads. This function adds the
+/// two invocation forms that are specific to Gommage: the binary itself and
+/// `cargo run --bin gommage -- ...` during local development.
+pub(crate) fn gommage_admin_effects(
+    analysis: &ShellAnalysis,
+    cwd: Option<&str>,
+) -> EffectSet<GommageAdminEffect> {
+    let mut out = EffectSet::default();
+    let cwd = trusted_cwd(cwd);
+    for command in &analysis.commands {
+        classify_gommage_invocation(command, cwd.as_deref(), &mut out);
+        classify_gommage_service_lifecycle(command, &mut out);
+    }
+    out
+}
+
+fn classify_gommage_invocation(
+    command: &ShellCommand,
+    cwd: Option<&str>,
+    out: &mut EffectSet<GommageAdminEffect>,
+) {
+    let Some(words) = gommage_invocation_words(command, out) else {
+        return;
+    };
+    if classify_gommage_argv(&shell_word_tokens(&words), out) {
+        for home in gommage_path_option_words(&words, "--home", out) {
+            match static_path(&home, cwd) {
+                Ok(path) => out.push(GommageAdminEffect::HomeMutate(path)),
+                Err(reason) => out.ambiguity(reason),
+            }
+        }
+    }
+}
+
+fn gommage_invocation_words<T: PartialEq>(
+    command: &ShellCommand,
+    out: &mut EffectSet<T>,
+) -> Option<Vec<ShellWord>> {
+    let Ok(head) = command.effective_head() else {
+        return None;
+    };
+    match head {
+        "gommage" => Some(command.effective_args().to_vec()),
+        "cargo" => {
+            let args = command.effective_args();
+            let tokens = shell_word_tokens(args);
+            let argv_start = cargo_run_gommage_argv_start(&tokens, out)?;
+            Some(args[argv_start..].to_vec())
+        }
+        _ => None,
+    }
+}
+
+fn shell_word_tokens(words: &[ShellWord]) -> Vec<Option<String>> {
+    words
+        .iter()
+        .map(|word| word.static_value().ok().map(str::to_string))
+        .collect()
+}
+
+fn cargo_run_gommage_argv_start<T: PartialEq>(
+    tokens: &[Option<String>],
+    out: &mut EffectSet<T>,
+) -> Option<usize> {
+    let Some(run) = cargo_run_subcommand_index(tokens) else {
+        let dynamic_subcommand_with_gommage_selector = tokens.iter().any(Option::is_none)
+            && tokens.iter().flatten().any(|token| {
+                token == "gommage" || token == "gommage-cli" || is_gommage_cli_manifest(token)
+            });
+        if dynamic_subcommand_with_gommage_selector {
+            out.ambiguity("dynamic-gommage-admin-command");
+        }
+        return None;
+    };
+    let mut bin: Option<Option<String>> = None;
+    let mut package: Option<Option<String>> = None;
+    let mut manifest: Option<Option<String>> = None;
+    let mut example_selected = false;
+    let mut argv_start = tokens.len();
+    let mut index = run + 1;
+    while index < tokens.len() {
+        match tokens[index].as_deref() {
+            Some("--") => {
+                argv_start = index + 1;
+                break;
+            }
+            Some("--bin") => {
+                bin = Some(tokens.get(index + 1).cloned().unwrap_or(None));
+                index += 2;
+            }
+            Some("-p" | "--package") => {
+                package = Some(tokens.get(index + 1).cloned().unwrap_or(None));
+                index += 2;
+            }
+            Some("--manifest-path") => {
+                manifest = Some(tokens.get(index + 1).cloned().unwrap_or(None));
+                index += 2;
+            }
+            Some(value) if value.starts_with("--bin=") => {
+                bin = Some(Some(value["--bin=".len()..].to_string()));
+                index += 1;
+            }
+            Some(value) if value.starts_with("--package=") => {
+                package = Some(Some(value["--package=".len()..].to_string()));
+                index += 1;
+            }
+            Some(value) if value.starts_with("--manifest-path=") => {
+                manifest = Some(Some(value["--manifest-path=".len()..].to_string()));
+                index += 1;
+            }
+            Some("--example") => {
+                example_selected = true;
+                if tokens.get(index + 1).is_none() {
+                    out.ambiguity("unknown-gommage-admin-command");
+                    return None;
+                }
+                index += 2;
+            }
+            Some(value) if value.starts_with("--example=") => {
+                example_selected = true;
+                index += 1;
+            }
+            Some(
+                "--target" | "--target-dir" | "--features" | "-F" | "--jobs" | "-j" | "--profile"
+                | "--color" | "--config" | "-Z" | "--message-format",
+            ) => {
+                if tokens.get(index + 1).is_none() {
+                    out.ambiguity("unknown-gommage-admin-command");
+                    return None;
+                }
+                index += 2;
+            }
+            Some(value)
+                if value.starts_with("--target=")
+                    || value.starts_with("--target-dir=")
+                    || value.starts_with("--features=")
+                    || value.starts_with("--jobs=")
+                    || value.starts_with("--profile=")
+                    || value.starts_with("--color=")
+                    || value.starts_with("--config=")
+                    || value.starts_with("--message-format=") =>
+            {
+                index += 1;
+            }
+            Some(
+                "--release"
+                | "--all-features"
+                | "--no-default-features"
+                | "--locked"
+                | "--offline"
+                | "--frozen"
+                | "--ignore-rust-version"
+                | "--unit-graph"
+                | "--future-incompat-report"
+                | "--timings"
+                | "--quiet"
+                | "-q"
+                | "--verbose"
+                | "-v",
+            ) => index += 1,
+            Some(value) if value.starts_with('-') => {
+                out.ambiguity("unknown-gommage-admin-command");
+                return None;
+            }
+            Some(_) | None => {
+                argv_start = index;
+                break;
+            }
+        }
+    }
+
+    let dynamic_selector = [&bin, &package, &manifest]
+        .into_iter()
+        .flatten()
+        .any(Option::is_none);
+    if dynamic_selector {
+        out.ambiguity("dynamic-gommage-admin-command");
+    }
+    let explicit_other_bin = bin
+        .as_ref()
+        .and_then(Option::as_deref)
+        .is_some_and(|value| value != "gommage");
+    let selected_gommage = !example_selected
+        && !explicit_other_bin
+        && (bin.as_ref().and_then(Option::as_deref) == Some("gommage")
+            || package.as_ref().and_then(Option::as_deref) == Some("gommage-cli")
+            || manifest
+                .as_ref()
+                .and_then(Option::as_deref)
+                .is_some_and(is_gommage_cli_manifest));
+    if selected_gommage {
+        return Some(argv_start);
+    }
+
+    let has_static_selector = example_selected
+        || [&bin, &package, &manifest]
+            .into_iter()
+            .flatten()
+            .any(|selector| selector.is_some());
+    if has_static_selector && !dynamic_selector {
+        return None;
+    }
+
+    let possible_admin_argv = tokens[argv_start..]
+        .first()
+        .and_then(Option::as_deref)
+        .is_some_and(is_gommage_admin_command_name);
+    if dynamic_selector || possible_admin_argv {
+        out.ambiguity("unknown-gommage-admin-command");
+    }
+    None
+}
+
+fn cargo_run_subcommand_index(tokens: &[Option<String>]) -> Option<usize> {
+    let mut index = 0;
+    if tokens
+        .first()
+        .and_then(Option::as_deref)
+        .is_some_and(|token| token.starts_with('+'))
+    {
+        index += 1;
+    }
+    while index < tokens.len() {
+        match tokens[index].as_deref() {
+            Some("run" | "r") => return Some(index),
+            Some(
+                "--verbose" | "-v" | "--quiet" | "-q" | "--frozen" | "--locked" | "--offline"
+                | "--version" | "-V" | "--list" | "--help" | "-h",
+            ) => index += 1,
+            Some("--color" | "--config" | "-Z" | "--explain" | "-C") => index += 2,
+            Some(value)
+                if value.starts_with("--color=")
+                    || value.starts_with("--config=")
+                    || value.starts_with("--explain=") =>
+            {
+                index += 1;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn is_gommage_cli_manifest(value: &str) -> bool {
+    value == "crates/gommage-cli/Cargo.toml"
+        || value == "./crates/gommage-cli/Cargo.toml"
+        || value.ends_with("/crates/gommage-cli/Cargo.toml")
+}
+
+fn is_gommage_admin_command_name(value: &str) -> bool {
+    matches!(
+        value,
+        "grant"
+            | "g"
+            | "confirm"
+            | "revoke"
+            | "approval"
+            | "tui"
+            | "init"
+            | "quickstart"
+            | "upgrade"
+            | "policy"
+            | "project"
+            | "agent"
+            | "repair"
+            | "daemon"
+            | "expedition"
+            | "uninstall"
+            | "state"
+            | "harness"
+    )
+}
+
+fn classify_gommage_argv(raw: &[Option<String>], out: &mut EffectSet<GommageAdminEffect>) -> bool {
+    if raw.iter().any(Option::is_none) {
+        out.ambiguity("dynamic-gommage-admin-command");
+    }
+    let argv = strip_gommage_home_options(raw, out);
+
+    let help_requested = argv
+        .iter()
+        .flatten()
+        .any(|arg| matches!(arg.as_str(), "-h" | "--help"));
+    let version_requested = argv
+        .first()
+        .and_then(Option::as_deref)
+        .is_some_and(|arg| matches!(arg, "-V" | "--version"));
+    if help_requested || version_requested {
+        return false;
+    }
+
+    // A bare `gommage` invocation only renders help and does not mutate.
+    if argv.is_empty() {
+        return false;
+    }
+    let Some(command) = static_gommage_subcommand(&argv, 0, out) else {
+        return false;
+    };
+    let dry_run = has_exact_flag(&argv, "--dry-run");
+
+    match command {
+        "grant" | "g" | "confirm" | "revoke" => {
+            out.push(GommageAdminEffect::Authorize);
+            true
+        }
+        "approval" => classify_approval_command(&argv, dry_run, out),
+        "tui" => {
+            let inspection_only = [
+                "--snapshot",
+                "--watch",
+                "--watch-ticks",
+                "--stream",
+                "--stream-ticks",
+            ]
+            .iter()
+            .any(|flag| has_exact_or_value_flag(&argv, flag));
+            if !inspection_only {
+                out.push(GommageAdminEffect::Authorize);
+            }
+            !inspection_only
+        }
+        "init" => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        "quickstart" | "upgrade" => {
+            if !dry_run {
+                out.push(GommageAdminEffect::Reconfigure);
+            }
+            !dry_run && command == "quickstart"
+        }
+        "policy" => classify_policy_command(&argv, out),
+        "project" => classify_project_command(&argv, dry_run, out),
+        "agent" => classify_agent_command(&argv, dry_run, out),
+        "repair" => classify_repair_command(&argv, dry_run, out),
+        "daemon" => classify_daemon_command(&argv, dry_run, out),
+        "expedition" => classify_expedition_command(&argv, out),
+        "harness" => classify_harness_command(&argv, dry_run, out),
+        "state" => classify_state_command(&argv, dry_run, out),
+        "uninstall" => {
+            if !dry_run {
+                out.push(GommageAdminEffect::Disable);
+            }
+            !dry_run
+                && (has_exact_flag(&argv, "--purge-home")
+                    || has_exact_flag(&argv, "--home-data")
+                    || has_exact_flag(&argv, "--all"))
+        }
+        // Closed inventory of non-administrative top-level commands. Some can
+        // have ordinary filesystem or network effects, which remain visible to
+        // their dedicated typed effects and compatibility mapper rules.
+        "list" | "beta" | "update" | "posture" | "tail" | "explain" | "audit-verify" | "replay"
+        | "decide" | "map" | "doctor" | "verify" | "managed" | "release" | "report" | "run"
+        | "smoke" | "stats" | "sandbox" | "session" | "mascot" | "logo" | "hook" | "mcp" => {
+            validate_read_only_nested_command(command, &argv, out);
+            false
+        }
+        _ => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+    }
+}
+
+fn strip_gommage_home_options(
+    raw: &[Option<String>],
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> Vec<Option<String>> {
+    let mut argv = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < raw.len() {
+        match raw[index].as_deref() {
+            Some("--home") => {
+                match raw.get(index + 1) {
+                    Some(Some(value)) if !value.is_empty() => {}
+                    Some(None) => out.ambiguity("dynamic-gommage-admin-command"),
+                    _ => out.ambiguity("unknown-gommage-admin-command"),
+                }
+                index += 2;
+            }
+            Some(value) if value.starts_with("--home=") => {
+                if value == "--home=" {
+                    out.ambiguity("unknown-gommage-admin-command");
+                }
+                index += 1;
+            }
+            _ => {
+                argv.push(raw[index].clone());
+                index += 1;
+            }
+        }
+    }
+    argv
+}
+
+fn static_gommage_subcommand<'a>(
+    argv: &'a [Option<String>],
+    index: usize,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> Option<&'a str> {
+    match argv.get(index) {
+        Some(Some(command)) => Some(command),
+        Some(None) => {
+            out.ambiguity("dynamic-gommage-admin-command");
+            None
+        }
+        None => {
+            out.ambiguity("unknown-gommage-admin-command");
+            None
+        }
+    }
+}
+
+fn has_exact_flag(argv: &[Option<String>], flag: &str) -> bool {
+    argv.iter().any(|arg| arg.as_deref() == Some(flag))
+}
+
+fn has_exact_or_value_flag(argv: &[Option<String>], flag: &str) -> bool {
+    argv.iter().flatten().any(|arg| {
+        arg == flag
+            || arg
+                .strip_prefix(flag)
+                .is_some_and(|suffix| suffix.starts_with('='))
+    })
+}
+
+fn classify_approval_command(
+    argv: &[Option<String>],
+    dry_run: bool,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    let Some(command) = static_gommage_subcommand(argv, 1, out) else {
+        return false;
+    };
+    match command {
+        "approve" | "deny" => {
+            out.push(GommageAdminEffect::Authorize);
+            true
+        }
+        "webhook" | "callback" if !dry_run => {
+            out.push(GommageAdminEffect::Authorize);
+            true
+        }
+        "deny-stale" if has_exact_flag(argv, "--apply") => {
+            out.push(GommageAdminEffect::Authorize);
+            true
+        }
+        "webhook" | "callback" | "deny-stale" | "list" | "show" | "dlq" | "replay" | "evidence"
+        | "template" => false,
+        _ => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+    }
+}
+
+fn classify_policy_command(
+    argv: &[Option<String>],
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    let Some(command) = static_gommage_subcommand(argv, 1, out) else {
+        return false;
+    };
+    match command {
+        "init" => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        "check" | "layers" | "lint" | "schema" | "test" | "diff" | "suggest" | "snapshot"
+        | "capture" | "hash" => false,
+        _ => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+    }
+}
+
+fn classify_project_command(
+    argv: &[Option<String>],
+    dry_run: bool,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    match static_gommage_subcommand(argv, 1, out) {
+        Some("init") if !dry_run => {
+            out.push(GommageAdminEffect::Reconfigure);
+            false
+        }
+        Some("init") => false,
+        Some(_) => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+        None => false,
+    }
+}
+
+fn classify_agent_command(
+    argv: &[Option<String>],
+    dry_run: bool,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    match static_gommage_subcommand(argv, 1, out) {
+        Some("install") if !dry_run => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        Some("uninstall") if !dry_run => {
+            out.push(GommageAdminEffect::Disable);
+            false
+        }
+        Some("install" | "uninstall" | "status") => false,
+        Some(_) => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+        None => false,
+    }
+}
+
+fn classify_repair_command(
+    argv: &[Option<String>],
+    dry_run: bool,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    match static_gommage_subcommand(argv, 1, out) {
+        Some("agent") if !dry_run => {
+            out.push(GommageAdminEffect::Reconfigure);
+            !has_exact_flag(argv, "--restore-backup")
+        }
+        Some("agent") => false,
+        Some(_) => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+        None => false,
+    }
+}
+
+fn classify_daemon_command(
+    argv: &[Option<String>],
+    dry_run: bool,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    match static_gommage_subcommand(argv, 1, out) {
+        Some("install") if !dry_run => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        Some("uninstall") if !dry_run => {
+            out.push(GommageAdminEffect::Disable);
+            false
+        }
+        Some("reload") => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        Some("install" | "uninstall" | "status") => false,
+        Some(_) => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+        None => false,
+    }
+}
+
+fn classify_expedition_command(
+    argv: &[Option<String>],
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    match static_gommage_subcommand(argv, 1, out) {
+        Some("start" | "end") => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        Some("status") => false,
+        Some(_) => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+        None => false,
+    }
+}
+
+fn classify_harness_command(
+    argv: &[Option<String>],
+    dry_run: bool,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    match static_gommage_subcommand(argv, 1, out) {
+        Some("write-context") if !dry_run => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        Some("write-context" | "diagnose" | "explain") => false,
+        Some(_) => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+        None => false,
+    }
+}
+
+fn classify_state_command(
+    argv: &[Option<String>],
+    dry_run: bool,
+    out: &mut EffectSet<GommageAdminEffect>,
+) -> bool {
+    match static_gommage_subcommand(argv, 1, out) {
+        Some("rebuild" | "vacuum") => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        Some("reset") if !dry_run => {
+            out.push(GommageAdminEffect::Reconfigure);
+            true
+        }
+        Some("reset" | "verify" | "stats") => false,
+        Some(_) => {
+            out.ambiguity("unknown-gommage-admin-command");
+            false
+        }
+        None => false,
+    }
+}
+
+fn validate_read_only_nested_command(
+    command: &str,
+    argv: &[Option<String>],
+    out: &mut EffectSet<GommageAdminEffect>,
+) {
+    let known: &[&str] = match command {
+        "beta" => &["check"],
+        "managed" => &["status"],
+        "release" => &["verify"],
+        "report" => &["bundle"],
+        "run" => &["codex"],
+        "sandbox" => &["advise"],
+        "session" => &["doctor"],
+        _ => return,
+    };
+    let Some(nested) = static_gommage_subcommand(argv, 1, out) else {
+        return;
+    };
+    if !known.contains(&nested) {
+        out.ambiguity("unknown-gommage-admin-command");
+    }
+}
+
+fn classify_gommage_service_lifecycle(
+    command: &ShellCommand,
+    out: &mut EffectSet<GommageAdminEffect>,
+) {
+    let Ok(head) = command.effective_head() else {
+        return;
+    };
+    if !matches!(
+        head,
+        "systemctl" | "launchctl" | "service" | "pkill" | "killall" | "kill"
+    ) {
+        return;
+    }
+    let tokens = shell_word_tokens(command.effective_args());
+    let targets_gommage = tokens.iter().flatten().any(|arg| match head {
+        "systemctl" | "service" => {
+            matches!(
+                arg.rsplit('/').next(),
+                Some("gommage-daemon.service" | "gommage-daemon")
+            )
+        }
+        "launchctl" => {
+            matches!(
+                arg.as_str(),
+                "dev.gommage.daemon" | "dev.gommage.daemon.plist"
+            ) || arg.ends_with("/dev.gommage.daemon")
+                || arg.ends_with("/dev.gommage.daemon.plist")
+        }
+        "pkill" | "killall" => arg.contains("gommage-daemon"),
+        _ => false,
+    });
+    let lifecycle = match head {
+        "systemctl" => tokens.iter().flatten().find_map(|arg| match arg.as_str() {
+            "start" | "restart" | "try-restart" | "reload" | "reload-or-restart" | "enable"
+            | "edit" | "link" | "reenable" | "preset" | "revert" | "unmask" => {
+                Some(GommageAdminEffect::Reconfigure)
+            }
+            "stop" | "disable" | "mask" | "kill" => Some(GommageAdminEffect::Disable),
+            _ => None,
+        }),
+        "launchctl" => tokens.iter().flatten().find_map(|arg| match arg.as_str() {
+            "start" | "kickstart" | "bootstrap" | "load" | "enable" | "submit" => {
+                Some(GommageAdminEffect::Reconfigure)
+            }
+            "stop" | "bootout" | "unload" | "disable" | "remove" | "kill" => {
+                Some(GommageAdminEffect::Disable)
+            }
+            _ => None,
+        }),
+        "service" => tokens.iter().flatten().find_map(|arg| match arg.as_str() {
+            "start" | "restart" | "reload" => Some(GommageAdminEffect::Reconfigure),
+            "stop" => Some(GommageAdminEffect::Disable),
+            _ => None,
+        }),
+        "pkill" | "killall" => Some(GommageAdminEffect::Disable),
+        "kill" if tokens.iter().any(Option::is_none) => {
+            out.ambiguity("dynamic-gommage-service-target");
+            return;
+        }
+        _ => None,
+    };
+    let Some(lifecycle) = lifecycle else {
+        if targets_gommage && tokens.iter().any(Option::is_none) {
+            out.ambiguity("dynamic-gommage-service-action");
+        } else if targets_gommage && !known_gommage_service_inspection(head, &tokens) {
+            out.ambiguity("unknown-gommage-service-action");
+        }
+        return;
+    };
+
+    if targets_gommage {
+        out.push(lifecycle);
+    } else if tokens.iter().any(Option::is_none) {
+        out.ambiguity("dynamic-gommage-service-target");
+    }
+}
+
+fn known_gommage_service_inspection(head: &str, tokens: &[Option<String>]) -> bool {
+    tokens.iter().flatten().any(|arg| match head {
+        "systemctl" => matches!(
+            arg.as_str(),
+            "status"
+                | "show"
+                | "cat"
+                | "help"
+                | "is-active"
+                | "is-enabled"
+                | "is-failed"
+                | "list-dependencies"
+        ),
+        "launchctl" => matches!(
+            arg.as_str(),
+            "list"
+                | "print"
+                | "print-disabled"
+                | "blame"
+                | "procinfo"
+                | "dumpstate"
+                | "getenv"
+                | "help"
+                | "managerpid"
+                | "manageruid"
+                | "managername"
+                | "error"
+                | "variant"
+                | "version"
+        ),
+        "service" => arg == "status",
+        _ => false,
+    })
+}
+
 /// Convert parsed commands into deterministic filesystem effects.
 pub(crate) fn filesystem_effects(
     analysis: &ShellAnalysis,
@@ -971,6 +1748,7 @@ pub(crate) fn filesystem_effects(
             continue;
         };
         let args = command.effective_args();
+        collect_gommage_cli_filesystem_effects(command, cwd.as_deref(), &mut out);
         match head {
             "cat" | "head" | "tail" | "less" | "od" | "xxd" | "base64" | "strings" | "file" => {
                 collect_read_operands(head, args, cwd.as_deref(), &mut out)
@@ -991,6 +1769,385 @@ pub(crate) fn filesystem_effects(
         }
     }
     out
+}
+
+fn collect_gommage_cli_filesystem_effects(
+    command: &ShellCommand,
+    cwd: Option<&str>,
+    out: &mut EffectSet<FsEffect>,
+) {
+    let Some(raw) = gommage_invocation_words(command, out) else {
+        return;
+    };
+    let argv = strip_gommage_home_word_options(&raw);
+    if argv.iter().any(|word| {
+        word.static_value()
+            .is_ok_and(|value| matches!(value, "-h" | "--help"))
+    }) {
+        return;
+    }
+    let Some(top) = argv.first().and_then(|word| word.static_value().ok()) else {
+        return;
+    };
+
+    match top {
+        "approval" => match gommage_static_word(&argv, 1) {
+            Some("callback") => {
+                collect_gommage_path_options(&argv, "--body", cwd, FsEffectKind::Read, out)
+            }
+            Some("evidence") => {
+                collect_gommage_path_options(&argv, "--output", cwd, FsEffectKind::Write, out)
+            }
+            _ => {}
+        },
+        "report" if gommage_static_word(&argv, 1) == Some("bundle") => {
+            collect_gommage_path_options(&argv, "--output", cwd, FsEffectKind::Write, out);
+        }
+        "upgrade" => collect_gommage_upgrade_paths(&argv, cwd, out),
+        "project" if gommage_static_word(&argv, 1) == Some("init") => {
+            collect_gommage_project_paths(&argv, cwd, out);
+        }
+        "release" if gommage_static_word(&argv, 1) == Some("verify") => {
+            collect_gommage_release_paths(&argv, cwd, out);
+        }
+        "replay" => {
+            collect_gommage_path_options(&argv, "--audit", cwd, FsEffectKind::Read, out);
+            collect_gommage_path_options(&argv, "--policy", cwd, FsEffectKind::Read, out);
+        }
+        "policy" => collect_gommage_policy_read_paths(&argv, cwd, out),
+        "beta" if gommage_static_word(&argv, 1) == Some("check") => {
+            collect_gommage_path_options(&argv, "--policy-test", cwd, FsEffectKind::Read, out);
+        }
+        "verify" => {
+            collect_gommage_path_options(&argv, "--policy-test", cwd, FsEffectKind::Read, out)
+        }
+        _ => {}
+    }
+}
+
+fn strip_gommage_home_word_options(raw: &[ShellWord]) -> Vec<ShellWord> {
+    let mut argv = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < raw.len() {
+        let value = raw[index].static_value().ok();
+        if value == Some("--home") {
+            index += 2;
+        } else if value.is_some_and(|value| value.starts_with("--home="))
+            || raw[index].raw.starts_with("--home=")
+        {
+            index += 1;
+        } else {
+            argv.push(raw[index].clone());
+            index += 1;
+        }
+    }
+    argv
+}
+
+fn gommage_static_word(argv: &[ShellWord], index: usize) -> Option<&str> {
+    argv.get(index)?.static_value().ok()
+}
+
+fn gommage_path_option_words<T: PartialEq>(
+    argv: &[ShellWord],
+    flag: &str,
+    out: &mut EffectSet<T>,
+) -> Vec<ShellWord> {
+    let attached_prefix = format!("{flag}=");
+    let mut paths = Vec::new();
+    let mut index = 0;
+    while index < argv.len() {
+        match argv[index].static_value() {
+            Ok(value) if value == flag => {
+                let Some(path) = argv.get(index + 1) else {
+                    out.ambiguity("missing-gommage-path-option-value");
+                    break;
+                };
+                paths.push(path.clone());
+                index += 2;
+            }
+            Ok(value) if value.starts_with(&attached_prefix) => {
+                let path = &value[attached_prefix.len()..];
+                if path.is_empty() {
+                    out.ambiguity("missing-gommage-path-option-value");
+                } else {
+                    let mut word = argv[index].clone();
+                    word.raw = word
+                        .raw
+                        .split_once('=')
+                        .map_or_else(|| path.to_string(), |(_, raw)| raw.to_string());
+                    word.value = Some(path.to_string());
+                    paths.push(word);
+                }
+                index += 1;
+            }
+            Err(reason) if argv[index].raw.starts_with(&attached_prefix) => {
+                out.ambiguity(reason);
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    paths
+}
+
+fn collect_gommage_path_options(
+    argv: &[ShellWord],
+    flag: &str,
+    cwd: Option<&str>,
+    kind: FsEffectKind,
+    out: &mut EffectSet<FsEffect>,
+) {
+    for path in gommage_path_option_words(argv, flag, out) {
+        add_path_effect(&path, cwd, kind, out);
+    }
+}
+
+fn collect_gommage_upgrade_paths(
+    argv: &[ShellWord],
+    cwd: Option<&str>,
+    out: &mut EffectSet<FsEffect>,
+) {
+    if gommage_has_flag(argv, "--dry-run") {
+        return;
+    }
+
+    for installer in gommage_path_option_words(argv, "--installer", out) {
+        match installer.static_value() {
+            Ok(value) if value.starts_with("https://") || value.starts_with("http://") => {}
+            Ok(value) if value.starts_with("file://") => {
+                add_synthetic_path(
+                    value.trim_start_matches("file://"),
+                    cwd,
+                    FsEffectKind::Read,
+                    out,
+                );
+            }
+            Ok(_) => add_path_effect(&installer, cwd, FsEffectKind::Read, out),
+            Err(reason) => out.ambiguity(reason),
+        }
+    }
+
+    if gommage_has_flag(argv, "--skill-only") {
+        return;
+    }
+    for bin_dir in gommage_path_option_words(argv, "--bin-dir", out) {
+        let Some(dir) = normalized_effect_path(&bin_dir, cwd, out) else {
+            continue;
+        };
+        out.push(FsEffect {
+            kind: FsEffectKind::Write,
+            path: dir.clone(),
+        });
+        for binary in ["gommage", "gommage-daemon", "gommage-mcp"] {
+            out.push(FsEffect {
+                kind: FsEffectKind::Write,
+                path: child_effect_path(&dir, binary),
+            });
+        }
+    }
+}
+
+fn collect_gommage_project_paths(
+    argv: &[ShellWord],
+    cwd: Option<&str>,
+    out: &mut EffectSet<FsEffect>,
+) {
+    if gommage_has_flag(argv, "--dry-run") {
+        return;
+    }
+    let roots = gommage_path_option_words(argv, "--root", out);
+    let roots = if roots.is_empty() {
+        cwd.map(|cwd| {
+            vec![ShellWord {
+                raw: cwd.to_string(),
+                value: Some(cwd.to_string()),
+                provenance: WordProvenance::default(),
+                ambiguity: None,
+            }]
+        })
+        .unwrap_or_default()
+    } else {
+        roots
+    };
+    for root in roots {
+        let Some(root) = normalized_effect_path(&root, cwd, out) else {
+            continue;
+        };
+        for relative in [
+            ".gommage/policy.d/20-project.yaml",
+            ".gommage/policy-fixtures.yaml",
+            ".gommage/README.md",
+        ] {
+            out.push(FsEffect {
+                kind: FsEffectKind::Write,
+                path: child_effect_path(&root, relative),
+            });
+        }
+    }
+}
+
+fn collect_gommage_release_paths(
+    argv: &[ShellWord],
+    cwd: Option<&str>,
+    out: &mut EffectSet<FsEffect>,
+) {
+    let dirs = gommage_path_option_words(argv, "--dir", out);
+    if dirs.is_empty() {
+        return;
+    }
+    let assets: Vec<String> = if gommage_has_flag(argv, "--all-assets") {
+        gommage_release_assets()
+            .iter()
+            .map(|asset| (*asset).to_string())
+            .collect()
+    } else {
+        let selected = gommage_static_option(argv, "--asset", out);
+        match selected.as_deref() {
+            None | Some("auto") => default_gommage_release_asset()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            Some(asset) if gommage_release_assets().contains(&asset) => {
+                vec![asset.to_string()]
+            }
+            Some(_) => {
+                out.ambiguity("unknown-gommage-release-asset");
+                Vec::new()
+            }
+        }
+    };
+    for dir in dirs {
+        let Some(dir) = normalized_effect_path(&dir, cwd, out) else {
+            continue;
+        };
+        out.push(FsEffect {
+            kind: FsEffectKind::Write,
+            path: dir.clone(),
+        });
+        for asset in &assets {
+            for name in [
+                asset.to_string(),
+                format!("{asset}.sha256"),
+                format!("{asset}.sigstore.json"),
+            ] {
+                out.push(FsEffect {
+                    kind: FsEffectKind::Write,
+                    path: child_effect_path(&dir, &name),
+                });
+            }
+        }
+    }
+}
+
+fn collect_gommage_policy_read_paths(
+    argv: &[ShellWord],
+    cwd: Option<&str>,
+    out: &mut EffectSet<FsEffect>,
+) {
+    match gommage_static_word(argv, 1) {
+        Some("lint") => collect_gommage_positional_path(
+            argv,
+            2,
+            &["--strict", "--json"],
+            cwd,
+            FsEffectKind::Read,
+            out,
+        ),
+        Some("test") => {
+            collect_gommage_positional_path(argv, 2, &["--json"], cwd, FsEffectKind::Read, out)
+        }
+        Some("diff") => {
+            for flag in ["--from", "--to", "--against"] {
+                collect_gommage_path_options(argv, flag, cwd, FsEffectKind::Read, out);
+            }
+        }
+        Some("suggest") => {
+            collect_gommage_path_options(argv, "--audit", cwd, FsEffectKind::Read, out)
+        }
+        _ => {}
+    }
+}
+
+fn collect_gommage_positional_path(
+    argv: &[ShellWord],
+    start: usize,
+    boolean_options: &[&str],
+    cwd: Option<&str>,
+    kind: FsEffectKind,
+    out: &mut EffectSet<FsEffect>,
+) {
+    for word in &argv[start..] {
+        match word.static_value() {
+            Ok("--") => continue,
+            Ok(value) if boolean_options.contains(&value) => continue,
+            Ok(value) if value.starts_with('-') => continue,
+            Ok(_) => {
+                add_path_effect(word, cwd, kind, out);
+                return;
+            }
+            Err(reason) => {
+                out.ambiguity(reason);
+                return;
+            }
+        }
+    }
+}
+
+fn gommage_static_option(
+    argv: &[ShellWord],
+    flag: &str,
+    out: &mut EffectSet<FsEffect>,
+) -> Option<String> {
+    gommage_path_option_words(argv, flag, out)
+        .last()
+        .and_then(|word| word.static_value().ok().map(str::to_string))
+}
+
+fn gommage_has_flag(argv: &[ShellWord], flag: &str) -> bool {
+    argv.iter()
+        .any(|word| word.static_value().ok() == Some(flag))
+}
+
+fn normalized_effect_path(
+    word: &ShellWord,
+    cwd: Option<&str>,
+    out: &mut EffectSet<FsEffect>,
+) -> Option<String> {
+    match static_path(word, cwd) {
+        Ok(path) => Some(path),
+        Err(reason) => {
+            out.ambiguity(reason);
+            None
+        }
+    }
+}
+
+fn child_effect_path(parent: &str, child: &str) -> String {
+    if parent == "/" {
+        format!("/{child}")
+    } else {
+        format!("{}/{child}", parent.trim_end_matches('/'))
+    }
+}
+
+fn gommage_release_assets() -> &'static [&'static str] {
+    &[
+        "gommage-aarch64-darwin.tar.gz",
+        "gommage-aarch64-linux.tar.gz",
+        "gommage-x86_64-darwin.tar.gz",
+        "gommage-x86_64-linux.tar.gz",
+    ]
+}
+
+fn default_gommage_release_asset() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => Some("gommage-aarch64-darwin.tar.gz"),
+        ("macos", "x86_64") => Some("gommage-x86_64-darwin.tar.gz"),
+        ("linux", "aarch64") => Some("gommage-aarch64-linux.tar.gz"),
+        ("linux", "x86_64") => Some("gommage-x86_64-linux.tar.gz"),
+        _ => None,
+    }
 }
 
 fn trusted_cwd(cwd: Option<&str>) -> Option<String> {
