@@ -14,7 +14,7 @@
 //! protocol upgrade, not a compatible v1 encoding repair.
 
 use crate::error::GommageError;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -104,8 +104,8 @@ impl Picto {
     }
 
     fn validate_signing_fields(&self, input_hash: Option<&str>) -> Result<(), String> {
-        validate_picto_text_field("id", &self.id, false, MAX_PICTO_ID_BYTES)?;
-        validate_picto_text_field("scope", &self.scope, false, MAX_PICTO_SCOPE_BYTES)?;
+        validate_picto_id(&self.id)?;
+        validate_picto_scope(&self.scope)?;
         validate_picto_text_field("reason", &self.reason, true, MAX_PICTO_REASON_BYTES)?;
 
         if self.max_uses == 0 {
@@ -165,7 +165,7 @@ impl Picto {
             .try_into()
             .map_err(|_| GommageError::BadSignature)?;
         let sig = Signature::from_bytes(&sig_arr);
-        vk.verify(
+        vk.verify_strict(
             &self.signing_payload_for_input_hash_unchecked(input_hash),
             &sig,
         )
@@ -741,6 +741,24 @@ fn timestamp_from_sql(value: i64, column: usize) -> rusqlite::Result<OffsetDateT
     })
 }
 
+fn validate_picto_id(value: &str) -> Result<(), String> {
+    validate_picto_visible_ascii("id", value, MAX_PICTO_ID_BYTES)
+}
+
+pub(crate) fn validate_picto_scope(value: &str) -> Result<(), String> {
+    validate_picto_visible_ascii("scope", value, MAX_PICTO_SCOPE_BYTES)
+}
+
+fn validate_picto_visible_ascii(field: &str, value: &str, max_bytes: usize) -> Result<(), String> {
+    validate_picto_text_field(field, value, false, max_bytes)?;
+    if !value.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err(format!(
+            "{field} must contain only visible ASCII bytes 0x21..=0x7e"
+        ));
+    }
+    Ok(())
+}
+
 fn validate_picto_text_field(
     field: &str,
     value: &str,
@@ -753,16 +771,28 @@ fn validate_picto_text_field(
     if value.len() > max_bytes {
         return Err(format!("{field} must not exceed {max_bytes} bytes"));
     }
-    if let Some(character) = value
-        .chars()
-        .find(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
-    {
+    if let Some(character) = value.chars().find(|character| {
+        character.is_control()
+            || matches!(character, '\u{2028}' | '\u{2029}')
+            || is_bidi_control(*character)
+    }) {
         return Err(format!(
-            "{field} contains forbidden control or line-separator character U+{:04X}",
+            "{field} contains forbidden control, line-separator, or bidirectional control character U+{:04X}",
             character as u32
         ));
     }
     Ok(())
+}
+
+fn is_bidi_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061C}'
+            | '\u{200E}'
+            | '\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+    )
 }
 
 fn is_canonical_input_hash(value: &str) -> bool {
@@ -1031,6 +1061,48 @@ mod tests {
     }
 
     #[test]
+    fn legacy_v1_signing_vectors_remain_byte_stable() {
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let picto = Picto {
+            id: "picto_legacy_001".to_string(),
+            scope: "gommage.authorize".to_string(),
+            max_uses: 3,
+            uses: 2,
+            ttl_expires_at: OffsetDateTime::from_unix_timestamp(1_700_000_600).unwrap(),
+            created_at: OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+            status: PictoStatus::Revoked,
+            reason: "operator reviewed exact command".to_string(),
+            signature_b64: String::new(),
+        };
+        let input_hash = input_hash('a');
+        let scope_payload = picto.signing_payload_for_input_hash_unchecked(None);
+        let input_payload = picto.signing_payload_for_input_hash_unchecked(Some(&input_hash));
+
+        assert_eq!(
+            scope_payload,
+            b"picto_legacy_001\ngommage.authorize\n3\n1700000600\n1700000000\noperator reviewed exact command"
+        );
+        assert_eq!(
+            input_payload,
+            b"picto_legacy_001\ngommage.authorize\n3\n1700000600\n1700000000\noperator reviewed exact command\ninput_hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+
+        let mut scope_only = picto.clone();
+        scope_only.signature_b64 =
+            "Zgig5tGaUvom9GgN4rXhIf3fHKoWM35J0yL9Q0eWGXfUHOqNfx2oHaY5BxSt/lrR+Ag+h4wNva/xBJGaJC2KBg"
+                .to_string();
+        let mut input_bound = picto;
+        input_bound.signature_b64 =
+            "JHfuED1g5eQaJNXsXX0w5zZ2HjpdUImRLYTi+jTjO8Rs719bjgll2MICxn+RJ7LeQMtI9ajJ/TsE8xkFiznTBQ"
+                .to_string();
+
+        scope_only.verify(&signing_key.verifying_key()).unwrap();
+        input_bound
+            .verify_for_input_hash(Some(&input_hash), &signing_key.verifying_key())
+            .unwrap();
+    }
+
+    #[test]
     fn signature_encoding_must_be_canonical() {
         let store = PictoStore::open_in_memory().unwrap();
         let sk = key();
@@ -1058,6 +1130,39 @@ mod tests {
     }
 
     #[test]
+    fn verification_rejects_weak_key_signatures_accepted_by_permissive_ed25519() {
+        use ed25519_dalek::Verifier as _;
+
+        let mut weak_key_bytes = [0_u8; 32];
+        weak_key_bytes[0] = 1;
+        let weak_key = VerifyingKey::from_bytes(&weak_key_bytes).unwrap();
+        assert!(weak_key.is_weak());
+
+        let mut signature_bytes = [0_u8; 64];
+        signature_bytes[0] = 1;
+        let signature = Signature::from_bytes(&signature_bytes);
+        let created_at = whole_second_now();
+        let picto = Picto {
+            id: "strict-signature".to_string(),
+            scope: "test.strict".to_string(),
+            max_uses: 1,
+            uses: 0,
+            ttl_expires_at: created_at + time::Duration::seconds(60),
+            created_at,
+            status: PictoStatus::Active,
+            reason: "strict verification regression".to_string(),
+            signature_b64: base64_encode(&signature_bytes),
+        };
+        let payload = picto.signing_payload_for_input_hash_unchecked(None);
+
+        assert!(weak_key.verify(&payload, &signature).is_ok());
+        assert!(matches!(
+            picto.verify(&weak_key),
+            Err(GommageError::BadSignature)
+        ));
+    }
+
+    #[test]
     fn creation_rejects_ambiguous_or_empty_signed_text_fields() {
         let store = PictoStore::open_in_memory().unwrap();
         let sk = key();
@@ -1066,6 +1171,14 @@ mod tests {
         assert_invalid_picto(store.create("p1", "", 1, 60, "r", &sk, false), "scope");
         assert_invalid_picto(
             store.create("p1\nother", "scope", 1, 60, "r", &sk, false),
+            "id",
+        );
+        assert_invalid_picto(
+            store.create("hidden\u{200b}id", "scope", 1, 60, "r", &sk, false),
+            "id",
+        );
+        assert_invalid_picto(
+            store.create("id with space", "scope", 1, 60, "r", &sk, false),
             "id",
         );
         assert_invalid_picto(
@@ -1085,8 +1198,24 @@ mod tests {
             "reason",
         );
         assert_invalid_picto(
+            store.create("p6", "safe\u{202e}evil", 1, 60, "r", &sk, false),
+            "scope",
+        );
+        assert_invalid_picto(
+            store.create("p7", "safe\u{2066}evil", 1, 60, "r", &sk, false),
+            "scope",
+        );
+        assert_invalid_picto(
+            store.create("p8", "safe\u{200b}evil", 1, 60, "r", &sk, false),
+            "scope",
+        );
+        assert_invalid_picto(
+            store.create("p8-space", "scope with space", 1, 60, "r", &sk, false),
+            "scope",
+        );
+        assert_invalid_picto(
             store.create_for_input(
-                "p6",
+                "p9",
                 "scope",
                 &format!("SHA256:{}", "a".repeat(64)),
                 1,
@@ -1098,15 +1227,42 @@ mod tests {
             "input_hash",
         );
         assert_invalid_picto(
-            store.create("p7", "scope", 0, 60, "r", &sk, false),
+            store.create("p10", "scope", 0, 60, "r", &sk, false),
             "max_uses",
         );
-        assert_invalid_picto(store.create("p8", "scope", 1, 0, "r", &sk, false), "ttl");
+        assert_invalid_picto(store.create("p11", "scope", 1, 0, "r", &sk, false), "ttl");
         assert_invalid_picto(
-            store.create("p9", "scope", 1, MAX_PICTO_TTL_SECONDS + 1, "r", &sk, false),
+            store.create(
+                "p12",
+                "scope",
+                1,
+                MAX_PICTO_TTL_SECONDS + 1,
+                "r",
+                &sk,
+                false,
+            ),
             "ttl",
         );
         assert!(store.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reason_allows_visible_unicode_and_emoji_variation_selectors() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        let picto = store
+            .create(
+                "p1",
+                "approval.reason",
+                1,
+                60,
+                "Revisión del operador ✅️",
+                &sk,
+                false,
+            )
+            .unwrap();
+
+        picto.verify(&sk.verifying_key()).unwrap();
     }
 
     #[test]

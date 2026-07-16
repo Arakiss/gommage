@@ -193,9 +193,15 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
     );
     assert_eq!(
         approved
-            .pointer("/picto/probe_consumes_use")
+            .pointer("/picto/matching_call_consumes_use")
             .and_then(|value| value.as_bool()),
         Some(true)
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/non_matching_call_consumes_use")
+            .and_then(|value| value.as_bool()),
+        Some(false)
     );
     assert_eq!(
         approved
@@ -277,7 +283,8 @@ fn scope_only_probe_consumes_the_only_use_before_the_intended_retry() {
         approved["picto"]["consumption"],
         "one_use_per_matching_call"
     );
-    assert_eq!(approved["picto"]["probe_consumes_use"], true);
+    assert_eq!(approved["picto"]["matching_call_consumes_use"], true);
+    assert_eq!(approved["picto"]["non_matching_call_consumes_use"], false);
 
     let probe = run_mcp(&home, probe_payload);
     assert_eq!(
@@ -366,6 +373,8 @@ fn input_bound_approval_does_not_unlock_a_different_mcp_write() {
             .and_then(|value| value.as_str()),
         Some("only_the_exact_observed_tool_input")
     );
+    assert_eq!(approved["picto"]["matching_call_consumes_use"], true);
+    assert_eq!(approved["picto"]["non_matching_call_consumes_use"], false);
 
     let different = run_mcp(&home, different_payload);
     assert_eq!(
@@ -594,7 +603,9 @@ fn approval_human_output_is_scannable_for_operators() {
     assert!(approve_stdout.contains("Picto minted"));
     assert!(approve_stdout.contains("kind:    scope-only"));
     assert!(approve_stdout.contains("binding: scope only — not tied to the request input hash"));
-    assert!(approve_stdout.contains("spends:  one use per matching call, including a probe"));
+    assert!(
+        approve_stdout.contains("spends:  one use per matching call; non-matches do not consume")
+    );
     assert!(approve_stdout.contains("next:    retry the intended blocked call directly"));
 }
 

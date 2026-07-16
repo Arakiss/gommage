@@ -16,7 +16,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Approval action JSON is now schema version 2. Scope-wide grants are named
   `scope_only` instead of the misleading `exact_scope`, and machine and human
   output state what each Picto authorizes, that every matching call consumes
-  one use, and that a probe can spend the only use before the intended retry.
+  one use, and that a matching probe can spend the only use before the intended
+  retry while a non-match cannot.
 - `gommage state rebuild --json` and `state stats --json` now call their
   rebuild input `source_log` rather than `source_of_truth`. The rebuildable
   state schema is version 2, so older indexes report stale until rebuilt; this
@@ -91,10 +92,14 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   unknown entries are preserved instead of recursively deleting a
   caller-selected path.
 - Picto v1 creation and verification now enforce one canonical signed-field
-  domain: non-empty IDs and scopes, control-free text bounded to 128-byte IDs,
-  512-byte scopes, and 4096-byte reasons, whole-second UTC timestamps, bounded
-  lifetimes, canonical input hashes, and canonical signatures. Existing
-  well-formed Pictos keep their original signed bytes, while malformed rows fail
+  domain: visible-ASCII IDs and scopes using bytes `0x21..=0x7e`; signed display
+  text without delimiters, line separators, or Unicode bidirectional controls;
+  bounded field sizes; whole-second UTC timestamps; bounded lifetimes;
+  canonical input hashes; canonical unpadded Base64 signature text; and strict Ed25519
+  verification. Policy compilation uses the same scope validator, so it cannot
+  create an approval request that the Picto store refuses to mint. Existing
+  well-formed Pictos keep their original signed bytes; previously accepted IDs
+  or scopes containing Unicode or spaces now fail closed. Malformed rows fail
   closed instead of allowing an input-bound grant to be reinterpreted as a
   scope-only grant by moving the hash into `reason`. This does not change the
   separate Picto v1 limitation that mutable `uses` and `status` are not signed.

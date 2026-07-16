@@ -8,7 +8,10 @@ picto and must not be treated as one.
 
 ## Properties
 
-- **Scope.** Exact string match against the `required_scope` of the policy rule. No wildcards.
+- **Scope.** Exact string match against the `required_scope` of the policy rule.
+  No wildcards. Scopes are non-empty ASCII bytes `0x21..=0x7e` (no spaces) and
+  at most 512 bytes; policy loading rejects a scope that the Picto store could
+  not mint.
 - **Optional input binding.** A rule with `bind_input: true` requires the same
   canonical `ToolCall::input_hash` as well as the exact scope. A scope-only
   picto cannot satisfy such a rule.
@@ -18,15 +21,16 @@ picto and must not be treated as one.
   containing `id`, `scope`, `max_uses`, expiry, creation time, and `reason`,
   using the daemon's keypair. For an input-bound picto, the canonical input hash
   is also signed. Gommage verifies this payload before lookup and consumption.
-- **Canonical v1 domain.** `id` and `scope` must be non-empty; `id`, `scope`,
-  and `reason` reject control characters and Unicode line separators. Timestamps
-  must be UTC at whole-second precision. UTF-8 byte lengths are capped at 128
-  for `id`, 512 for `scope`, and 4,096 for `reason`; lifetime must be
+- **Canonical v1 domain.** `id` and `scope` must contain only visible ASCII
+  bytes `0x21..=0x7e`; `id`, `scope`, and `reason` reject control characters,
+  Unicode line separators, and the Unicode `Bidi_Control` set.
+  Timestamps must be UTC at whole-second precision. UTF-8 byte lengths are
+  capped at 128 for `id`, 512 for `scope`, and 4,096 for `reason`; lifetime must be
   1–86,400 seconds; `max_uses` must be positive; an optional input hash must be
   canonical `sha256:<lowercase-hex>`; and the signature must use canonical
-  base64. Signing and verification apply the same checks, so delimiter
-  injection, representation malleability, and input-bound-to-scope-only row
-  mutation fail closed.
+  unpadded Base64 and pass strict Ed25519 verification. Signing and verification
+  apply the same checks, so delimiter injection, representation malleability,
+  and input-bound-to-scope-only row mutation fail closed.
 - **Revocable.** `gommage revoke <id>` marks the picto revoked in O(1). Audit log records the revocation.
 - **`--require-confirmation`.** Optional. Picto is created in `pending_confirmation`; must be activated via `gommage confirm <id>` (e.g., by a second human) before first use.
 
@@ -58,8 +62,9 @@ retry. When the matching policy rule has `bind_input: true`, approval mints an
 exact-input picto instead; only the same canonical tool input can consume it,
 and each matching retry still consumes one use. The version 2 JSON action report
 exposes this as `picto.kind: "scope_only" | "exact_input"`, together with
-`picto.authorizes`, `picto.consumption`, `picto.probe_consumes_use`, and the
-compatibility field `picto.input_bound`. The default approval output is a plain
+`picto.authorizes`, `picto.consumption`, `picto.matching_call_consumes_use`,
+`picto.non_matching_call_consumes_use`, and the compatibility field
+`picto.input_bound`. The default approval output is a plain
 operator summary; add `--json` for the stable agent contract with request,
 scope, picto, TTL, uses, and `next_action` fields. A human can deny instead:
 

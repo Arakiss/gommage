@@ -141,6 +141,11 @@ deny — even with `hard_stop: false` — is terminal: the picto store is never
 consulted, so no picto can unlock it. Only an `ask_picto` rule with a
 `required_scope` is picto-bypassable.
 
+`required_scope` must be a non-empty ASCII identifier using bytes
+`0x21..=0x7e` (no spaces) and at most 512 bytes. Policy loading uses the same
+scope validator as Picto creation, so an
+accepted approval rule cannot create a request that is impossible to mint.
+
 ```yaml
 - name: no-force-push
   decision: ask_picto

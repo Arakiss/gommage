@@ -270,10 +270,11 @@ write signed `picto_created` plus `approval_resolved` events. Human approval
 output is a plain, scannable summary;
 `approval approve <id> --json` emits the version 2 action report with `status`,
 `request_id`, `scope`, `picto_id`, nested `picto` details including
-`kind`, `authorizes`, `consumption`, `probe_consumes_use`, and the compatibility
-field `input_bound`, plus `next_action` for agents. Denying a request writes a
-signed `approval_resolved` event with `status: denied`. Webhook delivery uses bounded
-retries; exhausted failures are written to
+`kind`, `authorizes`, `consumption`, `matching_call_consumes_use`,
+`non_matching_call_consumes_use`, and the compatibility field `input_bound`,
+plus `next_action` for agents. Denying a request writes a
+signed `approval_resolved` event with `status: denied`. Webhook delivery uses
+bounded retries; exhausted failures are written to
 `~/.gommage/approval-webhook-dlq.jsonl`, exposed through `approval dlq`, and
 signed in audit as `approval_webhook_failed` plus
 `approval_webhook_dead_lettered`. Dry-run JSON includes the provider-shaped

@@ -1,4 +1,4 @@
-use crate::{Capability, error::GommageError};
+use crate::{Capability, error::GommageError, picto::validate_picto_scope};
 use globset::{Glob, GlobMatcher};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -567,11 +567,19 @@ fn compile_rule(
 ) -> Result<Rule, GommageError> {
     // Validate decision/field combinations early — a policy with inconsistent
     // fields should fail at load, not at evaluation.
-    if raw.decision == RuleDecision::AskPicto && raw.required_scope.is_none() {
-        return Err(GommageError::Policy(format!(
-            "rule {:?}: decision=ask_picto requires required_scope",
-            raw.name
-        )));
+    if raw.decision == RuleDecision::AskPicto {
+        let scope = raw.required_scope.as_deref().ok_or_else(|| {
+            GommageError::Policy(format!(
+                "rule {:?}: decision=ask_picto requires required_scope",
+                raw.name
+            ))
+        })?;
+        validate_picto_scope(scope).map_err(|reason| {
+            GommageError::Policy(format!(
+                "rule {:?}: invalid required_scope: {reason}",
+                raw.name
+            ))
+        })?;
     }
     if raw.decision != RuleDecision::Gommage && raw.hard_stop {
         return Err(GommageError::Policy(format!(
@@ -960,6 +968,36 @@ mod tests {
 "#;
         let err = Policy::from_yaml_string(yaml, &HashMap::new(), "t").unwrap_err();
         assert!(matches!(err, GommageError::Policy(_)));
+    }
+
+    #[test]
+    fn ask_picto_scope_must_fit_the_picto_signing_domain() {
+        for scope in [
+            String::new(),
+            "safe\u{202e}evil".to_string(),
+            "safe\u{2066}evil".to_string(),
+            "s".repeat(513),
+        ] {
+            let yaml = serde_yaml::to_string(&vec![RawRule {
+                name: "invalid-scope".to_string(),
+                decision: RuleDecision::AskPicto,
+                hard_stop: false,
+                required_scope: Some(scope),
+                bind_input: false,
+                r#match: RawMatch {
+                    any_capability: vec!["mcp.write:*".to_string()],
+                    ..RawMatch::default()
+                },
+                reason: "must be approvable".to_string(),
+            }])
+            .unwrap();
+            let error =
+                Policy::from_yaml_string(&yaml, &HashMap::new(), "invalid.yaml").unwrap_err();
+            assert!(
+                error.to_string().contains("invalid required_scope"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

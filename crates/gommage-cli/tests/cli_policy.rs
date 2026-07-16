@@ -233,6 +233,36 @@ fn policy_lint_strict_json_passes_stdlib() {
 }
 
 #[test]
+fn policy_check_rejects_a_scope_that_cannot_be_minted() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    assert!(gommage(&home).arg("init").status().unwrap().success());
+    assert!(
+        gommage(&home)
+            .args(["policy", "init", "--stdlib"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let invalid_policy = serde_yaml::to_string(&serde_json::json!([{
+        "name": "visually-spoofed-scope",
+        "decision": "ask_picto",
+        "required_scope": "safe\u{202e}evil",
+        "match": { "any_capability": ["mcp.write:*"] },
+        "reason": "this scope must never enter the approval inbox"
+    }]))
+    .unwrap();
+    fs::write(home.join("policy.d/99-invalid-scope.yaml"), invalid_policy).unwrap();
+
+    let output = gommage(&home).args(["policy", "check"]).output().unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("invalid required_scope"), "{stderr}");
+    assert!(stderr.contains("U+202E"), "{stderr}");
+}
+
+#[test]
 fn policy_layers_json_reports_user_before_project_and_project_can_tighten() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

@@ -12,12 +12,12 @@
 //! 2. `Policy::from_yaml_string` on arbitrary strings → returns `Ok` or a
 //!    `GommageError`. Never panics, never hangs.
 //! 3. `Picto::verify` on a correctly-shaped picto with a random 64-byte
-//!    signature → never panics, almost always rejects.
+//!    signature → never panics and rejects.
 //! 4. `evaluate` on arbitrary capability lists → returns one of the three
 //!    decision variants. Never panics.
 
 use gommage_core::{
-    Capability, CapabilityMapper, Decision, Policy, ToolCall, evaluate,
+    Capability, CapabilityMapper, Decision, GommageError, Policy, ToolCall, evaluate,
     picto::{Picto, PictoStatus},
 };
 use proptest::prelude::*;
@@ -337,22 +337,24 @@ proptest! {
 
         let sk = SigningKey::generate(&mut OsRng);
         let vk = sk.verifying_key();
+        let created_at = time::OffsetDateTime::from_unix_timestamp(
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )
+        .unwrap();
 
         let picto = Picto {
             id: "proptest".into(),
             scope: "any".into(),
             max_uses: 1,
             uses: 0,
-            ttl_expires_at: time::OffsetDateTime::now_utc() + time::Duration::seconds(60),
-            created_at: time::OffsetDateTime::now_utc(),
+            ttl_expires_at: created_at + time::Duration::seconds(60),
+            created_at,
             status: PictoStatus::Active,
             reason: "proptest".into(),
             signature_b64: general_purpose::STANDARD_NO_PAD.encode(&sig),
         };
 
-        // Random 64-byte blob must not panic. It will almost always reject
-        // (probability of a valid ed25519 signature is 2^-256).
-        let _ = picto.verify(&vk);
+        prop_assert!(matches!(picto.verify(&vk), Err(GommageError::BadSignature)));
     }
 }
 

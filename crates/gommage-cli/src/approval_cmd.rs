@@ -235,7 +235,8 @@ pub(crate) struct ApprovalPictoReport {
     pub(crate) input_bound: bool,
     pub(crate) authorizes: String,
     pub(crate) consumption: String,
-    pub(crate) probe_consumes_use: bool,
+    pub(crate) matching_call_consumes_use: bool,
+    pub(crate) non_matching_call_consumes_use: bool,
     pub(crate) max_uses: u32,
     pub(crate) uses_remaining: u32,
     pub(crate) expires_at: String,
@@ -793,7 +794,8 @@ pub(crate) fn approve_request(
                 "any_matching_call_in_scope".to_string()
             },
             consumption: "one_use_per_matching_call".to_string(),
-            probe_consumes_use: true,
+            matching_call_consumes_use: true,
+            non_matching_call_consumes_use: false,
             max_uses: picto_max_uses,
             uses_remaining,
             expires_at: picto_expires_at,
@@ -1264,7 +1266,7 @@ fn print_action_human(report: &ApprovalActionReport) {
             println!("binding: scope only — not tied to the request input hash");
             println!("allows:  any matching call in scope {}", picto.scope);
         }
-        println!("spends:  one use per matching call, including a probe");
+        println!("spends:  one use per matching call; non-matches do not consume");
         println!(
             "uses:    {}/{} remaining",
             picto.uses_remaining, picto.max_uses
@@ -1277,7 +1279,7 @@ fn print_action_human(report: &ApprovalActionReport) {
         "retry_blocked_call" => {
             if report.picto.as_ref().is_some_and(|picto| picto.input_bound) {
                 println!(
-                    "next:    retry the intended blocked call directly; a probe would spend one use"
+                    "next:    retry the intended blocked call; only the exact-input match spends a use"
                 )
             } else {
                 println!(
