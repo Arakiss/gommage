@@ -1,0 +1,5 @@
+- name: allow-project-read
+  decision: allow
+  match:
+    any_capability:
+      - "fs.read:/project/**"

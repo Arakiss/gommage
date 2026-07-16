@@ -1,0 +1,6 @@
+- name: fuzz-git-push
+  tool: Bash
+  match_input:
+    command: "(?s)^git\\s+push(?:\\s+.*)?$"
+  emit:
+    - "proc.exec:${input.command}"

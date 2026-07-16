@@ -1,0 +1,1 @@
+printf '%s\n' "$(sh -c 'mkfs.ext4 /dev/test')"

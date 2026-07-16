@@ -1,0 +1,5 @@
+- name: duplicate
+  decision: allow
+  decision: gommage
+  match:
+    any_capability: ["**"]
