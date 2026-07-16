@@ -3,23 +3,29 @@
 - name: allow-bun-install
   decision: allow
   match:
-    any_capability:
+    all_capability:
       - "pkg.bun:install"
+      - "net.out:registry.npmjs.org"
+      - "proc.exec:**bun **"
   reason: "bun install is a normal operation in this project family"
 
 - name: allow-npm-install
   decision: allow
   match:
-    any_capability:
+    all_capability:
       - "pkg.npm:install"
+      - "net.out:registry.npmjs.org"
+      - "proc.exec:**npm **"
   reason: "npm install is a normal operation"
 
 - name: ask-cargo-install-global
   decision: ask_picto
   required_scope: "pkg.cargo:install"
   match:
-    any_capability:
+    all_capability:
       - "pkg.cargo:install"
+      - "net.out:crates.io"
+      - "proc.exec:**cargo install**"
   reason: "global cargo install touches ~/.cargo/bin; require picto"
 
 # --- Supply-chain publish: irreversible registry mutation -------------------
@@ -30,22 +36,58 @@
   decision: ask_picto
   required_scope: "pkg.npm:publish"
   match:
-    any_capability:
+    all_capability:
       - "pkg.npm:publish"
+      - "net.out:registry.npmjs.org"
+      - "proc.exec:**npm publish**"
   reason: "npm publish pushes to the public registry; a published version cannot be unpublished"
 
 - name: gate-cargo-publish
   decision: ask_picto
   required_scope: "pkg.cargo:publish"
   match:
-    any_capability:
+    all_capability:
       - "pkg.cargo:publish"
+      - "net.out:crates.io"
+      - "proc.exec:**cargo publish**"
   reason: "cargo publish pushes to crates.io; a published version is permanent"
+
+- name: gate-gommage-crates-publish-script
+  decision: ask_picto
+  required_scope: "pkg.cargo:publish"
+  match:
+    all_capability:
+      - "pkg.cargo:publish"
+      - "net.out:crates.io"
+      - "proc.exec:**scripts/publish-crates.sh**--execute**"
+  reason: "the crates publish helper executes permanent crates.io publishes"
 
 - name: gate-python-publish
   decision: ask_picto
   required_scope: "pkg.python:publish"
   match:
-    any_capability:
+    all_capability:
       - "pkg.python:publish"
+      - "net.out:pypi.org"
+      - "proc.exec:**twine upload**"
   reason: "twine/pip upload pushes to PyPI; a published version cannot be replaced"
+
+- name: gate-python-module-publish
+  decision: ask_picto
+  required_scope: "pkg.python:publish"
+  match:
+    all_capability:
+      - "pkg.python:publish"
+      - "net.out:pypi.org"
+      - "proc.exec:**python** -m twine upload**"
+  reason: "python -m twine upload pushes a permanent package to PyPI"
+
+- name: gate-pip-publish
+  decision: ask_picto
+  required_scope: "pkg.python:publish"
+  match:
+    all_capability:
+      - "pkg.python:publish"
+      - "net.out:pypi.org"
+      - "proc.exec:**pip** upload**"
+  reason: "pip upload pushes a permanent package to PyPI"

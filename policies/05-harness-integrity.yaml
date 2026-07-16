@@ -79,6 +79,8 @@
       - "proc.exec:**/gommage repair agent*"
       - "proc.exec:gommage upgrade*"
       - "proc.exec:**/gommage upgrade*"
+    all_capability:
+      - "proc.exec:**gommage **"
   reason: "reconfiguring Gommage hooks, policy, skills, or binaries requires an operator picto"
 
 - name: gate-gommage-disable
@@ -92,8 +94,19 @@
       - "proc.exec:**/gommage agent uninstall*"
       - "proc.exec:gommage uninstall*"
       - "proc.exec:**/gommage uninstall*"
+    all_capability:
+      - "proc.exec:**gommage **"
+  reason: "removing Gommage requires a signed operator picto"
+
+- name: gate-gommage-service-disable
+  decision: ask_picto
+  required_scope: "gommage.disable"
+  match:
+    any_capability:
       - "proc.exec:systemctl --user stop gommage-daemon.service*"
       - "proc.exec:systemctl --user disable --now gommage-daemon.service*"
       - "proc.exec:launchctl unload *dev.gommage.daemon*"
       - "proc.exec:launchctl bootout *dev.gommage.daemon*"
-  reason: "disabling or removing Gommage requires a signed operator picto"
+    all_capability:
+      - "proc.exec:**gommage-daemon**"
+  reason: "disabling the Gommage daemon requires a signed operator picto"

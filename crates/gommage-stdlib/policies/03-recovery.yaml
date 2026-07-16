@@ -19,6 +19,8 @@
       - "proc.exec:gommage policy check*"
       - "proc.exec:gommage agent status*"
       - "proc.exec:gommage daemon status*"
+    all_capability:
+      - "proc.exec:gommage *"
   reason: "Gommage readiness and recovery commands must remain available after quickstart"
 
 - name: allow-absolute-gommage-readiness-commands
@@ -36,39 +38,83 @@
       - "proc.exec:**/gommage policy check*"
       - "proc.exec:**/gommage agent status*"
       - "proc.exec:**/gommage daemon status*"
+    all_capability:
+      - "proc.exec:**/gommage *"
   reason: "absolute Gommage binary paths are valid recovery commands"
 
-- name: allow-basic-shell-inspection
+- name: allow-pwd-inspection
   decision: allow
   match:
     any_capability:
       - "proc.exec:pwd"
       - "proc.exec:pwd *"
-      - "proc.exec:ls"
-      - "proc.exec:ls *"
-      - "proc.exec:command -v gommage*"
-      - "proc.exec:which gommage*"
-  reason: "basic shell inspection must stay available for recovery"
+    all_capability:
+      - "proc.exec:pwd*"
+  reason: "the current directory must stay inspectable during recovery"
 
-- name: allow-gommage-systemd-recovery
+- name: allow-ls-inspection
   decision: allow
   match:
     any_capability:
-      - "proc.exec:systemctl --user status gommage-daemon.service*"
-      - "proc.exec:systemctl --user daemon-reload"
-  reason: "user-level daemon inspection and rollback must stay available"
+      - "proc.exec:ls"
+      - "proc.exec:ls *"
+    all_capability:
+      - "proc.exec:ls*"
+  reason: "directory listings must stay available during recovery"
 
-- name: allow-claude-settings-backup-inspection
+- name: allow-gommage-path-inspection
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:command -v gommage*"
+      - "proc.exec:which gommage*"
+    all_capability:
+      - "proc.exec:*gommage*"
+  reason: "the active Gommage binary path must stay inspectable during recovery"
+
+- name: allow-gommage-systemd-status
+  decision: allow
+  match:
+    all_capability:
+      - "proc.exec:systemctl --user status gommage-daemon.service*"
+  reason: "the user-level Gommage daemon must stay inspectable during recovery"
+
+- name: allow-gommage-systemd-reload
+  decision: allow
+  match:
+    all_capability:
+      - "proc.exec:systemctl --user daemon-reload"
+  reason: "the user-level service manager must be reloadable during recovery"
+
+- name: allow-claude-settings-inspection
   decision: allow
   match:
     any_capability:
       - "proc.exec:cat ~/.claude/settings.json"
-      - "proc.exec:cat ~/.claude/settings.json.gommage-bak-*"
       - "proc.exec:cat ${HOME}/.claude/settings.json"
+    all_capability:
+      - "fs.read:${HOME}/.claude/settings.json"
+  reason: "Claude settings must be inspectable during recovery"
+
+- name: allow-claude-settings-backup-cat
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:cat ~/.claude/settings.json.gommage-bak-*"
       - "proc.exec:cat ${HOME}/.claude/settings.json.gommage-bak-*"
+    all_capability:
+      - "fs.read:${HOME}/.claude/settings.json.gommage-bak-*"
+  reason: "Claude settings backups must be readable during recovery"
+
+- name: allow-claude-settings-backup-list
+  decision: allow
+  match:
+    any_capability:
       - "proc.exec:ls ~/.claude/settings.json.gommage-bak-*"
       - "proc.exec:ls ${HOME}/.claude/settings.json.gommage-bak-*"
-  reason: "Claude settings backups must be inspectable during recovery"
+    all_capability:
+      - "proc.exec:ls *settings.json.gommage-bak-*"
+  reason: "Claude settings backups must be discoverable during recovery"
 
 - name: allow-claude-settings-backup-restore
   decision: allow
@@ -78,4 +124,6 @@
       - "proc.exec:mv ~/.claude/settings.json.gommage-bak-* ~/.claude/settings.json"
       - "proc.exec:cp ${HOME}/.claude/settings.json.gommage-bak-* ${HOME}/.claude/settings.json"
       - "proc.exec:mv ${HOME}/.claude/settings.json.gommage-bak-* ${HOME}/.claude/settings.json"
+    all_capability:
+      - "fs.write:${HOME}/.claude/settings.json"
   reason: "a validated Claude settings backup must be restorable from inside the session"

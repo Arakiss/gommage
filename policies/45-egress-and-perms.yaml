@@ -16,32 +16,45 @@
   decision: ask_picto
   required_scope: "net.scp:out"
   match:
-    any_capability:
+    all_capability:
       - "net.scp:out"
+      - "proc.exec:**scp **"
   reason: "scp to a remote host can exfiltrate data; require a picto"
 
 - name: gate-rsync-out
   decision: ask_picto
   required_scope: "net.rsync:out"
   match:
-    any_capability:
+    all_capability:
       - "net.rsync:out"
+      - "proc.exec:**rsync **"
   reason: "rsync to a remote host can exfiltrate data; require a picto"
 
 - name: gate-ssh-exec
   decision: ask_picto
   required_scope: "net.ssh:exec"
   match:
-    any_capability:
+    all_capability:
       - "net.ssh:exec"
+      - "proc.exec:**ssh **"
   reason: "ssh running a remote command or opening a tunnel is a remote-exec/egress channel; require a picto"
 
 - name: gate-net-out-post
   decision: ask_picto
   required_scope: "net.out.post"
   match:
-    any_capability:
+    all_capability:
       - "net.out.post"
+      - "proc.exec:**curl **"
+  reason: "an HTTP upload/POST can exfiltrate data to an arbitrary endpoint; require a picto"
+
+- name: gate-net-out-post-wget
+  decision: ask_picto
+  required_scope: "net.out.post"
+  match:
+    all_capability:
+      - "net.out.post"
+      - "proc.exec:**wget **"
   reason: "an HTTP upload/POST can exfiltrate data to an arbitrary endpoint; require a picto"
 
 # --- Permissions: dangerous chmod / chown -----------------------------------
@@ -53,16 +66,18 @@
   decision: ask_picto
   required_scope: "fs.chmod:dangerous"
   match:
-    any_capability:
+    all_capability:
       - "fs.chmod:dangerous"
+      - "proc.exec:**chmod **"
   reason: "recursive or world-writable chmod widens access broadly; require a picto"
 
 - name: gate-chown-dangerous
   decision: ask_picto
   required_scope: "fs.chown:dangerous"
   match:
-    any_capability:
+    all_capability:
       - "fs.chown:dangerous"
+      - "proc.exec:**chown **"
   reason: "recursive chown or chowning to root changes ownership broadly; require a picto"
 
 # --- Code injection: dynamic-loader preload ---------------------------------
