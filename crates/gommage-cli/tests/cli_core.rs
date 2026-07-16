@@ -811,6 +811,11 @@ fn hook_codex_agent_suppresses_plain_allow_output() {
   match:
     any_capability:
       - "git.push:refs/heads/main"
+      - "git.push:refs/heads/master"
+    all_capability:
+      - "git.push:*"
+      - "net.out:github.com"
+      - "proc.exec:**git push**"
   reason: "operator opts into routine main pushes"
 "#,
     )
@@ -938,12 +943,17 @@ fn smoke_json_warns_for_local_policy_relaxations() {
   match:
     any_capability:
       - "net.fetch:*"
+    all_capability:
+      - "net.fetch:*"
+      - "net.out:*"
   reason: "operator opts into frictionless WebFetch"
 
 - name: operator-allow-mcp
   decision: allow
   match:
     any_capability:
+      - "mcp.write:*"
+    all_capability:
       - "mcp.write:*"
       - "mcp.call:*"
   reason: "operator opts into frictionless MCP"
@@ -957,6 +967,11 @@ fn smoke_json_warns_for_local_policy_relaxations() {
   match:
     any_capability:
       - "git.push:refs/heads/main"
+      - "git.push:refs/heads/master"
+    all_capability:
+      - "git.push:*"
+      - "net.out:github.com"
+      - "proc.exec:**git push**"
   reason: "operator opts into routine main pushes"
 "#,
     )
@@ -1052,12 +1067,17 @@ fn posture_json_reports_local_policy_relaxations() {
   match:
     any_capability:
       - "net.fetch:*"
+    all_capability:
+      - "net.fetch:*"
+      - "net.out:*"
   reason: "operator opts into frictionless WebFetch"
 
 - name: operator-allow-mcp
   decision: allow
   match:
     any_capability:
+      - "mcp.write:*"
+    all_capability:
       - "mcp.write:*"
       - "mcp.call:*"
   reason: "operator opts into frictionless MCP"
@@ -1071,6 +1091,11 @@ fn posture_json_reports_local_policy_relaxations() {
   match:
     any_capability:
       - "git.push:refs/heads/main"
+      - "git.push:refs/heads/master"
+    all_capability:
+      - "git.push:*"
+      - "net.out:github.com"
+      - "proc.exec:**git push**"
   reason: "operator opts into routine main pushes"
 "#,
     )
@@ -1122,12 +1147,17 @@ fn policy_init_can_remove_known_local_relaxation_layers() {
   match:
     any_capability:
       - "net.fetch:*"
+    all_capability:
+      - "net.fetch:*"
+      - "net.out:*"
   reason: "operator opts into frictionless WebFetch"
 
 - name: operator-allow-mcp
   decision: allow
   match:
     any_capability:
+      - "mcp.write:*"
+    all_capability:
       - "mcp.write:*"
       - "mcp.call:*"
   reason: "operator opts into frictionless MCP"
@@ -1141,6 +1171,11 @@ fn policy_init_can_remove_known_local_relaxation_layers() {
   match:
     any_capability:
       - "git.push:refs/heads/main"
+      - "git.push:refs/heads/master"
+    all_capability:
+      - "git.push:*"
+      - "net.out:github.com"
+      - "proc.exec:**git push**"
   reason: "operator opts into routine main pushes"
 "#,
     )
