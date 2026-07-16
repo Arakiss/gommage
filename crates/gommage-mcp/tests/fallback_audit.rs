@@ -133,7 +133,9 @@ fn gateway_forwards_allowed_tool_calls() {
 - name: allow-gateway-read
   decision: allow
   match:
-    any_capability: ["mcp.read:mcp__fixture__read_file"]
+    any_capability:
+      - "mcp.read:mcp__fixture__read_file"
+      - "mcp.call:mcp__fixture__read_file"
 "#,
     )
     .unwrap();
