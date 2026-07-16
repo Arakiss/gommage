@@ -447,7 +447,7 @@ fn map_hook_json_reports_codex_apply_patch_and_mcp_capabilities() {
 }
 
 #[test]
-fn map_hook_json_resolves_relative_writes_and_git_branch_context() {
+fn map_hook_json_emits_only_canonical_resolved_write_paths() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     let project = temp.path().join("project");
@@ -505,11 +505,14 @@ fn map_hook_json_resolves_relative_writes_and_git_branch_context() {
         .collect::<Vec<_>>();
     let resolved = format!("{}/src/lib.rs", project.display());
     let resolved_capability = format!("fs.write:{resolved}");
-    let branch_capability = format!("fs.write.git_branch:main:{resolved}");
-    assert!(capabilities.contains(&"fs.write:src/lib.rs"));
+    assert!(!capabilities.contains(&"fs.write:src/lib.rs"));
     assert!(capabilities.contains(&resolved_capability.as_str()));
-    assert!(capabilities.contains(&branch_capability.as_str()));
     assert!(!capabilities.contains(&"fs.write:/spoofed"));
+    assert!(
+        !capabilities
+            .iter()
+            .any(|cap| cap.starts_with("fs.write.git_branch:"))
+    );
 
     let bash_payload = serde_json::json!({
         "hook_event_name": "PreToolUse",
@@ -544,10 +547,18 @@ fn map_hook_json_resolves_relative_writes_and_git_branch_context() {
         .iter()
         .filter_map(|value| value.as_str())
         .collect::<Vec<_>>();
-    assert!(capabilities.contains(&"fs.write:src/lib.rs"));
+    assert!(!capabilities.contains(&"fs.write:src/lib.rs"));
     assert!(capabilities.contains(&resolved_capability.as_str()));
-    assert!(capabilities.contains(&branch_capability.as_str()));
-    assert!(capabilities.contains(&"git.cwd_branch:main"));
+    assert!(
+        !capabilities
+            .iter()
+            .any(|cap| cap.starts_with("fs.write.git_branch:"))
+    );
+    assert!(
+        !capabilities
+            .iter()
+            .any(|cap| cap.starts_with("git.cwd_branch:"))
+    );
     assert!(!capabilities.contains(&"fs.read:>"));
 
     let sed_payload = serde_json::json!({
@@ -583,10 +594,18 @@ fn map_hook_json_resolves_relative_writes_and_git_branch_context() {
         .iter()
         .filter_map(|value| value.as_str())
         .collect::<Vec<_>>();
-    assert!(capabilities.contains(&"fs.write:src/lib.rs"));
+    assert!(!capabilities.contains(&"fs.write:src/lib.rs"));
     assert!(capabilities.contains(&resolved_capability.as_str()));
-    assert!(capabilities.contains(&branch_capability.as_str()));
-    assert!(capabilities.contains(&"git.cwd_branch:main"));
+    assert!(
+        !capabilities
+            .iter()
+            .any(|cap| cap.starts_with("fs.write.git_branch:"))
+    );
+    assert!(
+        !capabilities
+            .iter()
+            .any(|cap| cap.starts_with("git.cwd_branch:"))
+    );
 }
 
 #[test]

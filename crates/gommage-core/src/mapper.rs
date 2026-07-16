@@ -151,6 +151,14 @@ impl CapabilityMapper {
 
         let mut out: Vec<Capability> = Vec::new();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Security-relevant Bash effects are derived from the quote-preserving
+        // AST before compatibility regex rules. The raw proc.exec rule remains
+        // authoritative and is appended below; typed effects never replace it.
+        for capability in typed_shell_capabilities(call) {
+            if seen.insert(capability.as_str().to_string()) {
+                out.push(capability);
+            }
+        }
         for rule in &self.rules {
             let Some(tool_captures) = match_tool(&rule.tool_match, &call.tool) else {
                 continue;
@@ -181,6 +189,9 @@ impl CapabilityMapper {
                     // Capture groups come from the matched candidate; ${input.*}
                     // and ${tool} always refer to the original tool input.
                     let rendered = render(tpl, &captures, &call.tool, &call.input);
+                    if shadowed_relative_filesystem_capability(call, &rendered) {
+                        continue;
+                    }
                     if seen.insert(rendered.clone()) {
                         out.push(Capability::new(rendered));
                     }
@@ -189,6 +200,28 @@ impl CapabilityMapper {
         }
         out
     }
+}
+
+fn shadowed_relative_filesystem_capability(call: &ToolCall, capability: &str) -> bool {
+    let (raw_field, resolved_field) = if call.tool == "NotebookEdit" {
+        ("notebook_path", "__gommage_notebook_path")
+    } else if matches!(call.tool.as_str(), "Read" | "Write" | "Edit" | "MultiEdit") {
+        ("file_path", "__gommage_file_path")
+    } else {
+        return false;
+    };
+    let Some(raw) = call.input.get(raw_field).and_then(Value::as_str) else {
+        return false;
+    };
+    if call
+        .input
+        .get(resolved_field)
+        .and_then(Value::as_str)
+        .is_none()
+    {
+        return false;
+    }
+    capability == format!("fs.read:{raw}") || capability == format!("fs.write:{raw}")
 }
 
 /// The name of the field on a shell tool call that carries the command string.
@@ -211,85 +244,90 @@ fn shell_candidates(call: &ToolCall) -> Vec<String> {
         return Vec::new();
     };
 
-    let mut candidates: Vec<String> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    collect_candidates(command, &mut candidates, &mut seen, 0);
-    // The whole command (candidate 0) is handled separately by the caller; drop
-    // it here if the recursion re-derived it identically.
-    candidates.retain(|c| c != command);
+    let analysis = crate::shell::analyze(command);
+    let mut candidates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for parsed in &analysis.commands {
+        let Some(mut argv) = parsed.static_argv() else {
+            continue;
+        };
+        if argv.is_empty() {
+            continue;
+        }
+        argv[0] = crate::shell::head_basename(&argv[0]).to_string();
+        let candidate = argv.join(" ");
+        if candidate != command && seen.insert(candidate.clone()) {
+            candidates.push(candidate);
+        }
+    }
     candidates
 }
 
-/// Recursion depth cap for command-substitution nesting. One level of recursion
-/// is required by spec; we allow a small bounded depth so `$( $( … ) )` and
-/// `bash -c '$(…)'` still surface their inner verbs without unbounded work.
-const MAX_CANDIDATE_DEPTH: usize = 3;
+fn typed_shell_capabilities(call: &ToolCall) -> Vec<Capability> {
+    if call.tool != "Bash" {
+        return Vec::new();
+    }
+    let Some(command) = call.input.get(SHELL_COMMAND_FIELD).and_then(Value::as_str) else {
+        return vec![Capability::new("proc.exec.ambiguous:missing-command")];
+    };
+    let cwd = call.input.get("__gommage_cwd").and_then(Value::as_str);
+    let analysis = crate::shell::analyze(command);
+    let mut rendered = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut emit = |value: String| {
+        if seen.insert(value.clone()) {
+            rendered.push(Capability::new(value));
+        }
+    };
 
-fn collect_candidates(
-    command: &str,
-    out: &mut Vec<String>,
-    seen: &mut std::collections::HashSet<String>,
-    depth: usize,
-) {
-    if depth > MAX_CANDIDATE_DEPTH {
-        return;
+    for reason in &analysis.ambiguities {
+        emit(format!("proc.exec.ambiguous:{reason}"));
     }
 
-    // 1. Each shell segment, with leading env/sudo/wrapper prefixes stripped and
-    //    the head reduced to its basename so `/usr/bin/git push` matches `git`.
-    for segment in crate::shell::shell_segments(command) {
-        if let Some(real) = crate::shell::command_words(&segment) {
-            if real.is_empty() {
-                continue;
-            }
-            // Drop redirections / background `&` before joining: they are not
-            // arguments, and leaving them in lets a gate keyed on a refspec
-            // (e.g. `git.push:refs/heads/main`) be evaded by appending `2>&1`
-            // or `&`, which would otherwise land in the refspec position.
-            let mut normalized = crate::shell::strip_redirections(real);
-            if normalized.is_empty() {
-                continue;
-            }
-            normalized[0] = crate::shell::head_basename(&normalized[0]).to_string();
-            let joined = normalized.join(" ");
-            push_candidate(joined, out, seen);
+    let filesystem = crate::shell::filesystem_effects(&analysis, cwd);
+    for effect in filesystem.effects {
+        let namespace = match effect.kind {
+            crate::shell::FsEffectKind::Read => "fs.read",
+            crate::shell::FsEffectKind::Write => "fs.write",
+        };
+        if effect.kind == crate::shell::FsEffectKind::Write && is_raw_device_path(&effect.path) {
+            emit("disk.device:write".to_string());
+        }
+        emit(format!("{namespace}:{}", effect.path));
+    }
+    for reason in &filesystem.ambiguities {
+        emit(format!("proc.exec.ambiguous:{reason}"));
+    }
+    if crate::shell::has_static_remote_rsync(&analysis) {
+        emit("net.rsync:out".to_string());
+    }
 
-            // 1b. If this segment is a `bash/sh/zsh -c "<payload>"`, recurse into
-            //     the payload one level deeper.
-            let head = crate::shell::head_basename(&real[0]);
-            if matches!(head, "bash" | "sh" | "zsh")
-                && let Some(payload) = crate::shell::shell_c_payload(&real[1..])
-            {
-                collect_candidates(payload, out, seen, depth + 1);
+    let git = crate::shell::git_push_effects(&analysis);
+    for effect in git.effects {
+        match effect {
+            crate::shell::GitPushEffect::Destination(destination) => {
+                emit(format!("git.push:{destination}"));
             }
+            crate::shell::GitPushEffect::CurrentBranch => {
+                emit("git.push:<current-branch>".to_string());
+            }
+            crate::shell::GitPushEffect::Force => emit("git.push.force:<any>".to_string()),
+            crate::shell::GitPushEffect::Delete(destination) => {
+                emit(format!("git.push.delete:{destination}"));
+            }
+            crate::shell::GitPushEffect::Network => emit("net.out:github.com".to_string()),
         }
     }
-
-    // 2. The body of each command substitution, recursing one level deeper.
-    for sub in crate::shell::command_substitutions(command) {
-        collect_candidates(&sub, out, seen, depth + 1);
+    for reason in &git.ambiguities {
+        emit(format!("proc.exec.ambiguous:{reason}"));
     }
-
-    // 3. Genuine (quote-aware) output-redirection targets, surfaced as a small
-    //    synthetic candidate of the form `> <target>`. A YAML rule anchored at
-    //    `^>` matches these but never matches quoted data (whose segment join
-    //    and raw candidate never *begin* with `>`), so a device-write redirect
-    //    is caught while `echo "> /dev/sda"` is left as inert data. The leading
-    //    operator is preserved verbatim so the existing fs.write redirect rule's
-    //    semantics are untouched (it keeps matching segments/candidate 0).
-    for target in crate::shell::redirect_targets(command) {
-        push_candidate(format!("> {target}"), out, seen);
-    }
+    rendered
 }
 
-fn push_candidate(
-    candidate: String,
-    out: &mut Vec<String>,
-    seen: &mut std::collections::HashSet<String>,
-) {
-    if !candidate.is_empty() && seen.insert(candidate.clone()) {
-        out.push(candidate);
-    }
+fn is_raw_device_path(path: &str) -> bool {
+    ["/dev/sd", "/dev/disk", "/dev/nvme", "/dev/rdisk"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
 }
 
 /// Does this rule constrain the shell command field? Only such rules take part
@@ -496,6 +534,7 @@ fn render(tpl: &Template, captures: &HashMap<String, String>, tool: &str, input:
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn git_push_to_main() {
@@ -644,6 +683,18 @@ mod tests {
     - "git.reset.hard:<any>"
 "#;
         CapabilityMapper::from_yaml_string(yaml, "bash.yaml").unwrap()
+    }
+
+    fn typed_mapper() -> CapabilityMapper {
+        CapabilityMapper::from_yaml_string(
+            r#"
+- name: bash-proc-exec
+  tool: Bash
+  emit: ["proc.exec:${input.command}"]
+"#,
+            "typed-bash.yaml",
+        )
+        .unwrap()
     }
 
     fn bash(cmd: &str) -> ToolCall {
@@ -833,7 +884,7 @@ mod tests {
             .filter(|c| c.as_str() == "git.push:refs/heads/main")
             .count();
         assert_eq!(push_count, 1, "deduped; caps: {caps:?}");
-        // proc.exec (rule 0) precedes git.push (rule 1).
+        // AST-backed effects precede compatibility YAML emissions.
         let proc_idx = caps
             .iter()
             .position(|c| c.starts_with("proc.exec:"))
@@ -842,6 +893,313 @@ mod tests {
             .iter()
             .position(|c| c.starts_with("git.push:"))
             .unwrap();
-        assert!(proc_idx < push_idx, "rule order; caps: {caps:?}");
+        assert!(push_idx < proc_idx, "typed effect order; caps: {caps:?}");
+    }
+
+    #[test]
+    fn typed_git_refspecs_use_remote_destinations() {
+        let mapper = typed_mapper();
+        let cases = [
+            ("git push origin HEAD:main", "git.push:refs/heads/main"),
+            (
+                "git push origin feature/x:release/x",
+                "git.push:refs/heads/release/x",
+            ),
+            ("git push --repo=origin main", "git.push:refs/heads/main"),
+            (
+                "git push origin refs/tags/v1.2.3",
+                "git.push:refs/tags/v1.2.3",
+            ),
+        ];
+        for (command, expected) in cases {
+            let caps = caps_of(&mapper, command);
+            assert!(
+                caps.iter().any(|cap| cap == expected),
+                "{command}: {caps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_git_force_and_delete_are_explicit() {
+        let mapper = typed_mapper();
+        for command in [
+            "git push --force origin main",
+            "git push --force-with-lease=main origin HEAD:main",
+            "git push origin +main",
+        ] {
+            let caps = caps_of(&mapper, command);
+            assert!(
+                caps.iter().any(|cap| cap == "git.push.force:<any>"),
+                "{command}: {caps:?}"
+            );
+            assert!(
+                caps.iter().any(|cap| cap == "git.push:refs/heads/main"),
+                "{command}: {caps:?}"
+            );
+        }
+
+        for command in ["git push origin :main", "git push --delete origin main"] {
+            let caps = caps_of(&mapper, command);
+            assert!(
+                caps.iter()
+                    .any(|cap| cap == "git.push.delete:refs/heads/main"),
+                "{command}: {caps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_git_options_and_redirects_never_become_refspecs() {
+        let mapper = typed_mapper();
+        let caps = caps_of(
+            &mapper,
+            "git -C repo push --force --repo origin HEAD:main 2>&1",
+        );
+        assert!(caps.iter().any(|cap| cap == "git.push:refs/heads/main"));
+        assert!(caps.iter().any(|cap| cap == "git.push.force:<any>"));
+        assert!(!caps.iter().any(|cap| {
+            cap.contains("refs/heads/origin")
+                || cap.contains("refs/heads/2>&1")
+                || cap.contains("refs/heads/--repo")
+        }));
+    }
+
+    #[test]
+    fn typed_filesystem_effects_emit_one_canonical_cwd_path() {
+        let mapper = typed_mapper();
+        let call = ToolCall {
+            tool: "Bash".into(),
+            input: json!({
+                "command": "cp first second out && touch note",
+                "__gommage_cwd": "/repo//./work",
+                "__gommage_cwd_git_branch": "main"
+            }),
+        };
+        let caps: Vec<String> = mapper
+            .map(&call)
+            .into_iter()
+            .map(|cap| cap.as_str().to_string())
+            .collect();
+        for expected in [
+            "fs.read:/repo/work/first",
+            "fs.read:/repo/work/second",
+            "fs.write:/repo/work/out",
+            "fs.write:/repo/work/note",
+        ] {
+            assert!(caps.iter().any(|cap| cap == expected), "caps: {caps:?}");
+        }
+        assert!(!caps.iter().any(|cap| cap == "fs.write:out"));
+        assert!(!caps.iter().any(|cap| cap.starts_with("git.cwd_branch:")));
+    }
+
+    #[test]
+    fn dynamic_security_operands_fail_closed() {
+        let mapper = typed_mapper();
+        for command in [
+            // Every recognized read command.
+            "cat \"$SRC\"",
+            "head \"$SRC\"",
+            "tail \"$SRC\"",
+            "less \"$SRC\"",
+            "od \"$SRC\"",
+            "xxd \"$SRC\"",
+            "base64 \"$SRC\"",
+            "strings \"$SRC\"",
+            "file \"$SRC\"",
+            // Every recognized filesystem mutation family.
+            "cp \"$SRC\" dest",
+            "cp source \"$DEST\"",
+            "install \"$SRC\" dest",
+            "install -d \"$DEST\"",
+            "mv source \"$DEST\"",
+            "rsync \"$SRC\" dest",
+            "rsync source \"$DEST\"",
+            "rsync --remove-source-files \"$SRC\" dest",
+            "ln source \"$DEST\"",
+            "touch \"$DEST\"",
+            "mkdir \"$DEST\"",
+            "rm \"$DEST\"",
+            "tee \"$DEST\"",
+            "sed -f \"$SCRIPT\" input",
+            "sed -i 's/x/y/' \"$DEST\"",
+            "dd if=\"$SRC\" of=dest",
+            "dd if=source of=\"$DEST\"",
+            "cat < \"$SRC\"",
+            "printf x > \"$DEST\"",
+            // Git global, repository, refspec, tag, option-value, and each
+            // wide push mode must all preserve a fail-closed ambiguity.
+            "git -C \"$REPO\" push origin main",
+            "git push \"$REMOTE\" HEAD:main",
+            "git push --repo \"$REMOTE\" main",
+            "git push origin \"$BRANCH\"",
+            "git push --force origin \"$BRANCH\"",
+            "git push --delete origin \"$BRANCH\"",
+            "git push origin tag \"$TAG\"",
+            "git push --push-option \"$OPTION\" origin main",
+            "git push \"$REMOTE\" --all",
+            "git push \"$REMOTE\" --tags",
+            "git push \"$REMOTE\" --follow-tags",
+            // Globs and malformed syntax cannot collapse to raw execution.
+            "cp source *.secret",
+            "printf 'unterminated",
+        ] {
+            let caps = caps_of(&mapper, command);
+            assert!(
+                caps.iter()
+                    .any(|cap| cap.starts_with("proc.exec.ambiguous:")),
+                "{command}: {caps:?}"
+            );
+            assert!(caps.iter().any(|cap| cap.starts_with("proc.exec:")));
+        }
+    }
+
+    #[test]
+    fn quote_changes_distinguish_home_alias_from_literal_data() {
+        let mapper = typed_mapper();
+        let expanded = mapper.map(&ToolCall {
+            tool: "Bash".into(),
+            input: json!({
+                "command": "touch \"$HOME//./note\"",
+                "__gommage_cwd": "/repo"
+            }),
+        });
+        let literal = mapper.map(&ToolCall {
+            tool: "Bash".into(),
+            input: json!({
+                "command": "touch '$HOME/note'",
+                "__gommage_cwd": "/repo"
+            }),
+        });
+        assert!(
+            expanded
+                .iter()
+                .any(|cap| cap.as_str() == "fs.write:$HOME/note")
+        );
+        assert!(
+            literal
+                .iter()
+                .any(|cap| cap.as_str() == "fs.write:/repo/$HOME/note")
+        );
+
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/home/operator".to_string());
+        let policy = crate::Policy::from_yaml_string("[]", &env, "home-test.yaml").unwrap();
+        let expanded = policy.normalize_capabilities(&expanded);
+        let literal = policy.normalize_capabilities(&literal);
+        assert!(
+            expanded
+                .iter()
+                .any(|cap| cap.as_str() == "fs.write:/home/operator/note")
+        );
+        assert!(
+            literal
+                .iter()
+                .any(|cap| cap.as_str() == "fs.write:/repo/$HOME/note")
+        );
+    }
+
+    #[test]
+    fn ambiguous_rm_targets_are_terminal_before_raw_execution_allows() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mapper = CapabilityMapper::load_from_dir(&root.join("capabilities")).unwrap();
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/__home__".to_string());
+        env.insert(
+            "EXPEDITION_ROOT".to_string(),
+            "/__no_expedition__".to_string(),
+        );
+        let policy = crate::Policy::load_from_dir(&root.join("policies"), &env).unwrap();
+
+        for command in [
+            "rm \"$TARGET\"",
+            "rm -rf \"$TARGET\"",
+            "rm ../outside",
+            "rm -rf ../outside",
+        ] {
+            let capabilities = mapper.map(&bash(command));
+            assert!(
+                capabilities
+                    .iter()
+                    .any(|cap| cap.as_str().starts_with("proc.exec.ambiguous:")),
+                "{command}: {capabilities:?}"
+            );
+            assert!(
+                capabilities
+                    .iter()
+                    .any(|cap| cap.as_str().starts_with("proc.exec:")),
+                "{command}: {capabilities:?}"
+            );
+
+            let evaluated = crate::evaluate(&capabilities, &policy);
+            assert!(
+                matches!(
+                    evaluated.decision,
+                    crate::Decision::Gommage {
+                        hard_stop: true,
+                        ..
+                    }
+                ),
+                "{command}: {evaluated:?}"
+            );
+            assert_eq!(
+                evaluated
+                    .matched_rule
+                    .as_ref()
+                    .map(|rule| rule.name.as_str()),
+                Some("deny-ambiguous-shell-effects"),
+                "{command}: {evaluated:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shipped_force_policy_keeps_force_scope_without_affecting_normal_pushes() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mapper = CapabilityMapper::load_from_dir(&root.join("capabilities")).unwrap();
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/__home__".to_string());
+        env.insert(
+            "EXPEDITION_ROOT".to_string(),
+            "/__no_expedition__".to_string(),
+        );
+        let policy = crate::Policy::load_from_dir(&root.join("policies"), &env).unwrap();
+
+        let normal = crate::evaluate(&mapper.map(&bash("git push origin main")), &policy);
+        assert!(matches!(
+            normal.decision,
+            crate::Decision::AskPicto {
+                ref required_scope,
+                ..
+            } if required_scope == "git.push:main"
+        ));
+
+        for command in [
+            "git push --force origin main",
+            "git push --force origin HEAD:main 2>&1",
+            "git push origin +main > /tmp/push.log",
+        ] {
+            let capabilities = mapper.map(&bash(command));
+            assert!(
+                capabilities
+                    .iter()
+                    .any(|cap| cap.as_str() == "git.push:refs/heads/main"),
+                "{command}: {capabilities:?}"
+            );
+            assert!(!capabilities.iter().any(|cap| {
+                cap.as_str().contains("refs/heads/2") || cap.as_str().contains("refs/heads/origin")
+            }));
+            let evaluated = crate::evaluate(&capabilities, &policy);
+            assert!(
+                matches!(
+                    evaluated.decision,
+                    crate::Decision::AskPicto {
+                        ref required_scope,
+                        ..
+                    } if required_scope == "git.push.force"
+                ),
+                "{command}: {evaluated:?}"
+            );
+        }
     }
 }

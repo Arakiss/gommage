@@ -1,5 +1,9 @@
 {
-  "name": "shell-substitution-git-reset-hard-asks-for-picto",
+  "name": "shell-substitution-git-reset-hard-fails-closed-as-dynamic-command",
   "call": { "tool": "Bash", "input": { "command": "$(git reset --hard origin/main)" } },
-  "expected": { "kind": "ask_picto", "required_scope": "git.reset.hard" }
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
 }

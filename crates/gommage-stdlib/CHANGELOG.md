@@ -132,6 +132,15 @@
   available after quickstart while loading after hard-stops and native deny
   imports.
 
+### Changed
+
+- Bash filesystem and Git push capabilities now use typed AST effects with
+  canonical destinations, while dynamic security-relevant shell effects are
+  denied early through `proc.exec.ambiguous:*`.
+- Filesystem policies now receive a single canonical resolved path capability;
+  Git branch context remains audit metadata instead of an authorizable write
+  capability.
+
 ## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.1.0-alpha.1...gommage-stdlib-v0.2.0-alpha.1) (2026-04-22)
 
 

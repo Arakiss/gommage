@@ -23,9 +23,9 @@ pub const HARD_STOPS: &[(&str, &str)] = &[
     ("hs.wipe-disk", "proc.exec:shred /dev/*"),
     ("hs.chmod-system", "proc.exec:chmod -R * /"),
     // Compound commands, shell wrappers, `env`/`sudo` prefixes, `xargs`, and
-    // command substitution are handled by the semantic scanner below. Keep glob
-    // entries for single-command shapes only; broad substring globs create
-    // false positives for quoted fixture data.
+    // command substitution are handled by the AST-backed semantic analysis
+    // below. Keep glob entries for single-command shapes only; broad substring
+    // globs create false positives for quoted fixture data.
 ];
 
 const SEMANTIC_RM_RF_ROOT_PATTERN: &str = "proc.exec:<shell-semantic rm -rf absolute>";
@@ -91,32 +91,20 @@ pub fn check(caps: &[Capability]) -> Option<HardStopHit> {
 }
 
 fn semantic_proc_exec_hit(command: &str) -> Option<(&'static str, &'static str)> {
-    for substitution in crate::shell::command_substitutions(command) {
-        if let Some(hit) = semantic_proc_exec_hit(&substitution) {
-            return Some(hit);
-        }
-    }
-
-    for segment in crate::shell::shell_segments(command) {
-        if let Some(hit) = semantic_segment_hit(&segment) {
+    let analysis = crate::shell::analyze(command);
+    for command in &analysis.commands {
+        if let Some(hit) = semantic_command_hit(command) {
             return Some(hit);
         }
     }
     None
 }
 
-fn semantic_segment_hit(words: &[String]) -> Option<(&'static str, &'static str)> {
-    let words = crate::shell::command_words(words)?;
-    let (cmd_token, args) = words.split_first()?;
-    // Normalise an absolute/relative path head (`/bin/rm`, `./bin/rm`) to its
-    // basename so a fully-pathed invocation hits the same hardstops.
-    let cmd = crate::shell::head_basename(cmd_token);
-
-    if matches!(cmd, "bash" | "sh" | "zsh")
-        && let Some(script) = crate::shell::shell_c_payload(args)
-    {
-        return semantic_proc_exec_hit(script);
-    }
+fn semantic_command_hit(
+    command: &crate::shell::ShellCommand,
+) -> Option<(&'static str, &'static str)> {
+    let cmd = command.effective_head().ok()?;
+    let args = command.effective_args();
 
     if cmd == "xargs" && xargs_invokes_rm_rf(args) {
         return Some(("hs.xargs-rm-rf", "proc.exec:*xargs rm -rf*"));
@@ -130,27 +118,45 @@ fn semantic_segment_hit(words: &[String]) -> Option<(&'static str, &'static str)
         return Some(("hs.dd-to-device", SEMANTIC_DD_DEVICE_PATTERN));
     }
 
+    if cmd.starts_with("mkfs") {
+        return Some(("hs.mkfs", "proc.exec:mkfs*"));
+    }
+
+    if cmd == "shred" && args.iter().any(is_device_path) {
+        return Some(("hs.wipe-disk", "proc.exec:shred /dev/*"));
+    }
+
+    if cmd == "chmod" && chmod_recursively_targets_root(args) {
+        return Some(("hs.chmod-system", "proc.exec:chmod -R * /"));
+    }
+
     None
 }
 
-fn rm_rf_absolute(args: &[String]) -> bool {
+fn rm_rf_absolute(args: &[crate::shell::ShellWord]) -> bool {
     let mut recursive = false;
     let mut force = false;
     let mut absolute = false;
+    let mut options = true;
 
     for arg in args {
-        if arg == "--" {
+        let Ok(value) = arg.static_value() else {
+            continue;
+        };
+        if options && value == "--" {
+            options = false;
             continue;
         }
-        if arg == "--recursive" {
+        if options && value == "--recursive" {
             recursive = true;
             continue;
         }
-        if arg == "--force" {
+        if options && value == "--force" {
             force = true;
             continue;
         }
-        if let Some(flags) = arg.strip_prefix('-')
+        if options
+            && let Some(flags) = value.strip_prefix('-')
             && !flags.is_empty()
             && flags.chars().all(|ch| ch.is_ascii_alphabetic())
         {
@@ -158,25 +164,41 @@ fn rm_rf_absolute(args: &[String]) -> bool {
             force |= flags.contains('f');
             continue;
         }
-        absolute |= arg == "/" || arg.starts_with('/');
+        absolute |= crate::shell::static_path(arg, None).is_ok_and(|path| {
+            path.starts_with('/') || path == "$HOME" || path.starts_with("$HOME/")
+        });
     }
 
     recursive && force && absolute
 }
 
-fn dd_writes_device(args: &[String]) -> bool {
-    args.iter().any(|arg| arg.starts_with("of=/dev/"))
+fn dd_writes_device(args: &[crate::shell::ShellWord]) -> bool {
+    args.iter().any(|arg| {
+        arg.static_value().is_ok_and(|arg| {
+            arg.strip_prefix("of=").is_some_and(|path| {
+                let target = crate::shell::ShellWord {
+                    raw: path.to_string(),
+                    value: Some(path.to_string()),
+                    provenance: crate::shell::WordProvenance::default(),
+                    ambiguity: None,
+                };
+                crate::shell::static_path(&target, None).is_ok_and(|path| path.starts_with("/dev/"))
+            })
+        })
+    })
 }
 
-fn xargs_invokes_rm_rf(args: &[String]) -> bool {
-    args.windows(3)
-        .any(|window| window[0] == "rm" && rm_rf_flags(&window[1..]))
-        || args
-            .windows(2)
-            .any(|window| window[0] == "rm" && rm_rf_flags(&window[1..]))
+fn xargs_invokes_rm_rf(args: &[crate::shell::ShellWord]) -> bool {
+    let static_args: Vec<&str> = args
+        .iter()
+        .filter_map(|arg| arg.static_value().ok())
+        .collect();
+    static_args.iter().enumerate().any(|(index, arg)| {
+        crate::shell::head_basename(arg) == "rm" && rm_rf_flags(&static_args[index + 1..])
+    })
 }
 
-fn rm_rf_flags(args: &[String]) -> bool {
+fn rm_rf_flags(args: &[&str]) -> bool {
     let mut recursive = false;
     let mut force = false;
     for arg in args {
@@ -186,6 +208,25 @@ fn rm_rf_flags(args: &[String]) -> bool {
         }
     }
     recursive && force
+}
+
+fn is_device_path(arg: &crate::shell::ShellWord) -> bool {
+    crate::shell::static_path(arg, None).is_ok_and(|path| path.starts_with("/dev/"))
+}
+
+fn chmod_recursively_targets_root(args: &[crate::shell::ShellWord]) -> bool {
+    let recursive = args.iter().any(|arg| {
+        arg.static_value().is_ok_and(|arg| {
+            arg == "--recursive"
+                || arg
+                    .strip_prefix('-')
+                    .is_some_and(|flags| flags.contains('R'))
+        })
+    });
+    recursive
+        && args
+            .iter()
+            .any(|arg| crate::shell::static_path(arg, None).is_ok_and(|path| path == "/"))
 }
 
 #[cfg(test)]
@@ -323,9 +364,67 @@ mod tests {
 
     #[test]
     fn compound_dd_to_device_is_caught() {
-        let caps = vec![Capability::new(
-            "proc.exec:printf ok; dd if=/dev/zero of=/dev/sda",
-        )];
-        assert!(check(&caps).is_some());
+        for command in [
+            "printf ok; dd if=/dev/zero of=/dev/sda",
+            "dd of=//dev/./disk2",
+        ] {
+            let caps = vec![Capability::new(format!("proc.exec:{command}"))];
+            assert!(check(&caps).is_some(), "must hard-stop {command:?}");
+        }
+    }
+
+    #[test]
+    fn home_aliases_and_lexical_variants_are_caught() {
+        for command in [
+            "rm -rf $HOME",
+            r#"rm -rf "${HOME}//.""#,
+            "rm --recursive --force ~/./cache",
+            "rm -fr ////var//./tmp",
+        ] {
+            let caps = vec![Capability::new(format!("proc.exec:{command}"))];
+            assert!(check(&caps).is_some(), "must hard-stop {command:?}");
+        }
+    }
+
+    #[test]
+    fn recursively_unwrapped_rm_is_caught() {
+        for command in [
+            "command rm -rf /",
+            "exec env X=1 /bin/rm --recursive --force /var",
+            "sudo -- timeout 2 sh -c 'rm -rf /home'",
+            "env -i HOME=/tmp command rm -rf $HOME",
+        ] {
+            let caps = vec![Capability::new(format!("proc.exec:{command}"))];
+            assert!(check(&caps).is_some(), "must hard-stop {command:?}");
+        }
+    }
+
+    #[test]
+    fn quoted_and_relative_rm_operands_are_not_hardstopped() {
+        for command in [
+            "echo 'rm -rf /'",
+            "printf '%s' '$HOME'",
+            "rm -rf '$HOME'",
+            r"rm -rf \$HOME",
+            "rm -rf ./target",
+            "command -v rm",
+            r#"sh -c 'printf "%s" "rm -rf /"'"#,
+        ] {
+            let caps = vec![Capability::new(format!("proc.exec:{command}"))];
+            assert!(check(&caps).is_none(), "must not hard-stop {command:?}");
+        }
+    }
+
+    #[test]
+    fn wrappers_cannot_hide_other_compiled_invariants() {
+        for command in [
+            "command mkfs.ext4 /dev/sda",
+            "exec env X=1 dd if=/dev/zero of=/dev/disk2",
+            "sudo -- shred /dev/nvme0n1",
+            "timeout 2 chmod -R 000 /",
+        ] {
+            let caps = vec![Capability::new(format!("proc.exec:{command}"))];
+            assert!(check(&caps).is_some(), "must hard-stop {command:?}");
+        }
     }
 }

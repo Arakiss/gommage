@@ -69,6 +69,147 @@ proptest! {
         let m = shipped_mapper();
         let _ = m.map(&call);
     }
+
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 128,
+        ..ProptestConfig::default()
+    })]
+
+    #[test]
+    fn mapper_output_is_order_stable_and_duplicate_free(call in arb_tool_call()) {
+        let mapper = shipped_mapper();
+        let first = mapper.map(&call);
+        let second = mapper.map(&call);
+        prop_assert_eq!(&first, &second);
+
+        let mut unique = first
+            .iter()
+            .map(|capability| capability.as_str())
+            .collect::<Vec<_>>();
+        unique.sort_unstable();
+        unique.dedup();
+        prop_assert_eq!(unique.len(), first.len(), "caps: {:?}", first);
+    }
+
+    #[test]
+    fn dynamic_destinations_always_emit_ambiguity(suffix in "[a-zA-Z0-9_./-]{0,40}") {
+        let mapper = shipped_mapper();
+        let call = ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({
+                "command": format!("touch \"$DEST{suffix}\"")
+            }),
+        };
+        let capabilities = mapper.map(&call);
+        prop_assert!(
+            capabilities
+                .iter()
+                .any(|cap| cap.as_str().starts_with("proc.exec.ambiguous:")),
+            "caps: {:?}",
+            capabilities
+        );
+        prop_assert!(
+            capabilities
+                .iter()
+                .any(|cap| cap.as_str().starts_with("proc.exec:")),
+            "raw execution capability must remain authoritative"
+        );
+    }
+
+    #[test]
+    fn malformed_shell_never_maps_as_only_permissive_execution(
+        prefix in "[a-zA-Z0-9_ ./-]{0,80}",
+    ) {
+        let mapper = shipped_mapper();
+        let call = ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({
+                "command": format!("printf %s {prefix} '")
+            }),
+        };
+        let capabilities = mapper.map(&call);
+        prop_assert!(
+            capabilities
+                .iter()
+                .any(|cap| cap.as_str().starts_with("proc.exec.ambiguous:")),
+            "caps: {:?}",
+            capabilities
+        );
+        prop_assert!(capabilities.iter().any(|cap| cap.as_str().starts_with("proc.exec:")));
+    }
+
+    #[test]
+    fn transparent_wrappers_do_not_remove_write_effect(
+        wrapper in prop::sample::select(vec![
+            "command --",
+            "exec",
+            "env X=1",
+            "sudo --",
+            "doas --",
+            "timeout 2",
+            "time",
+            "nice -n 1",
+            "nohup",
+            "stdbuf -o0",
+            "setsid",
+        ]),
+        name in "[a-zA-Z0-9_][a-zA-Z0-9_-]{0,29}",
+    ) {
+        let mapper = shipped_mapper();
+        let command = format!("{wrapper} touch {name}");
+        let capabilities = mapper.map(&ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({"command": command, "__gommage_cwd": "/repo"}),
+        });
+        let expected = format!("fs.write:/repo/{name}");
+        prop_assert!(
+            capabilities.iter().any(|cap| cap.as_str() == expected),
+            "wrapper {wrapper:?} removed {expected:?}; caps: {:?}",
+            capabilities
+        );
+    }
+
+    #[test]
+    fn adding_a_compound_command_never_removes_existing_effect(
+        name in "[a-zA-Z0-9_][a-zA-Z0-9_-]{0,29}",
+        prefix in prop::sample::select(vec!["true", "echo ok", "printf ok"]),
+    ) {
+        let mapper = shipped_mapper();
+        let base = ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({"command": format!("touch {name}"), "__gommage_cwd": "/repo"}),
+        };
+        let compound = ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({"command": format!("{prefix}; touch {name}"), "__gommage_cwd": "/repo"}),
+        };
+        let expected = format!("fs.write:/repo/{name}");
+        prop_assert!(mapper.map(&base).iter().any(|cap| cap.as_str() == expected));
+        prop_assert!(mapper.map(&compound).iter().any(|cap| cap.as_str() == expected));
+    }
+
+    #[test]
+    fn quote_changes_preserve_home_alias_provenance(
+        name in "[a-zA-Z0-9_][a-zA-Z0-9_-]{0,29}",
+    ) {
+        let mapper = shipped_mapper();
+        let expanded = mapper.map(&ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({"command": format!("touch \"$HOME/{name}\"")}),
+        });
+        let literal = mapper.map(&ToolCall {
+            tool: "Bash".to_string(),
+            input: serde_json::json!({"command": format!("touch '$HOME/{name}'")}),
+        });
+        let expanded_expected = format!("fs.write:$HOME/{name}");
+        let literal_expected = format!("fs.write:./$HOME/{name}");
+        prop_assert!(expanded.iter().any(|cap| cap.as_str() == expanded_expected));
+        prop_assert!(literal.iter().any(|cap| cap.as_str() == literal_expected));
+        prop_assert_ne!(expanded, literal);
+    }
 }
 
 // ----------------------------------------------------------------------------
