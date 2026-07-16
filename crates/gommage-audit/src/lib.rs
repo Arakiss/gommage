@@ -46,7 +46,7 @@ pub enum AuditError {
     InvalidSchema {
         line: usize,
         record_kind: &'static str,
-        reason: &'static str,
+        reason: String,
     },
     #[error("time: {0}")]
     Time(#[from] time::error::Format),
@@ -55,6 +55,34 @@ pub enum AuditError {
 const LEGACY_DECISION_SCHEMA_VERSION: u32 = 1;
 const DECISION_SCHEMA_VERSION: u32 = 2;
 const EVENT_SCHEMA_VERSION: u32 = 1;
+const DECISION_V1_FIELDS: &[&str] = &[
+    "v",
+    "id",
+    "ts",
+    "tool",
+    "input_hash",
+    "capabilities",
+    "decision",
+    "matched_rule",
+    "policy_version",
+    "expedition",
+    "sig",
+];
+const DECISION_V2_FIELDS: &[&str] = &[
+    "v",
+    "id",
+    "ts",
+    "tool",
+    "input_hash",
+    "capabilities",
+    "capability_provenance",
+    "decision",
+    "matched_rule",
+    "policy_version",
+    "expedition",
+    "sig",
+];
+const EVENT_V1_FIELDS: &[&str] = &["v", "id", "ts", "kind", "event", "sig"];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AuditEntry {
@@ -304,26 +332,7 @@ impl AuditWriter {
     }
 }
 
-/// Canonical bytes of an entry **without** the `sig` field. Used for signing
-/// and verifying. We emit the fields in a fixed order so byte-output is stable
-/// across serde versions.
-fn canonical_decision_v1_bytes(e: &AuditEntry) -> Vec<u8> {
-    let obj = serde_json::json!({
-        "v": e.version,
-        "id": e.id,
-        "ts": e.ts,
-        "tool": e.tool,
-        "input_hash": e.input_hash,
-        "capabilities": e.capabilities,
-        "decision": e.decision,
-        "matched_rule": e.matched_rule,
-        "policy_version": e.policy_version,
-        "expedition": e.expedition,
-    });
-    // Sorted key rendering.
-    canonical_render(&obj).into_bytes()
-}
-
+/// Canonical bytes of a v2 decision entry **without** the `sig` field.
 fn canonical_decision_v2_bytes(e: &AuditEntry) -> Vec<u8> {
     let obj = serde_json::json!({
         "v": e.version,
@@ -339,18 +348,6 @@ fn canonical_decision_v2_bytes(e: &AuditEntry) -> Vec<u8> {
         "expedition": e.expedition,
     });
     canonical_render(&obj).into_bytes()
-}
-
-fn canonical_decision_bytes(e: &AuditEntry, line: usize) -> Result<Vec<u8>, AuditError> {
-    match e.version {
-        LEGACY_DECISION_SCHEMA_VERSION => Ok(canonical_decision_v1_bytes(e)),
-        DECISION_SCHEMA_VERSION => Ok(canonical_decision_v2_bytes(e)),
-        version => Err(AuditError::UnsupportedSchema {
-            line,
-            record_kind: "decision",
-            version: u64::from(version),
-        }),
-    }
 }
 
 fn canonical_event_bytes(e: &AuditEventEntry) -> Vec<u8> {
@@ -393,50 +390,161 @@ fn canonical_render(v: &serde_json::Value) -> String {
     }
 }
 
+/// JSON value parser that rejects duplicate object keys at every depth before
+/// `serde_json::Map` can collapse them with last-key-wins semantics.
+struct StrictJsonValue(serde_json::Value);
+
+impl<'de> Deserialize<'de> for StrictJsonValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(StrictJsonValueVisitor)
+    }
+}
+
+struct StrictJsonValueVisitor;
+
+impl<'de> serde::de::Visitor<'de> for StrictJsonValueVisitor {
+    type Value = StrictJsonValue;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON value without duplicate object keys")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(StrictJsonValue(serde_json::Value::Bool(value)))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(StrictJsonValue(serde_json::Value::Number(value.into())))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(StrictJsonValue(serde_json::Value::Number(value.into())))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        serde_json::Number::from_f64(value)
+            .map(serde_json::Value::Number)
+            .map(StrictJsonValue)
+            .ok_or_else(|| E::custom("non-finite JSON number"))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(StrictJsonValue(serde_json::Value::String(
+            value.to_string(),
+        )))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
+        Ok(StrictJsonValue(serde_json::Value::String(value)))
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(StrictJsonValue(serde_json::Value::Null))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(StrictJsonValue(serde_json::Value::Null))
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let mut values = Vec::new();
+        while let Some(StrictJsonValue(value)) = sequence.next_element()? {
+            values.push(value);
+        }
+        Ok(StrictJsonValue(serde_json::Value::Array(values)))
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let mut object = serde_json::Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if object.contains_key(&key) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate object key `{key}`"
+                )));
+            }
+            let StrictJsonValue(value) = map.next_value()?;
+            object.insert(key, value);
+        }
+        Ok(StrictJsonValue(serde_json::Value::Object(object)))
+    }
+}
+
 enum ParsedRecord {
-    Decision(AuditEntry),
-    Event(AuditEventEntry),
+    Decision {
+        entry: AuditEntry,
+        payload: Vec<u8>,
+    },
+    Event {
+        entry: AuditEventEntry,
+        payload: Vec<u8>,
+    },
 }
 
 impl ParsedRecord {
     fn id(&self) -> &str {
         match self {
-            ParsedRecord::Decision(e) => &e.id,
-            ParsedRecord::Event(e) => &e.id,
+            ParsedRecord::Decision { entry, .. } => &entry.id,
+            ParsedRecord::Event { entry, .. } => &entry.id,
         }
     }
 
     fn ts(&self) -> &str {
         match self {
-            ParsedRecord::Decision(e) => &e.ts,
-            ParsedRecord::Event(e) => &e.ts,
+            ParsedRecord::Decision { entry, .. } => &entry.ts,
+            ParsedRecord::Event { entry, .. } => &entry.ts,
         }
     }
 
     fn policy_version(&self) -> Option<&str> {
         match self {
-            ParsedRecord::Decision(e) => Some(&e.policy_version),
-            ParsedRecord::Event(_) => None,
+            ParsedRecord::Decision { entry, .. } => Some(&entry.policy_version),
+            ParsedRecord::Event { .. } => None,
         }
     }
 
     fn expedition(&self) -> Option<&str> {
         match self {
-            ParsedRecord::Decision(e) => e.expedition.as_deref(),
-            ParsedRecord::Event(_) => None,
+            ParsedRecord::Decision { entry, .. } => entry.expedition.as_deref(),
+            ParsedRecord::Event { .. } => None,
         }
     }
 
     fn sig(&self) -> &str {
         match self {
-            ParsedRecord::Decision(e) => &e.sig,
-            ParsedRecord::Event(e) => &e.sig,
+            ParsedRecord::Decision { entry, .. } => &entry.sig,
+            ParsedRecord::Event { entry, .. } => &entry.sig,
+        }
+    }
+
+    fn payload(&self) -> &[u8] {
+        match self {
+            ParsedRecord::Decision { payload, .. } | ParsedRecord::Event { payload, .. } => payload,
         }
     }
 }
 
 fn parse_record(line: &str, line_number: usize) -> Result<ParsedRecord, AuditError> {
-    let value: serde_json::Value = serde_json::from_str(line)?;
+    let mut deserializer = serde_json::Deserializer::from_str(line);
+    let StrictJsonValue(value) = StrictJsonValue::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    let object = value.as_object().ok_or_else(|| AuditError::InvalidSchema {
+        line: line_number,
+        record_kind: "record",
+        reason: "the top-level JSON value must be an object".to_string(),
+    })?;
+
     if value.get("kind").and_then(|v| v.as_str()) == Some("event") {
         let version = schema_version(&value, line_number, "event")?;
         if version != u64::from(EVENT_SCHEMA_VERSION) {
@@ -446,30 +554,33 @@ fn parse_record(line: &str, line_number: usize) -> Result<ParsedRecord, AuditErr
                 version,
             });
         }
-        return serde_json::from_value(value)
-            .map(ParsedRecord::Event)
-            .map_err(AuditError::from);
+        validate_exact_top_level_fields(object, EVENT_V1_FIELDS, line_number, "event", version)?;
+        let payload = canonical_unsigned_payload(&value);
+        let entry = serde_json::from_value(value)?;
+        return Ok(ParsedRecord::Event { entry, payload });
     }
 
     let version = schema_version(&value, line_number, "decision")?;
-    match version {
+    let allowed_fields = match version {
         version if version == u64::from(LEGACY_DECISION_SCHEMA_VERSION) => {
             if value.get("capability_provenance").is_some() {
                 return Err(AuditError::InvalidSchema {
                     line: line_number,
                     record_kind: "decision",
-                    reason: "v1 must not contain capability_provenance",
+                    reason: "v1 must not contain capability_provenance".to_string(),
                 });
             }
+            DECISION_V1_FIELDS
         }
         version if version == u64::from(DECISION_SCHEMA_VERSION) => {
             if value.get("capability_provenance").is_none() {
                 return Err(AuditError::InvalidSchema {
                     line: line_number,
                     record_kind: "decision",
-                    reason: "v2 requires capability_provenance",
+                    reason: "v2 requires capability_provenance".to_string(),
                 });
             }
+            DECISION_V2_FIELDS
         }
         version => {
             return Err(AuditError::UnsupportedSchema {
@@ -478,11 +589,56 @@ fn parse_record(line: &str, line_number: usize) -> Result<ParsedRecord, AuditErr
                 version,
             });
         }
-    }
+    };
 
-    serde_json::from_value(value)
-        .map(ParsedRecord::Decision)
-        .map_err(AuditError::from)
+    validate_exact_top_level_fields(object, allowed_fields, line_number, "decision", version)?;
+    let payload = canonical_unsigned_payload(&value);
+    let entry = serde_json::from_value(value)?;
+    Ok(ParsedRecord::Decision { entry, payload })
+}
+
+fn validate_exact_top_level_fields(
+    object: &serde_json::Map<String, serde_json::Value>,
+    allowed_fields: &[&str],
+    line: usize,
+    record_kind: &'static str,
+    version: u64,
+) -> Result<(), AuditError> {
+    if let Some(field) = object
+        .keys()
+        .filter(|field| !allowed_fields.contains(&field.as_str()))
+        .min()
+    {
+        return Err(AuditError::InvalidSchema {
+            line,
+            record_kind,
+            reason: format!("unexpected top-level field `{field}` in v{version}"),
+        });
+    }
+    if let Some(field) = allowed_fields
+        .iter()
+        .find(|field| !object.contains_key(**field))
+    {
+        return Err(AuditError::InvalidSchema {
+            line,
+            record_kind,
+            reason: format!("missing top-level field `{field}` in v{version}"),
+        });
+    }
+    Ok(())
+}
+
+fn canonical_unsigned_payload(value: &serde_json::Value) -> Vec<u8> {
+    // Preserve every nested field from the received record. Typed
+    // deserialization is used for consumers, but never to reconstruct the
+    // signed payload because doing so would silently drop unknown fields.
+    let mut unsigned = value.clone();
+    unsigned
+        .as_object_mut()
+        .expect("validated audit records are JSON objects")
+        .remove("sig")
+        .expect("validated audit records contain sig");
+    canonical_render(&unsigned).into_bytes()
 }
 
 fn schema_version(
@@ -496,7 +652,7 @@ fn schema_version(
         .ok_or(AuditError::InvalidSchema {
             line,
             record_kind,
-            reason: "v must be a non-negative integer",
+            reason: "v must be a non-negative integer".to_string(),
         })
 }
 
@@ -511,20 +667,7 @@ fn verify_record(record: &ParsedRecord, vk: &VerifyingKey, line: usize) -> Resul
         .try_into()
         .map_err(|_| AuditError::BadSignature { line })?;
     let sig = Signature::from_bytes(&sig_arr);
-    let payload = match record {
-        ParsedRecord::Decision(entry) => canonical_decision_bytes(entry, line)?,
-        ParsedRecord::Event(entry) => {
-            if entry.version != EVENT_SCHEMA_VERSION {
-                return Err(AuditError::UnsupportedSchema {
-                    line,
-                    record_kind: "event",
-                    version: u64::from(entry.version),
-                });
-            }
-            canonical_event_bytes(entry)
-        }
-    };
-    vk.verify(&payload, &sig)
+    vk.verify(record.payload(), &sig)
         .map_err(|_| AuditError::BadSignature { line })
 }
 
@@ -720,7 +863,7 @@ pub fn explain_log(path: &Path, vk: &VerifyingKey) -> Result<VerifyReport, Audit
             expeditions.push(e.to_string());
         }
 
-        if let ParsedRecord::Event(entry) = &record
+        if let ParsedRecord::Event { entry, .. } = &record
             && let AuditEvent::BypassActivated {
                 tool,
                 original_reason,
