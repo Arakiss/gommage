@@ -38,8 +38,8 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - name: Verify internal workspace dependency pins
         run: sh scripts/sync-workspace-internal-deps.sh --check
       - name: Verify living docs avoid pinned release drift
@@ -47,17 +47,94 @@ jobs:
       - name: Tag internal components without GitHub Releases
         run: sh scripts/tag-skipped-release-please-components.sh
       - id: release
-        uses: googleapis/release-please-action@v5
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Sync generated release PR workspace pins
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+      - name: Resolve active release PR
+        id: release-pr
+        if: ${{ steps.release.outputs.releases_created != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_PR: ${{ steps.release.outputs.pr }}
           RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_info="$(
+            node <<'NODE'
+          const candidates = [];
+          for (const raw of [process.env.RELEASE_PR, process.env.RELEASE_PRS]) {
+            if (!raw) continue;
+            try {
+              const parsed = JSON.parse(raw);
+              candidates.push(...(Array.isArray(parsed) ? parsed : [parsed]));
+            } catch (error) {
+              console.error(`Could not parse Release Please PR output: ${error.message}`);
+            }
+          }
+
+          const pr = candidates.find((item) => item && (item.number || item.id));
+          if (pr) {
+            const branch = pr.headRefName
+              || pr.headBranchName
+              || pr.branch
+              || pr.head?.ref
+              || "";
+            console.log(`${pr.number || ""}\t${branch}`);
+          }
+          NODE
+          )"
+
+          if [[ -z "${pr_info}" ]]; then
+            for attempt in 1 2 3 4 5 6; do
+              pr_info="$(
+                gh pr list \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --state open \
+                  --base main \
+                  --label "autorelease: pending" \
+                  --json number,headRefName,updatedAt \
+                  --jq 'sort_by(.updatedAt) | last | select(. != null) | [.number, .headRefName] | @tsv' \
+                  --limit 20
+              )"
+
+              [[ -n "${pr_info}" ]] && break
+              sleep $((attempt * 5))
+            done
+          fi
+
+          if [[ -z "${pr_info}" ]]; then
+            echo "No active release PR was created or updated."
+            exit 0
+          fi
+
+          pr_number="${pr_info%%$'\t'*}"
+          pr_branch="${pr_info#*$'\t'}"
+          if [[ -z "${pr_branch}" && -n "${pr_number}" ]]; then
+            pr_branch="$(
+              gh pr view "${pr_number}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json headRefName \
+                --jq .headRefName
+            )"
+          fi
+
+          if [[ -z "${pr_number}" || -z "${pr_branch}" ]]; then
+            echo "::error::Active release PR metadata is incomplete."
+            exit 1
+          fi
+
+          echo "number=${pr_number}" >> "${GITHUB_OUTPUT}"
+          echo "branch=${pr_branch}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved release PR #${pr_number} on ${pr_branch}."
+      - name: Sync generated release PR workspace pins
+        if: ${{ steps.release-pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_PR_NUMBER: ${{ steps.release-pr.outputs.number }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
@@ -65,27 +142,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          pr_number="$(
-            node <<'NODE'
-          const single = process.env.RELEASE_PR || "";
-          const many = process.env.RELEASE_PRS || "";
-          const prs = [];
-          if (single) prs.push(JSON.parse(single));
-          if (many) prs.push(...JSON.parse(many));
-          const pr = prs.find((item) => item && (item.number || item.id));
-          if (pr?.number) {
-            console.log(pr.number);
-          }
-          NODE
-          )"
-
-          if [[ -z "${pr_number}" ]]; then
-            echo "No release PR number emitted; skipping workspace pin sync."
-            exit 0
-          fi
-
-          gh pr checkout "${pr_number}" --repo "${GITHUB_REPOSITORY}"
+          gh pr checkout "${RELEASE_PR_NUMBER}" --repo "${GITHUB_REPOSITORY}"
           sh scripts/sync-workspace-internal-deps.sh
 
           if git diff --quiet -- Cargo.toml; then
@@ -97,67 +154,23 @@ jobs:
           git commit -m "chore: sync workspace dependency pins"
           git push origin "HEAD:$(git branch --show-current)"
       - name: Trigger PR-associated checks for generated release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        if: ${{ steps.release-pr.outputs.branch != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_PR: ${{ steps.release.outputs.pr }}
-          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+          RELEASE_PR_NUMBER: ${{ steps.release-pr.outputs.number }}
+          RELEASE_PR_BRANCH: ${{ steps.release-pr.outputs.branch }}
         shell: bash
         run: |
           set -euo pipefail
 
-          pr_info="$(
-            node <<'NODE'
-          const single = process.env.RELEASE_PR || "";
-          const many = process.env.RELEASE_PRS || "";
-          const prs = [];
-          if (single) prs.push(JSON.parse(single));
-          if (many) prs.push(...JSON.parse(many));
-          const pr = prs.find((item) => item && (item.number || item.id));
-          if (!pr) {
-            process.exit(0);
-          }
-          const branch = pr.headRefName
-            || pr.headBranchName
-            || pr.branch
-            || pr.head?.ref
-            || "";
-          console.log(`${pr.number || ""}\t${branch}`);
-          NODE
-          )"
-
-          if [[ -z "${pr_info}" ]]; then
-            echo "No release PR metadata emitted; skipping check dispatch."
-            exit 0
-          fi
-
-          pr_number="${pr_info%%$'\t'*}"
-          pr_branch="${pr_info#*$'\t'}"
-          if [[ -z "${pr_branch}" && -n "${pr_number}" ]]; then
-            pr_branch="$(gh pr view "${pr_number}" --repo "${GITHUB_REPOSITORY}" --json headRefName --jq .headRefName)"
-          fi
-
-          if [[ -z "${pr_branch}" ]]; then
-            echo "::warning::Release PR branch could not be resolved; skipping check trigger."
-            exit 0
-          fi
-
-          workflows=(ci.yml audit.yml)
-
-          if [[ -z "${pr_number}" ]]; then
-            echo "::warning::Release PR number could not be resolved; dispatching workflow fallbacks for ${pr_branch}."
-            for workflow in "${workflows[@]}"; do
-              gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
-            done
-            exit 0
-          fi
+          workflows=(ci.yml audit.yml codeql.yml)
 
           resolve_branch_head_sha() {
             local branch_head=""
 
             for attempt in 1 2 3 4 5 6; do
               branch_head="$(
-                git ls-remote --heads origin "${pr_branch}" \
+                git ls-remote --heads origin "${RELEASE_PR_BRANCH}" \
                   | awk '{ print $1 }' \
                   | head -n 1
               )"
@@ -174,80 +187,74 @@ jobs:
           }
 
           if ! pr_head_sha="$(resolve_branch_head_sha)"; then
-            echo "::warning::Release PR branch head could not be resolved; dispatching workflow fallbacks for ${pr_branch}."
-            for workflow in "${workflows[@]}"; do
-              gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
-            done
-            exit 0
+            echo "::error::Release PR branch head could not be resolved."
+            exit 1
           fi
 
-          echo "Release PR #${pr_number} branch ${pr_branch} is at ${pr_head_sha}."
+          echo "Release PR #${RELEASE_PR_NUMBER} branch ${RELEASE_PR_BRANCH} is at ${pr_head_sha}."
 
-          trigger_pr_workflow() {
+          dispatch_workflow() {
             local workflow="$1"
-            local pr_run_info=""
-            local pr_run_id=""
-            local pr_run_status=""
-            local pr_run_conclusion=""
+            local existing_run=""
+            local run_id=""
+            local run_status=""
+            local run_conclusion=""
+            local previous_run_id="0"
+
+            existing_run="$(
+              gh run list \
+                --repo "${GITHUB_REPOSITORY}" \
+                --workflow "${workflow}" \
+                --branch "${RELEASE_PR_BRANCH}" \
+                --event workflow_dispatch \
+                --json databaseId,headSha,status,conclusion \
+                --jq ".[] | select(.headSha == \"${pr_head_sha}\") | [.databaseId, .status, (.conclusion // \"\")] | @tsv" \
+                --limit 20 \
+                | head -n 1 \
+                || true
+            )"
+
+            if [[ -n "${existing_run}" ]]; then
+              IFS=$'\t' read -r run_id run_status run_conclusion <<< "${existing_run}"
+              if [[ "${run_status}" != "completed" || "${run_conclusion}" == "success" ]]; then
+                echo "${workflow} run ${run_id} already covers ${pr_head_sha} (${run_status}/${run_conclusion:-pending})."
+                return
+              fi
+              previous_run_id="${run_id}"
+            fi
+
+            gh workflow run "${workflow}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --ref "${RELEASE_PR_BRANCH}"
 
             for attempt in 1 2 3 4 5 6; do
-              pr_run_info="$(
+              run_id="$(
                 gh run list \
                   --repo "${GITHUB_REPOSITORY}" \
                   --workflow "${workflow}" \
-                  --branch "${pr_branch}" \
-                  --event pull_request \
-                  --json databaseId,headSha,status,conclusion \
-                  --jq ".[] | select(.headSha == \"${pr_head_sha}\") | [.databaseId, .status, (.conclusion // \"\")] | @tsv" \
+                  --branch "${RELEASE_PR_BRANCH}" \
+                  --event workflow_dispatch \
+                  --json databaseId,headSha \
+                  --jq ".[] | select(.headSha == \"${pr_head_sha}\" and .databaseId != ${previous_run_id}) | .databaseId" \
                   --limit 20 \
                   | head -n 1 \
                   || true
               )"
 
-              if [[ -n "${pr_run_info}" ]]; then
-                break
+              if [[ -n "${run_id}" ]]; then
+                echo "Dispatched ${workflow} run ${run_id} for ${pr_head_sha}."
+                return
               fi
 
-              sleep $((attempt * 10))
+              sleep $((attempt * 5))
             done
 
-            if [[ -n "${pr_run_info}" ]]; then
-              IFS=$'\t' read -r pr_run_id pr_run_status pr_run_conclusion <<< "${pr_run_info}"
-
-              if [[ "${pr_run_status}" != "completed" ]]; then
-                echo "pull_request ${workflow} run ${pr_run_id} is already ${pr_run_status} for release PR #${pr_number} at ${pr_head_sha}."
-                return
-              fi
-
-              if [[ "${pr_run_conclusion}" == "success" ]]; then
-                echo "pull_request ${workflow} run ${pr_run_id} already passed for release PR #${pr_number} at ${pr_head_sha}."
-                return
-              fi
-
-              if [[ "${pr_run_conclusion}" == "action_required" ]]; then
-                echo "::warning::pull_request ${workflow} run ${pr_run_id} requires manual approval; rerunning it so branch protection sees PR-associated checks."
-                if gh run rerun "${pr_run_id}" --repo "${GITHUB_REPOSITORY}"; then
-                  return
-                fi
-
-                echo "::warning::Rerun failed for pull_request ${workflow} run ${pr_run_id}; dispatching workflow_dispatch fallback for ${pr_branch}."
-                gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
-                return
-              fi
-            fi
-
-            if [[ -n "${pr_run_id}" ]]; then
-              echo "Rerunning pull_request ${workflow} run ${pr_run_id} for release PR #${pr_number} at ${pr_head_sha}."
-              gh run rerun "${pr_run_id}" --repo "${GITHUB_REPOSITORY}"
-              return
-            fi
-
-            echo "::warning::No pull_request ${workflow} run found for release PR #${pr_number} at ${pr_head_sha}; dispatching workflow_dispatch fallback."
-            gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "${pr_branch}"
+            echo "::error::Could not verify ${workflow} dispatch for ${pr_head_sha}."
+            return 1
           }
 
           for workflow in "${workflows[@]}"; do
-            trigger_pr_workflow "${workflow}"
+            dispatch_workflow "${workflow}"
           done
       - name: Mark prereleases
         if: ${{ steps.release.outputs.releases_created == 'true' }}
@@ -351,7 +358,7 @@ jobs:
             target: aarch64-apple-darwin
             asset: gommage-aarch64-darwin
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           # When workflow_dispatch-triggered, check out the tag provided via input.
           ref: ${{ github.event.inputs.tag || github.ref }}
@@ -370,11 +377,11 @@ jobs:
           fi
           echo "UPLOAD_TAG=${upload_tag}" >> "$GITHUB_ENV"
           echo "SIGNER_IDENTITY=https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${expected_ref}" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - uses: sigstore/cosign-installer@v4.1.2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Install cross toolchain (linux-aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         timeout-minutes: 10
@@ -425,15 +432,15 @@ jobs:
       - name: Attest artifact provenance
         id: attest-artifact-primary
         continue-on-error: true
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: dist/${{ matrix.asset }}.tar.gz
       - name: Retry artifact provenance attestation
         if: ${{ steps.attest-artifact-primary.outcome == 'failure' }}
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: dist/${{ matrix.asset }}.tar.gz
-      - uses: softprops/action-gh-release@v3
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ env.UPLOAD_TAG }}
           files: |
@@ -458,7 +465,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
       - name: Resolve and validate release tag
@@ -478,7 +485,7 @@ jobs:
       - name: Prepare evidence directory
         run: mkdir -p dist
       - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: .
           format: cyclonedx-json
@@ -498,12 +505,12 @@ jobs:
       - name: Attest SBOM provenance
         id: attest-sbom-primary
         continue-on-error: true
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
       - name: Retry SBOM provenance attestation
         if: ${{ steps.attest-sbom-primary.outcome == 'failure' }}
-        uses: actions/attest@v4
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
 
@@ -529,11 +536,11 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       UPLOAD_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Resolve and validate release tag
         shell: bash
         run: |

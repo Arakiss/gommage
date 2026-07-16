@@ -28,13 +28,6 @@ on:
       - '**/Cargo.lock'
       - '**/audit.toml'
       - '.github/workflows/audit.yml'
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-    paths:
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/audit.toml'
-      - '.github/workflows/audit.yml'
   schedule:
     # Daily at 06:00 UTC — after the typical RustSec publish window and
     # before European working hours, so any issue filed here is visible by
@@ -49,19 +42,28 @@ jobs:
   audit:
     name: cargo-audit
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
+    if: ${{ github.event_name != 'schedule' }}
     permissions:
       contents: read
-      # Needed so the action can open / update an issue when a new advisory
-      # is found during a scheduled run. No effect on PR runs.
-      issues: write
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
-      - uses: actions-rust-lang/audit@v1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24 # v1
         with:
           # Do NOT use the `ignore` input here — suppressing an advisory is a
           # security decision that belongs in a tracked PR editing `audit.toml`
           # (or deny.toml), not silently in this workflow file.
+          denyWarnings: true
+
+  scheduled-audit:
+    name: cargo-audit (scheduled watcher)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'schedule' }}
+    permissions:
+      contents: read
+      # Only the scheduled watcher may open or update advisory issues.
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24 # v1
+        with:
           denyWarnings: true
