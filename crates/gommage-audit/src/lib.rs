@@ -3,8 +3,9 @@
 //! Each decision produces one JSONL line of the form:
 //!
 //! ```json
-//! {"v":1,"id":"...","ts":"...","tool":"Bash","input_hash":"sha256:...",
+//! {"v":2,"id":"...","ts":"...","tool":"Bash","input_hash":"sha256:...",
 //!  "capabilities":["git.push:refs/heads/main"],"decision":{...},
+//!  "capability_provenance":[],
 //!  "matched_rule":{"name":"gate-main-push","file":"...","index":0},
 //!  "policy_version":"sha256:...","sig":"ed25519:..."}
 //! ```
@@ -35,13 +36,27 @@ pub enum AuditError {
     Json(#[from] serde_json::Error),
     #[error("signature verification failed at line {line}")]
     BadSignature { line: usize },
+    #[error("unsupported {record_kind} audit schema version {version} at line {line}")]
+    UnsupportedSchema {
+        line: usize,
+        record_kind: &'static str,
+        version: u64,
+    },
+    #[error("invalid {record_kind} audit schema at line {line}: {reason}")]
+    InvalidSchema {
+        line: usize,
+        record_kind: &'static str,
+        reason: &'static str,
+    },
     #[error("time: {0}")]
     Time(#[from] time::error::Format),
 }
 
-const AUDIT_SCHEMA_VERSION: u32 = 1;
+const LEGACY_DECISION_SCHEMA_VERSION: u32 = 1;
+const DECISION_SCHEMA_VERSION: u32 = 2;
+const EVENT_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AuditEntry {
     #[serde(rename = "v")]
     pub version: u32,
@@ -50,9 +65,11 @@ pub struct AuditEntry {
     pub tool: String,
     pub input_hash: String,
     pub capabilities: Vec<Capability>,
-    /// Deterministic per-capability policy provenance. Older signed entries do
-    /// not contain this additive field and deserialize to an empty vector.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Deterministic per-capability policy provenance. Legacy v1 entries do
+    /// not contain this field and deserialize to an empty vector. V2 entries
+    /// always serialize it, including when it is empty, so their signed shape
+    /// is unambiguous.
+    #[serde(default)]
     pub capability_provenance: Vec<CapabilityProvenance>,
     pub decision: Decision,
     pub matched_rule: Option<MatchedRule>,
@@ -60,6 +77,34 @@ pub struct AuditEntry {
     pub expedition: Option<String>,
     /// `ed25519:<base64>` signature over everything above.
     pub sig: String,
+}
+
+impl Serialize for AuditEntry {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let include_provenance = self.version != LEGACY_DECISION_SCHEMA_VERSION;
+        let mut entry =
+            serializer.serialize_struct("AuditEntry", if include_provenance { 12 } else { 11 })?;
+        entry.serialize_field("v", &self.version)?;
+        entry.serialize_field("id", &self.id)?;
+        entry.serialize_field("ts", &self.ts)?;
+        entry.serialize_field("tool", &self.tool)?;
+        entry.serialize_field("input_hash", &self.input_hash)?;
+        entry.serialize_field("capabilities", &self.capabilities)?;
+        if include_provenance {
+            entry.serialize_field("capability_provenance", &self.capability_provenance)?;
+        }
+        entry.serialize_field("decision", &self.decision)?;
+        entry.serialize_field("matched_rule", &self.matched_rule)?;
+        entry.serialize_field("policy_version", &self.policy_version)?;
+        entry.serialize_field("expedition", &self.expedition)?;
+        entry.serialize_field("sig", &self.sig)?;
+        entry.end()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,7 +247,7 @@ impl AuditWriter {
         let ts = OffsetDateTime::now_utc().format(&Rfc3339)?;
         let id = uuid::Uuid::now_v7().to_string();
         let mut entry = AuditEntry {
-            version: AUDIT_SCHEMA_VERSION,
+            version: DECISION_SCHEMA_VERSION,
             id,
             ts,
             tool: call.tool.clone(),
@@ -215,7 +260,7 @@ impl AuditWriter {
             expedition: expedition.map(str::to_string),
             sig: String::new(),
         };
-        let payload = canonical_bytes(&entry);
+        let payload = canonical_decision_v2_bytes(&entry);
         let sig: Signature = self.key.sign(&payload);
         entry.sig = format!(
             "ed25519:{}",
@@ -233,7 +278,7 @@ impl AuditWriter {
         let ts = OffsetDateTime::now_utc().format(&Rfc3339)?;
         let id = uuid::Uuid::now_v7().to_string();
         let mut entry = AuditEventEntry {
-            version: AUDIT_SCHEMA_VERSION,
+            version: EVENT_SCHEMA_VERSION,
             id,
             ts,
             kind: "event".to_string(),
@@ -262,8 +307,8 @@ impl AuditWriter {
 /// Canonical bytes of an entry **without** the `sig` field. Used for signing
 /// and verifying. We emit the fields in a fixed order so byte-output is stable
 /// across serde versions.
-fn canonical_bytes(e: &AuditEntry) -> Vec<u8> {
-    let mut obj = serde_json::json!({
+fn canonical_decision_v1_bytes(e: &AuditEntry) -> Vec<u8> {
+    let obj = serde_json::json!({
         "v": e.version,
         "id": e.id,
         "ts": e.ts,
@@ -275,17 +320,37 @@ fn canonical_bytes(e: &AuditEntry) -> Vec<u8> {
         "policy_version": e.policy_version,
         "expedition": e.expedition,
     });
-    if !e.capability_provenance.is_empty() {
-        obj.as_object_mut()
-            .expect("canonical audit entry is an object")
-            .insert(
-                "capability_provenance".to_string(),
-                serde_json::to_value(&e.capability_provenance)
-                    .expect("serializing capability provenance cannot fail"),
-            );
-    }
     // Sorted key rendering.
     canonical_render(&obj).into_bytes()
+}
+
+fn canonical_decision_v2_bytes(e: &AuditEntry) -> Vec<u8> {
+    let obj = serde_json::json!({
+        "v": e.version,
+        "id": e.id,
+        "ts": e.ts,
+        "tool": e.tool,
+        "input_hash": e.input_hash,
+        "capabilities": e.capabilities,
+        "capability_provenance": e.capability_provenance,
+        "decision": e.decision,
+        "matched_rule": e.matched_rule,
+        "policy_version": e.policy_version,
+        "expedition": e.expedition,
+    });
+    canonical_render(&obj).into_bytes()
+}
+
+fn canonical_decision_bytes(e: &AuditEntry, line: usize) -> Result<Vec<u8>, AuditError> {
+    match e.version {
+        LEGACY_DECISION_SCHEMA_VERSION => Ok(canonical_decision_v1_bytes(e)),
+        DECISION_SCHEMA_VERSION => Ok(canonical_decision_v2_bytes(e)),
+        version => Err(AuditError::UnsupportedSchema {
+            line,
+            record_kind: "decision",
+            version: u64::from(version),
+        }),
+    }
 }
 
 fn canonical_event_bytes(e: &AuditEventEntry) -> Vec<u8> {
@@ -362,13 +427,6 @@ impl ParsedRecord {
         }
     }
 
-    fn payload(&self) -> Vec<u8> {
-        match self {
-            ParsedRecord::Decision(e) => canonical_bytes(e),
-            ParsedRecord::Event(e) => canonical_event_bytes(e),
-        }
-    }
-
     fn sig(&self) -> &str {
         match self {
             ParsedRecord::Decision(e) => &e.sig,
@@ -377,13 +435,69 @@ impl ParsedRecord {
     }
 }
 
-fn parse_record(line: &str) -> Result<ParsedRecord, serde_json::Error> {
+fn parse_record(line: &str, line_number: usize) -> Result<ParsedRecord, AuditError> {
     let value: serde_json::Value = serde_json::from_str(line)?;
     if value.get("kind").and_then(|v| v.as_str()) == Some("event") {
-        serde_json::from_value(value).map(ParsedRecord::Event)
-    } else {
-        serde_json::from_value(value).map(ParsedRecord::Decision)
+        let version = schema_version(&value, line_number, "event")?;
+        if version != u64::from(EVENT_SCHEMA_VERSION) {
+            return Err(AuditError::UnsupportedSchema {
+                line: line_number,
+                record_kind: "event",
+                version,
+            });
+        }
+        return serde_json::from_value(value)
+            .map(ParsedRecord::Event)
+            .map_err(AuditError::from);
     }
+
+    let version = schema_version(&value, line_number, "decision")?;
+    match version {
+        version if version == u64::from(LEGACY_DECISION_SCHEMA_VERSION) => {
+            if value.get("capability_provenance").is_some() {
+                return Err(AuditError::InvalidSchema {
+                    line: line_number,
+                    record_kind: "decision",
+                    reason: "v1 must not contain capability_provenance",
+                });
+            }
+        }
+        version if version == u64::from(DECISION_SCHEMA_VERSION) => {
+            if value.get("capability_provenance").is_none() {
+                return Err(AuditError::InvalidSchema {
+                    line: line_number,
+                    record_kind: "decision",
+                    reason: "v2 requires capability_provenance",
+                });
+            }
+        }
+        version => {
+            return Err(AuditError::UnsupportedSchema {
+                line: line_number,
+                record_kind: "decision",
+                version,
+            });
+        }
+    }
+
+    serde_json::from_value(value)
+        .map(ParsedRecord::Decision)
+        .map_err(AuditError::from)
+}
+
+fn schema_version(
+    value: &serde_json::Value,
+    line: usize,
+    record_kind: &'static str,
+) -> Result<u64, AuditError> {
+    value
+        .get("v")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(AuditError::InvalidSchema {
+            line,
+            record_kind,
+            reason: "v must be a non-negative integer",
+        })
 }
 
 fn verify_record(record: &ParsedRecord, vk: &VerifyingKey, line: usize) -> Result<(), AuditError> {
@@ -397,7 +511,19 @@ fn verify_record(record: &ParsedRecord, vk: &VerifyingKey, line: usize) -> Resul
         .try_into()
         .map_err(|_| AuditError::BadSignature { line })?;
     let sig = Signature::from_bytes(&sig_arr);
-    let payload = record.payload();
+    let payload = match record {
+        ParsedRecord::Decision(entry) => canonical_decision_bytes(entry, line)?,
+        ParsedRecord::Event(entry) => {
+            if entry.version != EVENT_SCHEMA_VERSION {
+                return Err(AuditError::UnsupportedSchema {
+                    line,
+                    record_kind: "event",
+                    version: u64::from(entry.version),
+                });
+            }
+            canonical_event_bytes(entry)
+        }
+    };
     vk.verify(&payload, &sig)
         .map_err(|_| AuditError::BadSignature { line })
 }
@@ -411,7 +537,7 @@ pub fn verify_log(path: &Path, vk: &VerifyingKey) -> Result<usize, AuditError> {
         if line.trim().is_empty() {
             continue;
         }
-        let record = parse_record(&line)?;
+        let record = parse_record(&line, i + 1)?;
         verify_record(&record, vk, i + 1)?;
         count += 1;
     }
@@ -536,7 +662,7 @@ pub fn explain_log(path: &Path, vk: &VerifyingKey) -> Result<VerifyReport, Audit
             continue;
         }
         total += 1;
-        let record = match parse_record(&line) {
+        let record = match parse_record(&line, i + 1) {
             Ok(e) => e,
             Err(e) => {
                 anomalies.push(Anomaly::MalformedEntry {
