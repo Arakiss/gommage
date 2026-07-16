@@ -1,0 +1,32 @@
+[package]
+name = "gommage-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+gommage-core = { path = "../crates/gommage-core" }
+gommage-stdlib = { path = "../crates/gommage-stdlib" }
+libfuzzer-sys = "=0.4.13"
+serde_json = "1"
+
+[[bin]]
+name = "mapper_and_evaluator"
+path = "fuzz_targets/mapper_and_evaluator.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "configuration_parsers"
+path = "fuzz_targets/configuration_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
+resolver = "2"
