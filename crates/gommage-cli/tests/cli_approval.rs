@@ -148,7 +148,7 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
         approved
             .get("schema_version")
             .and_then(|value| value.as_u64()),
-        Some(1)
+        Some(2)
     );
     assert_eq!(
         approved.get("kind").and_then(|value| value.as_str()),
@@ -177,7 +177,25 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
         approved
             .pointer("/picto/kind")
             .and_then(|value| value.as_str()),
-        Some("exact_scope")
+        Some("scope_only")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/authorizes")
+            .and_then(|value| value.as_str()),
+        Some("any_matching_call_in_scope")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/consumption")
+            .and_then(|value| value.as_str()),
+        Some("one_use_per_matching_call")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/probe_consumes_use")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
     assert_eq!(
         approved
@@ -217,6 +235,72 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
     assert!(audit.contains(r#""type":"approval_requested""#));
     assert!(audit.contains(r#""type":"approval_resolved""#));
     assert!(audit.contains(r#""type":"picto_consumed""#));
+}
+
+#[test]
+fn scope_only_probe_consumes_the_only_use_before_the_intended_retry() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+
+    let intended_payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let probe_payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"probe"}}"#;
+    let ask = run_mcp(&home, intended_payload);
+    assert_eq!(
+        ask.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("ask")
+    );
+
+    let output = gommage(&home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    let approvals: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let request_id = approvals[0]["request"]["id"].as_str().unwrap();
+    let approve = gommage(&home)
+        .args([
+            "approval", "approve", request_id, "--ttl", "10m", "--uses", "1", "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(approve.status.success());
+    let approved: serde_json::Value = serde_json::from_slice(&approve.stdout).unwrap();
+    assert_eq!(approved["picto"]["kind"], "scope_only");
+    assert_eq!(
+        approved["picto"]["authorizes"],
+        "any_matching_call_in_scope"
+    );
+    assert_eq!(
+        approved["picto"]["consumption"],
+        "one_use_per_matching_call"
+    );
+    assert_eq!(approved["picto"]["probe_consumes_use"], true);
+
+    let probe = run_mcp(&home, probe_payload);
+    assert_eq!(
+        probe
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("allow")
+    );
+
+    let retry = run_mcp(&home, intended_payload);
+    assert_eq!(
+        retry
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(|value| value.as_str()),
+        Some("ask")
+    );
+    assert!(
+        retry
+            .pointer("/hookSpecificOutput/permissionDecisionReason")
+            .and_then(|value| value.as_str())
+            .unwrap()
+            .contains("approval request apr_")
+    );
 }
 
 #[test]
@@ -275,6 +359,12 @@ fn input_bound_approval_does_not_unlock_a_different_mcp_write() {
             .pointer("/picto/input_bound")
             .and_then(|value| value.as_bool()),
         Some(true)
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/authorizes")
+            .and_then(|value| value.as_str()),
+        Some("only_the_exact_observed_tool_input")
     );
 
     let different = run_mcp(&home, different_payload);
@@ -502,8 +592,10 @@ fn approval_human_output_is_scannable_for_operators() {
     assert!(approve_stdout.contains("status:  approved"));
     assert!(approve_stdout.contains("scope:   mcp.write"));
     assert!(approve_stdout.contains("Picto minted"));
-    assert!(approve_stdout.contains("kind:    exact-scope"));
-    assert!(approve_stdout.contains("next:    retry the blocked tool call"));
+    assert!(approve_stdout.contains("kind:    scope-only"));
+    assert!(approve_stdout.contains("binding: scope only — not tied to the request input hash"));
+    assert!(approve_stdout.contains("spends:  one use per matching call, including a probe"));
+    assert!(approve_stdout.contains("next:    retry the intended blocked call directly"));
 }
 
 #[test]

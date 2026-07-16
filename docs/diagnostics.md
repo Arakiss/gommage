@@ -257,13 +257,16 @@ clear the pending queue while preserving history. Human output prints a summary
 plus the first matched requests by default; use `--show-all` or `--verbose` for
 full terminal detail. JSON output always includes every processed request.
 
-Approving a normal request mints an exact-scope picto. A request created by a
+Approving a normal request mints a scope-only picto. It is not tied to the
+request input hash: any call in the exact scope can consume it, and every
+matching call (including a probe) spends one use. A request created by a
 `bind_input: true` rule mints an exact-input picto that only matches the same
-canonical tool call. Both paths write signed `picto_created` plus
+canonical tool input; every matching retry still spends one use. Both paths write signed `picto_created` plus
 `approval_resolved` events. Human approval output is a plain, scannable summary;
-`approval approve <id> --json` keeps the stable action report with `status`,
+`approval approve <id> --json` emits the version 2 action report with `status`,
 `request_id`, `scope`, `picto_id`, nested `picto` details including
-`kind` / `input_bound`, and `next_action` for agents. Denying a request writes a signed
+`kind`, `authorizes`, `consumption`, `probe_consumes_use`, and the compatibility
+field `input_bound`, plus `next_action` for agents. Denying a request writes a signed
 `approval_resolved` event with `status: denied`. Webhook delivery uses bounded
 retries; exhausted failures are written to
 `~/.gommage/approval-webhook-dlq.jsonl`, exposed through `approval dlq`, and

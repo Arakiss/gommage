@@ -233,6 +233,9 @@ pub(crate) struct ApprovalPictoReport {
     pub(crate) id: String,
     pub(crate) scope: String,
     pub(crate) input_bound: bool,
+    pub(crate) authorizes: String,
+    pub(crate) consumption: String,
+    pub(crate) probe_consumes_use: bool,
     pub(crate) max_uses: u32,
     pub(crate) uses_remaining: u32,
     pub(crate) expires_at: String,
@@ -767,7 +770,7 @@ pub(crate) fn approve_request(
     let picto_max_uses = picto.max_uses;
     let uses_remaining = picto.max_uses.saturating_sub(picto.uses);
     Ok(ApprovalActionReport {
-        schema_version: 1,
+        schema_version: 2,
         kind: "approval_action".to_string(),
         status: "approved".to_string(),
         request_id: id.to_string(),
@@ -779,20 +782,31 @@ pub(crate) fn approve_request(
             kind: if input_bound {
                 "exact_input".to_string()
             } else {
-                "exact_scope".to_string()
+                "scope_only".to_string()
             },
             id: picto_id,
             scope: picto_scope.clone(),
             input_bound,
+            authorizes: if input_bound {
+                "only_the_exact_observed_tool_input".to_string()
+            } else {
+                "any_matching_call_in_scope".to_string()
+            },
+            consumption: "one_use_per_matching_call".to_string(),
+            probe_consumes_use: true,
             max_uses: picto_max_uses,
             uses_remaining,
             expires_at: picto_expires_at,
         }),
         next_action: "retry_blocked_call".to_string(),
         message: if input_bound {
-            format!("approved {id}; minted input-bound picto for {picto_scope}")
+            format!(
+                "approved {id}; minted input-bound picto for {picto_scope}; each matching call consumes one use"
+            )
         } else {
-            format!("approved {id}; minted exact-scope picto for {picto_scope}")
+            format!(
+                "approved {id}; minted scope-only picto for {picto_scope}; any matching call consumes one use"
+            )
         },
     })
 }
@@ -911,7 +925,7 @@ pub(crate) fn deny_request(
         picto_id: None,
     })?;
     Ok(ApprovalActionReport {
-        schema_version: 1,
+        schema_version: 2,
         kind: "approval_action".to_string(),
         status: "denied".to_string(),
         request_id: id.to_string(),
@@ -1244,8 +1258,13 @@ fn print_action_human(report: &ApprovalActionReport) {
         println!("id:      {}", picto.id);
         println!("kind:    {}", picto.kind.replace('_', "-"));
         if picto.input_bound {
-            println!("binding: exact tool input");
+            println!("binding: exact tool input only");
+            println!("allows:  only the exact observed tool input");
+        } else {
+            println!("binding: scope only — not tied to the request input hash");
+            println!("allows:  any matching call in scope {}", picto.scope);
         }
+        println!("spends:  one use per matching call, including a probe");
         println!(
             "uses:    {}/{} remaining",
             picto.uses_remaining, picto.max_uses
@@ -1258,10 +1277,12 @@ fn print_action_human(report: &ApprovalActionReport) {
         "retry_blocked_call" => {
             if report.picto.as_ref().is_some_and(|picto| picto.input_bound) {
                 println!(
-                    "next:    retry the blocked tool call; the picto matches its exact scope and input"
+                    "next:    retry the intended blocked call directly; a probe would spend one use"
                 )
             } else {
-                println!("next:    retry the blocked tool call; the picto matches this exact scope")
+                println!(
+                    "next:    retry the intended blocked call directly; any in-scope probe would spend one use"
+                )
             }
         }
         "none" => println!("next:    no picto minted"),
@@ -1334,6 +1355,10 @@ fn print_state_detail(state: &ApprovalState) {
         "binding: {}",
         request_binding_label(state.request.bind_input)
     );
+    println!(
+        "meaning: {}",
+        request_binding_explanation(state.request.bind_input)
+    );
     println!("input:   {}", state.request.input_hash);
     println!("reason:  {}", state.request.reason);
     println!("policy:  {}", state.request.policy_version);
@@ -1366,6 +1391,14 @@ fn request_binding_label(bind_input: bool) -> &'static str {
         "exact tool input"
     } else {
         "scope only"
+    }
+}
+
+fn request_binding_explanation(bind_input: bool) -> &'static str {
+    if bind_input {
+        "approval authorizes only this exact observed tool input; each matching call consumes one use"
+    } else {
+        "approval authorizes any matching call in this scope, not this input hash; each matching call consumes one use"
     }
 }
 

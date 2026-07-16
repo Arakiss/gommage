@@ -37,13 +37,18 @@ gommage approval evidence <approval-id> --redact --output approval-evidence.json
 gommage approval approve <approval-id> --ttl 10m --uses 1
 ```
 
-Approval mints an exact-scope picto for a normal request. When the matching
-policy rule has `bind_input: true`, it mints an exact-input picto instead; only
-the same canonical tool call can consume it. The JSON action report exposes this
-as `picto.kind: "exact_scope" | "exact_input"` and `picto.input_bound`.
-The default approval output is a plain operator summary; add `--json` for the
-stable agent contract with request, scope, picto, TTL, uses, and `next_action`
-fields. A human can deny instead:
+Approval mints a scope-only picto for a normal request. It authorizes any call
+that matches that exact scope; it is not tied to the input hash shown on the
+approval request. Every matching call consumes one use, including a diagnostic
+or probe call, so a one-use approval must be followed directly by the intended
+retry. When the matching policy rule has `bind_input: true`, approval mints an
+exact-input picto instead; only the same canonical tool input can consume it,
+and each matching retry still consumes one use. The version 2 JSON action report
+exposes this as `picto.kind: "scope_only" | "exact_input"`, together with
+`picto.authorizes`, `picto.consumption`, `picto.probe_consumes_use`, and the
+compatibility field `picto.input_bound`. The default approval output is a plain
+operator summary; add `--json` for the stable agent contract with request,
+scope, picto, TTL, uses, and `next_action` fields. A human can deny instead:
 
 ```sh
 gommage approval deny <approval-id> --reason "not enough context"

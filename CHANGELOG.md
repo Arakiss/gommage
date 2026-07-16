@@ -13,6 +13,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- Approval action JSON is now schema version 2. Scope-wide grants are named
+  `scope_only` instead of the misleading `exact_scope`, and machine and human
+  output state what each Picto authorizes, that every matching call consumes
+  one use, and that a probe can spend the only use before the intended retry.
 - `gommage state rebuild --json` and `state stats --json` now call their
   rebuild input `source_log` rather than `source_of_truth`. The rebuildable
   state schema is version 2, so older indexes report stale until rebuilt; this
@@ -198,7 +202,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   asks de-duplicate while pending, and create a new suffixed request after a
   prior request has been approved or denied.
 - `gommage approval list|show|approve|deny|webhook` manages out-of-band
-  approval requests. Approving a normal request mints an exact-scope signed
+  approval requests. Approving a normal request mints a scope-only signed
   picto; an input-bound request mints a picto tied to the canonical tool input.
   Denying removes the request from pending work; both paths emit signed audit
   events.
