@@ -331,7 +331,7 @@ enum Cmd {
     #[command(subcommand)]
     Harness(HarnessCmd),
 
-    /// Inspect optional managed-mode readiness and harness integrity.
+    /// Inspect shipped user-mode deployment signals and isolation limits.
     #[command(subcommand)]
     Managed(ManagedCmd),
 

@@ -18,6 +18,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   state schema is version 2, so older indexes report stale until rebuilt; this
   avoids implying that independent audit-record signatures prove log
   completeness.
+- `gommage managed status` now reports only what the shipped implementation can
+  establish: user-mode signals, `isolation: none`,
+  `tamper_resistance: none`, and `reference_ready: false`. The misleading
+  `managed_like` and `root_required` fields have been replaced with precise
+  deployment/status fields.
 - `gommage explain` now verifies the selected audit record before presenting
   it. Its `--trace` JSON reports signed audited and normalized active
   per-capability/layer provenance, marks v1 provenance as unavailable, and

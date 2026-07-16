@@ -6,7 +6,7 @@ use support::gommage;
 use tempfile::tempdir;
 
 #[test]
-fn managed_status_json_reports_user_level_without_root_requirement() {
+fn managed_status_json_reports_user_mode_without_isolation_claims() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     let codex_home = temp.path().join("codex-home");
@@ -47,10 +47,15 @@ fn managed_status_json_reports_user_level_without_root_requirement() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["status"].as_str(), Some("warn"));
     assert_eq!(report["mode"].as_str(), Some("user_level"));
-    assert_eq!(report["root_required"].as_bool(), Some(false));
+    assert_eq!(report["status_requires_root"].as_bool(), Some(false));
+    assert_eq!(report["isolation"].as_str(), Some("none"));
+    assert_eq!(report["tamper_resistance"].as_str(), Some("none"));
+    assert_eq!(report["reference_ready"].as_bool(), Some(false));
+    assert!(report.get("root_required").is_none());
     assert_eq!(report["summary"]["failures"].as_u64(), Some(0));
     assert!(report["checks"].as_array().unwrap().iter().any(|check| {
-        check["name"].as_str() == Some("daemon_service") && check["status"].as_str() == Some("warn")
+        check["name"].as_str() == Some("user_daemon_service_file")
+            && check["status"].as_str() == Some("warn")
     }));
     assert!(report["checks"].as_array().unwrap().iter().any(|check| {
         check["name"].as_str() == Some("key_permissions") && check["status"].as_str() == Some("ok")

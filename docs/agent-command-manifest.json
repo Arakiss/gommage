@@ -196,7 +196,7 @@
     },
     {
       "id": "managed_status_json",
-      "purpose": "Inspect optional managed-mode readiness, daemon presence, hook integrity, and bypass posture.",
+      "purpose": "Inspect shipped user-mode deployment signals, hook integrity, bypass posture, and the explicit lack of isolation from the current UID.",
       "stdin_mode": "none",
       "argv": ["managed", "status", "--json"]
     },

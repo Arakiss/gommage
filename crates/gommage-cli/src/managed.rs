@@ -15,9 +15,9 @@ use crate::{
 
 #[derive(Subcommand)]
 pub(crate) enum ManagedCmd {
-    /// Diagnose whether this host is ready for optional managed-mode operation.
+    /// Inspect shipped user-mode deployment signals and their isolation limit.
     Status {
-        /// Emit a stable machine-readable managed-mode report.
+        /// Emit a stable machine-readable deployment report.
         #[arg(long)]
         json: bool,
     },
@@ -27,7 +27,10 @@ pub(crate) enum ManagedCmd {
 struct ManagedStatusReport {
     status: AgentStatus,
     mode: ManagedMode,
-    root_required: bool,
+    status_requires_root: bool,
+    isolation: &'static str,
+    tamper_resistance: &'static str,
+    reference_ready: bool,
     home: String,
     summary: ManagedSummary,
     checks: Vec<ManagedCheck>,
@@ -47,17 +50,17 @@ impl ManagedStatusReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ManagedMode {
-    ManagedLike,
+    UserServiceFilePresent,
     UserLevel,
-    Unmanaged,
+    Unconfigured,
 }
 
 impl ManagedMode {
     fn as_str(self) -> &'static str {
         match self {
-            Self::ManagedLike => "managed_like",
+            Self::UserServiceFilePresent => "user_service_file_present",
             Self::UserLevel => "user_level",
-            Self::Unmanaged => "unmanaged",
+            Self::Unconfigured => "unconfigured",
         }
     }
 }
@@ -116,13 +119,13 @@ fn build_managed_status_report(layout: &HomeLayout) -> ManagedStatusReport {
             AgentStatus::Fail => summary.failures += 1,
         }
     }
-    let daemon_service_ok = checks
+    let user_service_file_present = checks
         .iter()
-        .any(|check| check.name == "daemon_service" && check.status == AgentStatus::Ok);
+        .any(|check| check.name == "user_daemon_service_file" && check.status == AgentStatus::Ok);
     let mode = if summary.failures > 0 {
-        ManagedMode::Unmanaged
-    } else if daemon_service_ok {
-        ManagedMode::ManagedLike
+        ManagedMode::Unconfigured
+    } else if user_service_file_present {
+        ManagedMode::UserServiceFilePresent
     } else {
         ManagedMode::UserLevel
     };
@@ -136,14 +139,19 @@ fn build_managed_status_report(layout: &HomeLayout) -> ManagedStatusReport {
     ManagedStatusReport {
         status,
         mode,
-        root_required: false,
+        status_requires_root: false,
+        isolation: "none",
+        tamper_resistance: "none",
+        reference_ready: false,
         home: path_display(&layout.root),
         summary,
         checks,
         notes: vec![
-            "Managed mode is optional. Gommage does not require root for normal local development."
+            "This command inspects user-owned path modes, user-service file presence, socket presence, hooks, and the current process environment only."
                 .to_string(),
-            "A root-owned or MDM-managed deployment may protect service files and policy authority, but agent commands should still run as the operator user."
+            "These checks do not verify ownership, service process identity, socket peer credentials, a distinct authority principal, or resistance to the current UID."
+                .to_string(),
+            "A protected reference-mode authority is not shipped in this release."
                 .to_string(),
         ],
     }
@@ -221,14 +229,17 @@ fn push_service_file_check(checks: &mut Vec<ManagedCheck>) {
         AgentStatus::Warn
     };
     checks.push(ManagedCheck {
-        name: "daemon_service",
+        name: "user_daemon_service_file",
         status,
         message: if path.exists() {
-            format!("daemon service file exists at {}", path.display())
+            format!("user daemon service file exists at {}", path.display())
         } else {
-            format!("daemon service file not found at {}", path.display())
+            format!("user daemon service file not found at {}", path.display())
         },
-        details: serde_json::json!({ "path": path_display(&path) }),
+        details: serde_json::json!({
+            "path": path_display(&path),
+            "evidence_limit": "presence_only"
+        }),
     });
 }
 
@@ -241,9 +252,9 @@ fn push_socket_check(checks: &mut Vec<ManagedCheck>, socket: &Path) {
             AgentStatus::Warn
         },
         message: if socket.exists() {
-            format!("daemon socket exists at {}", socket.display())
+            format!("user daemon socket exists at {}", socket.display())
         } else {
-            format!("daemon socket not found at {}", socket.display())
+            format!("user daemon socket not found at {}", socket.display())
         },
         details: serde_json::json!({ "path": path_display(socket) }),
     });
@@ -305,12 +316,15 @@ fn service_file_path() -> PathBuf {
 
 fn print_managed_status_report(report: &ManagedStatusReport) {
     println!(
-        "managed status: {} [{}]",
+        "deployment status: {} [{}]",
         report.mode.as_str(),
         report.status.as_str()
     );
     println!("home: {}", report.home);
-    println!("root required: {}", report.root_required);
+    println!("status requires root: {}", report.status_requires_root);
+    println!("isolation: {}", report.isolation);
+    println!("tamper resistance: {}", report.tamper_resistance);
+    println!("reference ready: {}", report.reference_ready);
     for check in &report.checks {
         println!(
             "{} {}: {}",
