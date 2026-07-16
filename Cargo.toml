@@ -43,6 +43,7 @@ ratatui    = "0.30"
 
 # --- Determinism-critical (exact pins: any change here can flip a decision) -
 # Touching any of these requires a PR with a green determinism-suite run.
+brush-parser = "=0.4.0"
 globset       = "=0.4.18"
 regex         = "=1.12.4"
 ed25519-dalek = { version = "=2.2.0", features = ["rand_core", "std"] }

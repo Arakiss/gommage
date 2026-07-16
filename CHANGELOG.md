@@ -13,6 +13,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- Shell command effects now come from an exact-pinned, quote-preserving
+  `brush-parser` AST instead of handcrafted token scanning. Filesystem effects
+  have one canonical path identity, Git push capabilities describe destination
+  refs, and dynamic security-relevant operands fail closed as explicit
+  `proc.exec.ambiguous:*` capabilities.
 - Bumped determinism-critical dependency pins for `regex`, `rusqlite`,
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
@@ -79,10 +84,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Gommage now writes the canonical Codex `features.hooks` flag while treating
   legacy `features.codex_hooks` configs as migration-compatible status
   warnings.
-- Hook adapters now strip spoofed `__gommage_*` fields, resolve relative
-  filesystem write paths and common Bash write targets against hook `cwd`, and emit
-  `fs.write.git_branch:<branch>:<path>` capabilities for destination Git
-  worktrees so project policies can gate protected-branch edits.
+- Hook adapters now strip spoofed `__gommage_*` fields and resolve relative
+  filesystem effects against hook `cwd`. Policies receive only the canonical
+  resolved `fs.read:<path>` / `fs.write:<path>` identity; destination branch
+  context remains audit metadata rather than an authorizable action capability.
 - `gommage agent status` now warns when an installed Gommage hook matcher is
   missing currently mapped tool coverage such as `mcp__.*`, catching older
   Claude/Codex integrations that would otherwise report healthy.

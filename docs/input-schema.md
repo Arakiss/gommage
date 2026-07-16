@@ -37,8 +37,10 @@ agent-supplied `__gommage_*` fields, and then may add reserved
 is used to resolve hook-relative `Read` / `Write` / `Edit` / `NotebookEdit`,
 `apply_patch`, `Grep` / `Glob`, and shell write targets against the hook `cwd`.
 When the destination is inside a Git worktree, the adapter may also add branch
-context used by `fs.write.git_branch:<branch>:<path>` capabilities. Once added,
-those fields are ordinary input fields and are covered by the audit input hash.
+context for diagnostics and audit replay. Branch context is deliberately not an
+authorizable capability: filesystem decisions are made against the canonical
+resolved `fs.write:<path>` effect. Once added, reserved fields are ordinary
+input fields and are covered by the audit input hash.
 
 ---
 
@@ -67,8 +69,10 @@ string after this lexical home-alias step**. If the agent says
 `fs.write:/Users/you/proj/src/x.rs` and the glob is matched against that string.
 If the hook payload instead says `file_path = "src/x.rs"` with
 `cwd = "/Users/you/proj"`, the adapter adds
-`__gommage_file_path = "/Users/you/proj/src/x.rs"` so the stdlib emits both the
-raw and resolved forms.
+`__gommage_file_path = "/Users/you/proj/src/x.rs"` so the stdlib emits the
+canonical resolved form. It suppresses the raw relative alias when that trusted
+resolved field is present, preventing one write from acquiring two policy
+identities.
 
 **Why no normalisation?** Every normalisation is a small inference step that depends on filesystem state at decision time. Resolving a symlink today is a different decision than resolving it tomorrow. Gommage's contract is that the decision is a pure function of the input — so the input must carry whatever semantics the agent wants honoured. Agents that want canonicalised behaviour should canonicalise in their tool-call construction (`realpath`, Node `fs.realpath`, etc.) before emitting.
 
@@ -76,7 +80,18 @@ The home-alias rewrite above is not filesystem normalisation: it reads no
 filesystem state, uses the policy load environment already needed for `${HOME}`
 patterns, and preserves relative-path hard-stop semantics.
 
-**Implication for policy authors**: for real hook traffic, prefer the resolved stdlib capabilities (`fs.write:/absolute/path` and, when available, `fs.write.git_branch:<branch>:/absolute/path`) for project-scoped gates. For raw daemon `ToolCall` JSON that did not pass through the hook adapter, your patterns still need to account for the literal paths the caller supplied, or rely on the fail-closed default to deny the rest.
+The typed Bash analyzer has a separate deterministic rule because its paths are
+operands embedded in `input.command`, not native path fields. It collapses
+repeated `/` and `.` components, preserves the canonical leading HOME alias,
+and rejects any `..` component as `proc.exec.ambiguous:parent-component`. It
+never resolves symlinks or consults the filesystem.
+
+**Implication for policy authors**: for real hook traffic, use the canonical
+resolved stdlib capability (`fs.write:/absolute/path`) for project-scoped gates.
+For raw daemon `ToolCall` JSON that did not pass through the hook adapter, your
+patterns still need to account for the literal paths the caller supplied, or
+rely on the fail-closed default to deny the rest. Ambient Git branch state is
+not part of a filesystem authorization decision.
 
 ---
 
@@ -125,10 +140,21 @@ The bundled stdlib mapper makes `Bash` file-verbs emit the same filesystem capab
 
 - `cat` / `head` / `tail` / `less` / `od` / `xxd` / `base64` / `strings` / `file` emit `fs.read:<path>` (like `Read`).
 - `tee`, `cp` / `install` (destination), `sed -i` targets, `dd of=<path>`, and `>` / `>>` redirect targets emit `fs.write:<path>` (like `Write`).
-- For hook payloads with `cwd`, relative write paths also emit the resolved `fs.write:<cwd>/<path>` form. When the destination belongs to a Git worktree with a symbolic branch, the stdlib also emits `fs.write.git_branch:<branch>:<resolved-path>`.
-- Every `Bash` call also emits `proc.exec:<command>` for the whole command, plus a per-segment `proc.exec:<segment>` after wrapper/prefix stripping (`env`, `sudo`, `bash -c`, absolute-path heads, command substitution). Compound and wrapped commands are scanned segment by segment, so `cd /x && cat /etc/shadow` still surfaces `fs.read:/etc/shadow`.
+- For hook payloads with trusted `cwd`, relative filesystem paths emit only the
+  canonical resolved `fs.read:<cwd>/<path>` or `fs.write:<cwd>/<path>` form.
+- Every `Bash` call emits one raw `proc.exec:<command>` capability for the
+  original whole command. Parsed AST commands also become deterministic
+  candidates for compatibility mapper rules that constrain `input.command`;
+  they are not emitted as additional per-segment `proc.exec` capabilities.
+  Typed effects still walk compounds and wrappers, so
+  `cd /x && cat /etc/shadow` surfaces `fs.read:/etc/shadow`.
 
-These shell extractors are best-effort single-path matchers, not a full shell parser. Flag-heavy, multi-path, or here-doc forms may not parse precisely. When that happens the operation does not silently pass: the per-command `proc.exec` capability is always emitted, and the **fail-closed default denies any capability no rule allowed**. That fail-closed backstop is the safety net under the mapper, not the mapper itself.
+Shell effects are derived from a bounded, quote-preserving AST. The analyzer
+walks compound commands, static shell payloads, substitutions, wrappers,
+redirections, and every statically known operand. If syntax or a
+security-relevant destination is dynamic, it emits
+`proc.exec.ambiguous:<reason>` and the reference policy denies it before any
+generic `proc.exec:*` rule can authorize the command.
 
 **Recommendation for strict fs gating.** If you need the filesystem gates to hold tightly, restrict or deny raw `Bash` (gate `proc.exec:*` for the shells you do not trust) and route file access through the dedicated `Read` / `Write` / `Edit` tools, whose path arguments map exactly. See [`THREAT_MODEL.md`](../docs/THREAT_MODEL.md) for the residual shapes that fail closed but do not yet hit a precise gate scope.
 

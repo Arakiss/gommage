@@ -12,6 +12,14 @@
 #     signed picto whose scope equals `required_scope` turns the ask into allow.
 #     Use this for "deny by default, but allow with a signed, audited picto".
 
+- name: deny-ambiguous-shell-effects
+  decision: gommage
+  hard_stop: true
+  match:
+    any_capability:
+      - "proc.exec.ambiguous:*"
+  reason: "shell effects could not be resolved statically; reference posture fails closed"
+
 # Force pushes rewrite shared history; gate them behind a signed picto rather
 # than a hard deny so a deliberate, audited override is possible. Grant with
 # `gommage grant --scope git.push.force --reason "<why>"` then `gommage confirm`.
@@ -20,6 +28,11 @@
   required_scope: "git.push.force"
   match:
     any_capability:
+      - "git.push.force:*"
+      - "git.push:*"
+      - "net.out:github.com"
+      - "proc.exec:*git push*"
+    all_capability:
       - "git.push.force:*"
   reason: "force pushes rewrite shared history; require a signed picto (scope git.push.force)"
 
