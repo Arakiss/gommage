@@ -17,18 +17,18 @@ use std::{
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 #[derive(Subcommand)]
 pub(crate) enum StateCmd {
-    /// Rebuild state.sqlite from the signed JSONL audit ledger.
+    /// Rebuild state.sqlite from the available authenticated audit records.
     Rebuild {
         /// Emit a stable machine-readable report.
         #[arg(long)]
         json: bool,
     },
-    /// Verify whether state.sqlite matches the current audit ledger.
+    /// Verify whether state.sqlite matches the current audit log snapshot.
     Verify {
         /// Emit a stable machine-readable report.
         #[arg(long)]
@@ -42,7 +42,7 @@ pub(crate) enum StateCmd {
     },
     /// Vacuum state.sqlite.
     Vacuum,
-    /// Remove state.sqlite. The signed audit ledger is not touched.
+    /// Remove state.sqlite. The authenticated audit record file is not touched.
     Reset {
         /// Show the deletion without removing the file.
         #[arg(long)]
@@ -86,7 +86,7 @@ struct StateRebuildReport {
     status: &'static str,
     state_db: String,
     audit_log: String,
-    source_of_truth: &'static str,
+    source_log: &'static str,
     rebuilt_at: String,
     audit_size_bytes: u64,
     audit_sha256: String,
@@ -102,7 +102,7 @@ struct StateStatsReport {
     reason: String,
     state_db: String,
     audit_log: String,
-    source_of_truth: &'static str,
+    source_log: &'static str,
     counters: StateCounters,
 }
 
@@ -146,7 +146,7 @@ pub(crate) fn cmd_state(sub: StateCmd, layout: HomeLayout) -> Result<ExitCode> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 println!("ok state rebuilt at {}", report.state_db);
-                println!("source: {}", report.source_of_truth);
+                println!("source_log: {}", report.source_log);
                 println!("audit: {} entries indexed", report.indexed.audit_entries);
                 println!(
                     "counters: {} decisions, {} events, {} ask, {} deny, {} hard-stop",
@@ -189,7 +189,7 @@ pub(crate) fn cmd_state(sub: StateCmd, layout: HomeLayout) -> Result<ExitCode> {
                 reason: readiness.reason,
                 state_db: readiness.state_db,
                 audit_log: readiness.audit_log,
-                source_of_truth: "audit.log",
+                source_log: "audit.log",
                 counters,
             };
             if json {
@@ -340,7 +340,7 @@ fn rebuild_state(layout: &HomeLayout) -> Result<StateRebuildReport> {
         }
     }
     write_meta(&tx, "schema_version", SCHEMA_VERSION.to_string())?;
-    write_meta(&tx, "source_of_truth", "audit.log")?;
+    write_meta(&tx, "source_log", "audit.log")?;
     write_meta(&tx, "rebuilt_at", &rebuilt_at)?;
     write_meta(&tx, "audit_path", path_string(&layout.audit_log))?;
     write_meta(&tx, "audit_size_bytes", fingerprint.size_bytes.to_string())?;
@@ -359,7 +359,7 @@ fn rebuild_state(layout: &HomeLayout) -> Result<StateRebuildReport> {
         status: "ok",
         state_db: path_string(&layout.state_db),
         audit_log: path_string(&layout.audit_log),
-        source_of_truth: "audit.log",
+        source_log: "audit.log",
         rebuilt_at,
         audit_size_bytes: fingerprint.size_bytes,
         audit_sha256: fingerprint.sha256,
@@ -430,7 +430,7 @@ fn verify_state(layout: &HomeLayout, strong_hash: bool) -> Result<StateReadiness
         .get("schema_version")
         .and_then(|value| value.parse::<i64>().ok())
         == Some(SCHEMA_VERSION);
-    let source_ok = meta.get("source_of_truth").map(String::as_str) == Some("audit.log");
+    let source_ok = meta.get("source_log").map(String::as_str) == Some("audit.log");
     let path_ok = meta
         .get("audit_path")
         .is_some_and(|path| path == &path_string(&layout.audit_log));
@@ -438,7 +438,7 @@ fn verify_state(layout: &HomeLayout, strong_hash: bool) -> Result<StateReadiness
     let hash_ok = !strong_hash || indexed_sha.as_deref() == Some(fingerprint.sha256.as_str());
     let current = schema_ok && source_ok && path_ok && size_ok && hash_ok;
     let (status, reason) = if current {
-        ("ok", "state.sqlite matches the current audit ledger")
+        ("ok", "state.sqlite matches the current audit log snapshot")
     } else if !schema_ok {
         (
             "warn",
@@ -497,7 +497,7 @@ fn quick_current(layout: &HomeLayout) -> bool {
     meta.get("schema_version")
         .and_then(|value| value.parse::<i64>().ok())
         == Some(SCHEMA_VERSION)
-        && meta.get("source_of_truth").map(String::as_str) == Some("audit.log")
+        && meta.get("source_log").map(String::as_str) == Some("audit.log")
         && meta
             .get("audit_path")
             .is_some_and(|path| path == &path_string(&layout.audit_log))

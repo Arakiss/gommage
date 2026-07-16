@@ -13,6 +13,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- `gommage state rebuild --json` and `state stats --json` now call their
+  rebuild input `source_log` rather than `source_of_truth`. The rebuildable
+  state schema is version 2, so older indexes report stale until rebuilt; this
+  avoids implying that independent audit-record signatures prove log
+  completeness.
 - `gommage explain` now verifies the selected audit record before presenting
   it. Its `--trace` JSON reports signed audited and normalized active
   per-capability/layer provenance, marks v1 provenance as unavailable, and

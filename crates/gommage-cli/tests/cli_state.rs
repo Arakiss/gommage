@@ -1,5 +1,6 @@
 mod support;
 
+use rusqlite::Connection;
 use std::{io::Write, process::Stdio};
 use support::gommage;
 use tempfile::tempdir;
@@ -62,13 +63,31 @@ fn state_rebuild_verify_and_stats_index_signed_audit() {
     );
     let report: serde_json::Value = serde_json::from_slice(&rebuild.stdout).unwrap();
     assert_eq!(report["status"].as_str(), Some("ok"));
-    assert_eq!(report["source_of_truth"].as_str(), Some("audit.log"));
+    assert_eq!(report["source_log"].as_str(), Some("audit.log"));
+    assert!(report.get("source_of_truth").is_none());
     assert_eq!(report["indexed"]["audit_entries"].as_u64(), Some(2));
     assert_eq!(report["indexed"]["decisions"].as_u64(), Some(1));
     assert_eq!(report["indexed"]["events"].as_u64(), Some(1));
     assert_eq!(report["indexed"]["asks"].as_u64(), Some(1));
     assert_eq!(report["indexed"]["approval_requests"].as_u64(), Some(1));
     assert!(home.join("state.sqlite").exists());
+    let conn = Connection::open(home.join("state.sqlite")).unwrap();
+    let source_log: String = conn
+        .query_row(
+            "SELECT value FROM state_meta WHERE key = 'source_log'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(source_log, "audit.log");
+    let legacy_key_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM state_meta WHERE key = 'source_of_truth'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(legacy_key_count, 0);
 
     let verify = gommage(&home)
         .args(["state", "verify", "--json"])
@@ -98,6 +117,39 @@ fn state_rebuild_verify_and_stats_index_signed_audit() {
     assert_eq!(report["current"].as_bool(), Some(true));
     assert_eq!(report["counters"]["audit_entries"].as_u64(), Some(2));
     assert_eq!(report["counters"]["approval_requests"].as_u64(), Some(1));
+}
+
+#[test]
+fn state_verify_requires_rebuild_for_v1_metadata() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home(&home);
+    write_audit_fixture(&home);
+    assert!(
+        gommage(&home)
+            .args(["state", "rebuild"])
+            .status()
+            .unwrap()
+            .success()
+    );
+
+    let conn = Connection::open(home.join("state.sqlite")).unwrap();
+    conn.execute(
+        "UPDATE state_meta SET value = '1' WHERE key = 'schema_version'",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let verify = gommage(&home)
+        .args(["state", "verify", "--json"])
+        .output()
+        .unwrap();
+    assert!(verify.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(report["status"].as_str(), Some("warn"));
+    assert_eq!(report["current"].as_bool(), Some(false));
+    assert!(report["reason"].as_str().unwrap().contains("schema"));
 }
 
 #[test]

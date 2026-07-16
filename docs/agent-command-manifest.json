@@ -491,13 +491,13 @@
     },
     {
       "id": "state_rebuild_json",
-      "purpose": "Rebuild the local SQLite state read-model from the signed audit ledger.",
+      "purpose": "Rebuild the local SQLite state read-model from the available authenticated audit records.",
       "stdin_mode": "none",
       "argv": ["state", "rebuild", "--json"]
     },
     {
       "id": "state_verify_json",
-      "purpose": "Verify whether state.sqlite matches the current audit ledger.",
+      "purpose": "Verify whether state.sqlite matches the current audit log snapshot.",
       "stdin_mode": "none",
       "argv": ["state", "verify", "--json"]
     },
