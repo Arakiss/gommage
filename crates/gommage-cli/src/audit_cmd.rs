@@ -4,7 +4,7 @@ use gommage_audit::{
     Anomaly, AuditEntry, AuditEventEntry, VerifyReport as AuditVerifyReport, verify_log,
 };
 use gommage_core::{
-    Capability, Decision, MatchedRule, Policy, Rule, RuleDecision, evaluate, hardstop,
+    Capability, CapabilityProvenance, CapabilityProvenanceStatus, Decision, MatchedRule, evaluate,
     runtime::{Expedition, HomeLayout, default_policy_env, load_active_policy},
 };
 use serde::Serialize;
@@ -60,14 +60,16 @@ pub(crate) fn cmd_explain(
     trace: bool,
 ) -> Result<ExitCode> {
     use std::io::{BufRead, BufReader};
+    let verifying_key = layout.load_verifying_key()?;
     let file = std::fs::File::open(&layout.audit_log).context("opening audit log")?;
     let reader = BufReader::new(file);
-    for line in reader.lines() {
+    for (line_index, line) in reader.lines().enumerate() {
         let line = line?;
         let value: serde_json::Value = serde_json::from_str(&line)?;
         if value.get("id").and_then(|v| v.as_str()) != Some(id) {
             continue;
         }
+        verify_selected_record(&layout, &verifying_key, line_index + 1, id)?;
         if trace {
             if value.get("kind").and_then(|v| v.as_str()) == Some("event") {
                 let entry: AuditEventEntry = serde_json::from_value(value)?;
@@ -75,6 +77,7 @@ pub(crate) fn cmd_explain(
                     let report = ExplainEventTraceReport {
                         kind: "event",
                         entry,
+                        signature_verified: true,
                         trace_available: false,
                         reason: "policy traces are only available for audit decision entries",
                     };
@@ -114,6 +117,7 @@ pub(crate) fn cmd_explain(
 struct ExplainEventTraceReport {
     kind: &'static str,
     entry: AuditEventEntry,
+    signature_verified: bool,
     trace_available: bool,
     reason: &'static str,
 }
@@ -123,47 +127,29 @@ struct ExplainDecisionTraceReport {
     audit_id: String,
     timestamp: String,
     kind: &'static str,
+    audit_schema_version: u32,
+    signature_verified: bool,
     tool: String,
     input_hash: String,
     canonical_input: Option<serde_json::Value>,
     input_available: bool,
     input_note: &'static str,
-    capabilities: Vec<Capability>,
+    audited_capabilities: Vec<Capability>,
+    active_capabilities: Vec<Capability>,
     audited_decision: Decision,
-    audited_matched_rule: Option<MatchedRule>,
+    audited_primary_matched_rule: Option<MatchedRule>,
+    audited_capability_provenance: Option<Vec<CapabilityProvenance>>,
+    audited_provenance_note: &'static str,
     audit_policy_version: String,
     expedition: Option<String>,
     active_policy_version: String,
     active_decision: Decision,
-    active_matched_rule: Option<MatchedRule>,
+    active_primary_matched_rule: Option<MatchedRule>,
+    active_capability_provenance: Vec<CapabilityProvenance>,
+    primary_matched_rule_note: &'static str,
     policy_version_matches_audit: bool,
     decision_matches_audit: bool,
-    hard_stop: Option<HardStopTrace>,
-    rules: Vec<RuleTrace>,
-    shadowed_rules: Vec<RuleTrace>,
     fixture_hints: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct RuleTrace {
-    order: usize,
-    name: String,
-    file: String,
-    index: usize,
-    decision: RuleDecision,
-    required_scope: Option<String>,
-    hard_stop: bool,
-    reason: String,
-    matched_by_capabilities: bool,
-    evaluated: bool,
-    outcome: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct HardStopTrace {
-    name: String,
-    pattern: String,
-    capability: Capability,
 }
 
 fn build_decision_trace_report(
@@ -178,41 +164,41 @@ fn build_decision_trace_report(
     let policy = load_active_policy(layout, expedition.as_ref(), &env)
         .context("loading active policy for explain trace")?;
     let active_eval = evaluate(&entry.capabilities, &policy);
-    let hard_stop = hardstop::check(&entry.capabilities);
-    let hard_stop_trace = hard_stop.as_ref().map(|hit| HardStopTrace {
-        name: hit.name.to_string(),
-        pattern: hit.pattern.to_string(),
-        capability: hit.capability.clone(),
-    });
-    let rules = build_rule_trace(&policy, &entry.capabilities, hard_stop.is_some());
-    let shadowed_rules = rules
-        .iter()
-        .filter(|rule| rule.outcome == "shadowed")
-        .cloned()
-        .collect();
+    let audited_capability_provenance =
+        (entry.version >= 2).then(|| entry.capability_provenance.clone());
+    let audited_provenance_note = if audited_capability_provenance.is_some() {
+        "signed per-capability provenance from the audited decision"
+    } else {
+        "unavailable: audit schema v1 did not contain signed per-capability provenance"
+    };
 
     Ok(ExplainDecisionTraceReport {
         audit_id: entry.id.clone(),
         timestamp: entry.ts.clone(),
         kind: "decision",
+        audit_schema_version: entry.version,
+        signature_verified: true,
         tool: entry.tool.clone(),
         input_hash: entry.input_hash.clone(),
         canonical_input: None,
         input_available: false,
         input_note: "audit decision entries store input_hash and capabilities, not raw tool input",
-        capabilities: entry.capabilities.clone(),
+        audited_capabilities: entry.capabilities.clone(),
+        active_capabilities: active_eval.capabilities.clone(),
         audited_decision: entry.decision.clone(),
-        audited_matched_rule: entry.matched_rule.clone(),
+        audited_primary_matched_rule: entry.matched_rule.clone(),
+        audited_capability_provenance,
+        audited_provenance_note,
         audit_policy_version: entry.policy_version.clone(),
         expedition: entry.expedition.clone(),
         active_policy_version: active_eval.policy_version.clone(),
         active_decision: active_eval.decision.clone(),
-        active_matched_rule: active_eval.matched_rule.clone(),
+        active_primary_matched_rule: active_eval.matched_rule.clone(),
+        active_capability_provenance: active_eval.capability_provenance,
+        primary_matched_rule_note:
+            "primary compatibility summary only; per-capability provenance is authoritative",
         policy_version_matches_audit: entry.policy_version == active_eval.policy_version,
         decision_matches_audit: entry.decision == active_eval.decision,
-        hard_stop: hard_stop_trace,
-        rules,
-        shadowed_rules,
         fixture_hints: vec![
             "original tool input is not stored in the audit log; use `gommage policy snapshot --name <case>` with a captured ToolCall to create a fixture".to_string(),
             format!(
@@ -228,68 +214,34 @@ fn build_decision_trace_report(
     })
 }
 
-fn build_rule_trace(
-    policy: &Policy,
-    capabilities: &[Capability],
-    hard_stop: bool,
-) -> Vec<RuleTrace> {
-    let winning_index = if hard_stop {
-        None
-    } else {
-        policy
-            .rules
-            .iter()
-            .position(|rule| rule.r#match.matches(capabilities))
-    };
-
-    policy
-        .rules
-        .iter()
-        .enumerate()
-        .map(|(order, rule)| trace_rule(order, rule, capabilities, hard_stop, winning_index))
-        .collect()
-}
-
-fn trace_rule(
-    order: usize,
-    rule: &Rule,
-    capabilities: &[Capability],
-    hard_stop: bool,
-    winning_index: Option<usize>,
-) -> RuleTrace {
-    let matched_by_capabilities = rule.r#match.matches(capabilities);
-    let evaluated = !hard_stop && winning_index.is_none_or(|winner| order <= winner);
-    let outcome = if hard_stop {
-        "not_evaluated_hard_stop"
-    } else if winning_index == Some(order) {
-        "matched"
-    } else if evaluated {
-        "not_matched"
-    } else if matched_by_capabilities {
-        "shadowed"
-    } else {
-        "not_evaluated_after_match"
-    };
-
-    RuleTrace {
-        order,
-        name: rule.name.clone(),
-        file: path_display(&rule.source.file),
-        index: rule.source.index,
-        decision: rule.decision,
-        required_scope: rule.required_scope.clone(),
-        hard_stop: rule.hard_stop,
-        reason: rule.reason.clone(),
-        matched_by_capabilities,
-        evaluated,
-        outcome,
+fn verify_selected_record(
+    layout: &HomeLayout,
+    verifying_key: &ed25519_dalek::VerifyingKey,
+    line_number: usize,
+    id: &str,
+) -> Result<()> {
+    let report = gommage_audit::explain_log(&layout.audit_log, verifying_key)
+        .context("verifying selected audit record")?;
+    for anomaly in report.anomalies {
+        match anomaly {
+            Anomaly::MalformedEntry { line, error } if line == line_number => {
+                bail!("audit entry {id} at line {line} failed schema verification: {error}");
+            }
+            Anomaly::BadSignature { line, .. } if line == line_number => {
+                bail!("audit entry {id} at line {line} failed signature verification");
+            }
+            _ => {}
+        }
     }
+    Ok(())
 }
 
 fn print_decision_trace_report(report: &ExplainDecisionTraceReport) {
     println!("audit_id: {}", report.audit_id);
     println!("timestamp: {}", report.timestamp);
     println!("kind: decision");
+    println!("audit_schema_version: {}", report.audit_schema_version);
+    println!("signature_verified: {}", report.signature_verified);
     println!("tool: {}", report.tool);
     println!("input_hash: {}", report.input_hash);
     println!("input_available: {}", report.input_available);
@@ -309,60 +261,103 @@ fn print_decision_trace_report(report: &ExplainDecisionTraceReport) {
         decision_summary(&report.active_decision)
     );
     println!("decision_matches_audit: {}", report.decision_matches_audit);
-    if let Some(rule) = &report.audited_matched_rule {
+    println!(
+        "primary_matched_rule_note: {}",
+        report.primary_matched_rule_note
+    );
+    if let Some(rule) = &report.audited_primary_matched_rule {
         println!(
-            "audited_matched_rule: {} ({}:{})",
+            "audited_primary_matched_rule: {} ({}:{})",
             rule.name, rule.file, rule.index
         );
     } else {
-        println!("audited_matched_rule: <none>");
+        println!("audited_primary_matched_rule: <none>");
     }
-    if let Some(rule) = &report.active_matched_rule {
+    if let Some(rule) = &report.active_primary_matched_rule {
         println!(
-            "active_matched_rule: {} ({}:{})",
+            "active_primary_matched_rule: {} ({}:{})",
             rule.name, rule.file, rule.index
         );
     } else {
-        println!("active_matched_rule: <none>");
-    }
-    if let Some(hard_stop) = &report.hard_stop {
-        println!(
-            "hard_stop: {} pattern={} capability={}",
-            hard_stop.name, hard_stop.pattern, hard_stop.capability
-        );
-    } else {
-        println!("hard_stop: none");
+        println!("active_primary_matched_rule: <none>");
     }
     if let Some(expedition) = &report.expedition {
         println!("expedition: {expedition}");
     }
-    println!("capabilities:");
-    for cap in &report.capabilities {
+    println!("audited_capabilities:");
+    for cap in &report.audited_capabilities {
         println!("  - {}", cap.as_str());
     }
-    println!("rule_trace:");
-    for rule in &report.rules {
-        println!(
-            "  - #{} {} [{}] matched={} evaluated={} decision={:?}",
-            rule.order,
-            rule.name,
-            rule.outcome,
-            rule.matched_by_capabilities,
-            rule.evaluated,
-            rule.decision
-        );
+    println!("active_capabilities:");
+    for cap in &report.active_capabilities {
+        println!("  - {}", cap.as_str());
     }
-    if report.shadowed_rules.is_empty() {
-        println!("shadowed_rules: none");
-    } else {
-        println!("shadowed_rules:");
-        for rule in &report.shadowed_rules {
-            println!("  - #{} {} ({})", rule.order, rule.name, rule.file);
-        }
-    }
+    println!(
+        "audited_provenance_note: {}",
+        report.audited_provenance_note
+    );
+    print_capability_provenance(
+        "audited_capability_provenance",
+        report.audited_capability_provenance.as_deref(),
+    );
+    print_capability_provenance(
+        "active_capability_provenance",
+        Some(&report.active_capability_provenance),
+    );
     println!("fixture_hints:");
     for hint in &report.fixture_hints {
         println!("  - {hint}");
+    }
+}
+
+fn print_capability_provenance(label: &str, provenance: Option<&[CapabilityProvenance]>) {
+    let Some(provenance) = provenance else {
+        println!("{label}: unavailable");
+        return;
+    };
+    if provenance.is_empty() {
+        println!("{label}: none");
+        return;
+    }
+
+    println!("{label}:");
+    for capability in provenance {
+        let effective = capability
+            .effective_decision
+            .as_ref()
+            .map_or_else(|| "none".to_string(), decision_summary);
+        println!(
+            "  - capability={} status={} effective_decision={effective}",
+            capability.capability,
+            provenance_status(capability.status)
+        );
+        if capability.contributions.is_empty() {
+            println!("    contributions: none");
+        } else {
+            println!("    contributions:");
+            for contribution in &capability.contributions {
+                println!(
+                    "      - layer={} layer_index={} file_index={} rule={} ({}:{}) decision={}",
+                    contribution.layer,
+                    contribution.layer_index,
+                    contribution.file_index,
+                    contribution.rule.name,
+                    contribution.rule.file,
+                    contribution.rule.index,
+                    decision_summary(&contribution.decision)
+                );
+            }
+        }
+    }
+}
+
+const fn provenance_status(status: CapabilityProvenanceStatus) -> &'static str {
+    match status {
+        CapabilityProvenanceStatus::Resolved => "resolved",
+        CapabilityProvenanceStatus::Unresolved => "unresolved",
+        CapabilityProvenanceStatus::HardStop => "hard_stop",
+        CapabilityProvenanceStatus::SkippedDueToHardStop => "skipped_due_to_hard_stop",
+        CapabilityProvenanceStatus::PolicyBypassed => "policy_bypassed",
     }
 }
 
@@ -370,13 +365,18 @@ fn print_decision_explain(entry: &AuditEntry) -> Result<()> {
     println!("audit_id: {}", entry.id);
     println!("timestamp: {}", entry.ts);
     println!("kind: decision");
+    println!("audit_schema_version: {}", entry.version);
+    println!("signature_verified: true");
     println!("tool: {}", entry.tool);
     println!("input_hash: {}", entry.input_hash);
     println!("decision: {}", serde_json::to_string(&entry.decision)?);
     if let Some(rule) = &entry.matched_rule {
-        println!("matched_rule: {} ({}:{})", rule.name, rule.file, rule.index);
+        println!(
+            "primary_matched_rule: {} ({}:{}) [compatibility summary]",
+            rule.name, rule.file, rule.index
+        );
     } else {
-        println!("matched_rule: <none>");
+        println!("primary_matched_rule: <none> [compatibility summary]");
     }
     println!("policy_version: {}", entry.policy_version);
     if let Some(expedition) = &entry.expedition {
@@ -386,6 +386,14 @@ fn print_decision_explain(entry: &AuditEntry) -> Result<()> {
     for cap in &entry.capabilities {
         println!("  - {}", cap.as_str());
     }
+    if entry.version >= 2 {
+        print_capability_provenance(
+            "audited_capability_provenance",
+            Some(&entry.capability_provenance),
+        );
+    } else {
+        println!("audited_capability_provenance: unavailable (audit schema v1)");
+    }
     Ok(())
 }
 
@@ -393,6 +401,7 @@ fn print_event_explain(entry: &AuditEventEntry) -> Result<()> {
     println!("audit_id: {}", entry.id);
     println!("timestamp: {}", entry.ts);
     println!("kind: event");
+    println!("signature_verified: true");
     println!("event: {}", serde_json::to_string(&entry.event)?);
     Ok(())
 }

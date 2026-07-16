@@ -266,7 +266,7 @@ enum Cmd {
         id: String,
         #[arg(long)]
         json: bool,
-        /// Include current-policy rule-order trace and fixture-authoring hints.
+        /// Verify and compare signed audit provenance with the current policy.
         #[arg(long)]
         trace: bool,
     },

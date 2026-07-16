@@ -13,6 +13,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- `gommage explain` now verifies the selected audit record before presenting
+  it. Its `--trace` JSON reports signed audited and normalized active
+  per-capability/layer provenance, marks v1 provenance as unavailable, and
+  labels `matched_rule` as an aggregate compatibility summary. The misleading
+  synthetic global `rules` and `shadowed_rules` fields have been removed.
 - Policy evaluation now resolves every normalized capability independently,
   preserves first-match ordering only within one layer and capability, and
   combines layer contributions conservatively. A deny beats an unresolved

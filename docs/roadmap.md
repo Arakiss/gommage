@@ -90,8 +90,8 @@ Features:
     for decisions not covered by the active policy.
   - Never writes active policy without an explicit review/write flag.
 - `gommage explain --trace`
-  - Shows canonical tool call, emitted capabilities, evaluated rule order,
-    shadowed rules, picto matching, and fixture suggestions.
+  - Verifies the selected audit signature, compares signed historical and
+    current per-capability/layer provenance, and provides fixture suggestions.
 - `gommage policy lint --strict`
   - Detects unreachable rules, overbroad allows, duplicate denials, invalid
     picto scopes, mapper rules without fixtures, and capabilities no mapper can
@@ -100,8 +100,9 @@ Features:
 Current status:
 
 - Shipped: `replay`, `policy diff`, and `policy suggest --audit` have stable
-  JSON reports over historical audit capabilities; `explain --trace` and
-  `policy lint --strict` cover the first rule-order and strict authoring checks.
+  JSON reports over historical audit capabilities; `explain --trace` reports
+  signed compositional provenance and `policy lint --strict` covers the first
+  strict authoring checks.
 - Remaining: native-permission and captured-hook inputs for `policy suggest`,
   plus deeper strict-lint reachability checks.
 
