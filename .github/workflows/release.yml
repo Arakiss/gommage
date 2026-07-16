@@ -163,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          workflows=(ci.yml audit.yml codeql.yml)
+          workflows=(ci.yml audit.yml codeql.yml fuzz.yml)
 
           resolve_branch_head_sha() {
             local branch_head=""
