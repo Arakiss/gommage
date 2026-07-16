@@ -179,7 +179,7 @@ enum Cmd {
         /// Remove installed Codex and Claude Code skills.
         #[arg(long)]
         skills: bool,
-        /// Remove the Gommage home directory selected by --home / $GOMMAGE_HOME.
+        /// Purge known Gommage-owned files from --home / $GOMMAGE_HOME.
         #[arg(long = "purge-home", visible_alias = "home-data")]
         purge_home: bool,
         /// Select agent=all, daemon, binaries, skills, and purge-home.

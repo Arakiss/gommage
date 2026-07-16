@@ -194,5 +194,7 @@ gommage uninstall --all --dry-run
 
 `gommage uninstall --purge-home` requires `--yes` because the selected
 `GOMMAGE_HOME` contains the signing key, audit log, policies, local capability
-mappers, approvals, and pictos. Use `--purge-backups` only when a clean slate is
-intentional.
+mappers, approvals, and pictos. It removes only Gommage's known inventory and
+removes the home directory itself only when nothing unrecognized remains; it
+never recursively deletes the caller-selected root. Use `--purge-backups` only
+when a clean slate is intentional.

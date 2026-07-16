@@ -70,9 +70,9 @@ sed -n '1,200p' gommage-cachyos-claude-real/uninstall-dry-run.txt
 gommage uninstall --all --dry-run --daemon-manager systemd
 ```
 
-Do not remove real home data with `--purge-home --yes` unless the operator
-explicitly decided to delete `~/.gommage`, including its signing key and audit
-history.
+Do not purge real Gommage state with `--purge-home --yes` unless the operator
+explicitly decided to delete the known `~/.gommage` inventory, including its
+signing key and audit history. Unrecognized entries are preserved.
 
 ## macOS Path
 

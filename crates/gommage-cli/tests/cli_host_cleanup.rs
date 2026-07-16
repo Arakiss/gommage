@@ -699,6 +699,50 @@ fn uninstall_removes_selected_local_surfaces() {
 }
 
 #[test]
+fn uninstall_purge_home_preserves_unrecognized_entries() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    fs::create_dir_all(home.join("policy.d")).unwrap();
+    fs::create_dir_all(home.join("capabilities.d")).unwrap();
+    fs::write(home.join("key.ed25519"), [0_u8; 32]).unwrap();
+    fs::write(home.join("operator-notes.txt"), "preserve me\n").unwrap();
+
+    let output = gommage(&home)
+        .args(["uninstall", "--purge-home", "--yes"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("preserved home with unrecognized entries"));
+    assert!(home.join("operator-notes.txt").exists());
+    assert!(!home.join("key.ed25519").exists());
+    assert!(!home.join("policy.d").exists());
+    assert!(!home.join("capabilities.d").exists());
+}
+
+#[test]
+fn uninstall_rejects_unrecognized_custom_home() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("ordinary-data");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join("keep.txt"), "keep me\n").unwrap();
+
+    let output = gommage(&home)
+        .args(["uninstall", "--purge-home", "--yes"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not recognizably a Gommage home"));
+    assert!(home.join("keep.txt").exists());
+}
+
+#[test]
 fn uninstall_can_purge_known_backup_files_explicitly() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");

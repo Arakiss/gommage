@@ -60,6 +60,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Fixed
 
+- `gommage uninstall --purge-home` now validates the selected home and removes
+  only Gommage's known inventory. It rejects filesystem roots, the operator
+  home and its ancestors, symlinked roots, and unrecognized custom directories;
+  unknown entries are preserved instead of recursively deleting a
+  caller-selected path.
 - Remote `scp`, `rsync`, `curl` upload, and `wget` upload approval rules now
   cover their intrinsic local-read effects without widening the corresponding
   local-only commands.
