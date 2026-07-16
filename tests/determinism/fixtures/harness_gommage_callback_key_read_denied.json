@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-callback-key-read-denied",
+  "note": "The callback body operand must not turn the CLI into an alternate reader for its own signing key.",
+  "call": { "tool": "Bash", "input": { "command": "gommage approval callback --body ~/.gommage/key.ed25519 --signature x --timestamp t --signing-secret placeholder" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-private-state-read" }
+}

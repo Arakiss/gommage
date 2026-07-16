@@ -245,8 +245,8 @@ fn recovery_self_test_failures(layout: &HomeLayout, agents: &[AgentKind]) -> Res
                 "claude_settings_backup_inspection",
                 bash_call("cat ~/.claude/settings.json.gommage-bak-123"),
             ),
-            RecoveryCheck::allow(
-                "claude_settings_backup_restore",
+            RecoveryCheck::gommage(
+                "claude_settings_backup_restore_denied",
                 bash_call("cp ~/.claude/settings.json.gommage-bak-123 ~/.claude/settings.json"),
             ),
         ]);
@@ -300,6 +300,16 @@ impl RecoveryCheck {
             call,
             expectation: RecoveryExpectation::Gommage {
                 hard_stop: Some(true),
+            },
+        }
+    }
+
+    fn gommage(name: &'static str, call: ToolCall) -> Self {
+        Self {
+            name,
+            call,
+            expectation: RecoveryExpectation::Gommage {
+                hard_stop: Some(false),
             },
         }
     }

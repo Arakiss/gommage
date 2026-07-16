@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-systemctl-kill-asks",
+  "note": "Killing the Gommage systemd unit disables the live daemon and must use the semantic disable gate.",
+  "call": { "tool": "Bash", "input": { "command": "systemctl --user kill gommage-daemon.service" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.disable", "bind_input": true, "matched_rule": "gate-gommage-disable" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-launchctl-bootstrap-asks",
+  "note": "Bootstrapping the Gommage LaunchAgent changes the live decision authority and must use the semantic reconfiguration gate.",
+  "call": { "tool": "Bash", "input": { "command": "launchctl bootstrap gui/501 /Users/operator/Library/LaunchAgents/dev.gommage.daemon.plist" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.reconfigure", "bind_input": true, "matched_rule": "gate-gommage-reconfigure" }
+}

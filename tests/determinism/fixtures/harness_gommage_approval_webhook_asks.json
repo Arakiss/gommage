@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-approval-webhook-asks",
+  "note": "Delivering pending approval data to a caller-selected endpoint crosses the authorization workflow trust boundary.",
+  "call": { "tool": "Bash", "input": { "command": "gommage approval webhook --url https://approvals.example.test/hook" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.authorize", "bind_input": true, "matched_rule": "gate-gommage-authorize" }
+}

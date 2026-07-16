@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-policy-lint-key-read-denied",
+  "note": "Policy lint input mapping must not allow the signing key to be opened as a policy document.",
+  "call": { "tool": "Bash", "input": { "command": "gommage policy lint ~/.gommage/key.ed25519 --strict" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-private-state-read" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-replay-state-read-denied",
+  "note": "Replay input mapping must not allow the state database to be opened as an arbitrary audit source.",
+  "call": { "tool": "Bash", "input": { "command": "gommage replay --audit ~/.gommage/state.sqlite --policy ./policies" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-private-state-read" }
+}

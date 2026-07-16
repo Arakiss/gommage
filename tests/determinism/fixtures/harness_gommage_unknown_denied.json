@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-unknown-denied",
+  "note": "An unknown Gommage command cannot silently fall through to generic shell policy.",
+  "call": { "tool": "Bash", "input": { "command": "gommage future-admin-command" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

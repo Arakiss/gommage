@@ -2,5 +2,5 @@
   "name": "harness-gommage-quickstart-asks",
   "note": "Re-running quickstart mutates hooks, policy, context files, and optionally daemon service files. It must require an operator picto once Gommage is already active.",
   "call": { "tool": "Bash", "input": { "command": "gommage quickstart --agent codex --daemon" } },
-  "expected": { "kind": "ask_picto", "required_scope": "gommage.reconfigure" }
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.reconfigure", "bind_input": true }
 }
