@@ -60,6 +60,15 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Fixed
 
+- Picto v1 creation and verification now enforce one canonical signed-field
+  domain: non-empty IDs and scopes, control-free text bounded to 128-byte IDs,
+  512-byte scopes, and 4096-byte reasons,
+  whole-second UTC timestamps, bounded lifetimes, canonical input hashes, and
+  canonical signatures. Existing well-formed Pictos keep their original signed
+  bytes, while malformed rows fail closed instead of allowing an input-bound
+  grant to be reinterpreted as a scope-only grant by moving the hash into
+  `reason`. This does not change the separate Picto v1 limitation that mutable
+  `uses` and `status` are not signed.
 - Remote `scp`, `rsync`, `curl` upload, and `wget` upload approval rules now
   cover their intrinsic local-read effects without widening the corresponding
   local-only commands.

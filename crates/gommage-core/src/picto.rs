@@ -7,13 +7,24 @@
 //!
 //! Pictos are signed with the daemon's ed25519 key so that a foreign process
 //! cannot inject one via a tool-call payload.
+//!
+//! Picto v1 signs `id`, `scope`, `max_uses`, both timestamps, `reason`, and the
+//! optional `input_hash`. `uses` and `status` remain mutable store state and
+//! are not covered by that signature; binding them requires a transactional
+//! protocol upgrade, not a compatible v1 encoding repair.
 
 use crate::error::GommageError;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcOffset};
+
+const MAX_PICTO_TTL_SECONDS: i64 = 86_400;
+const MAX_PICTO_ID_BYTES: usize = 128;
+const MAX_PICTO_SCOPE_BYTES: usize = 512;
+const MAX_PICTO_REASON_BYTES: usize = 4 * 1024;
+const ED25519_SIGNATURE_B64_BYTES: usize = 86;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,7 +81,13 @@ pub enum PictoConsume {
 }
 
 impl Picto {
-    fn signing_payload_for_input_hash(&self, input_hash: Option<&str>) -> Vec<u8> {
+    /// Encode the legacy v1 signing payload after the caller has validated all
+    /// fields with [`Self::validate_signing_fields`].
+    ///
+    /// Keeping the byte format stable preserves well-formed Pictos already on
+    /// disk. The canonical field domain enforced at creation and verification
+    /// makes the newline separators unambiguous.
+    fn signing_payload_for_input_hash_unchecked(&self, input_hash: Option<&str>) -> Vec<u8> {
         let payload = format!(
             "{}\n{}\n{}\n{}\n{}\n{}",
             self.id,
@@ -84,6 +101,38 @@ impl Picto {
             Some(input_hash) => format!("{payload}\ninput_hash={input_hash}").into_bytes(),
             None => payload.into_bytes(),
         }
+    }
+
+    fn validate_signing_fields(&self, input_hash: Option<&str>) -> Result<(), String> {
+        validate_picto_text_field("id", &self.id, false, MAX_PICTO_ID_BYTES)?;
+        validate_picto_text_field("scope", &self.scope, false, MAX_PICTO_SCOPE_BYTES)?;
+        validate_picto_text_field("reason", &self.reason, true, MAX_PICTO_REASON_BYTES)?;
+
+        if self.max_uses == 0 {
+            return Err("max_uses must be greater than zero".to_string());
+        }
+        if self.created_at.offset() != UtcOffset::UTC
+            || self.ttl_expires_at.offset() != UtcOffset::UTC
+        {
+            return Err("timestamps must use UTC".to_string());
+        }
+        if self.created_at.nanosecond() != 0 || self.ttl_expires_at.nanosecond() != 0 {
+            return Err("timestamps must use whole seconds".to_string());
+        }
+        let lifetime = self
+            .ttl_expires_at
+            .unix_timestamp()
+            .checked_sub(self.created_at.unix_timestamp())
+            .ok_or_else(|| "picto lifetime is not representable".to_string())?;
+        if !(1..=MAX_PICTO_TTL_SECONDS).contains(&lifetime) {
+            return Err(format!(
+                "ttl must be between 1 and {MAX_PICTO_TTL_SECONDS} seconds"
+            ));
+        }
+        if input_hash.is_some_and(|hash| !is_canonical_input_hash(hash)) {
+            return Err("input_hash must be a canonical sha256 ToolCall hash".to_string());
+        }
+        Ok(())
     }
 
     /// Verify a legacy scope-only Picto signature.
@@ -103,16 +152,24 @@ impl Picto {
         input_hash: Option<&str>,
         vk: &VerifyingKey,
     ) -> Result<(), GommageError> {
-        if input_hash.is_some_and(|hash| !is_canonical_input_hash(hash)) {
+        self.validate_signing_fields(input_hash)
+            .map_err(|_| GommageError::BadSignature)?;
+        if self.signature_b64.len() != ED25519_SIGNATURE_B64_BYTES {
             return Err(GommageError::BadSignature);
         }
         let sig_bytes = base64_decode(&self.signature_b64)?;
+        if base64_encode(&sig_bytes) != self.signature_b64 {
+            return Err(GommageError::BadSignature);
+        }
         let sig_arr: [u8; 64] = sig_bytes
             .try_into()
             .map_err(|_| GommageError::BadSignature)?;
         let sig = Signature::from_bytes(&sig_arr);
-        vk.verify(&self.signing_payload_for_input_hash(input_hash), &sig)
-            .map_err(|_| GommageError::BadSignature)
+        vk.verify(
+            &self.signing_payload_for_input_hash_unchecked(input_hash),
+            &sig,
+        )
+        .map_err(|_| GommageError::BadSignature)
     }
 
     pub fn is_expired(&self, now: OffsetDateTime) -> bool {
@@ -275,18 +332,14 @@ impl PictoStore {
                 "max_uses must be greater than zero".to_string(),
             ));
         }
-        if !(1..=86_400).contains(&ttl_seconds) {
+        if !(1..=MAX_PICTO_TTL_SECONDS).contains(&ttl_seconds) {
             return Err(GommageError::InvalidPicto(
                 "ttl must be between 1 and 86400 seconds".to_string(),
             ));
         }
-        if input_hash.is_some_and(|hash| !is_canonical_input_hash(hash)) {
-            return Err(GommageError::InvalidPicto(
-                "input_hash must be a canonical sha256 ToolCall hash".to_string(),
-            ));
-        }
 
-        let now = OffsetDateTime::now_utc();
+        let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
+            .map_err(|error| GommageError::InvalidPicto(error.to_string()))?;
         let ttl_expires_at = now + time::Duration::seconds(ttl_seconds);
         let status = if require_confirmation {
             PictoStatus::PendingConfirmation
@@ -305,7 +358,10 @@ impl PictoStore {
             reason: reason.to_string(),
             signature_b64: String::new(),
         };
-        let sig = signing_key.sign(&picto.signing_payload_for_input_hash(input_hash));
+        picto
+            .validate_signing_fields(input_hash)
+            .map_err(GommageError::InvalidPicto)?;
+        let sig = signing_key.sign(&picto.signing_payload_for_input_hash_unchecked(input_hash));
         picto.signature_b64 = base64_encode(sig.to_bytes().as_slice());
 
         self.conn.execute(
@@ -660,10 +716,8 @@ fn row_to_picto(row: &rusqlite::Row<'_>) -> rusqlite::Result<Picto> {
         scope: row.get(1)?,
         max_uses: row.get(2)?,
         uses: row.get(3)?,
-        ttl_expires_at: OffsetDateTime::from_unix_timestamp(ttl)
-            .unwrap_or(OffsetDateTime::UNIX_EPOCH),
-        created_at: OffsetDateTime::from_unix_timestamp(created)
-            .unwrap_or(OffsetDateTime::UNIX_EPOCH),
+        ttl_expires_at: timestamp_from_sql(ttl, 4)?,
+        created_at: timestamp_from_sql(created, 5)?,
         status: parse_status(&status),
         reason: row.get(7)?,
         signature_b64: row.get(8)?,
@@ -675,6 +729,40 @@ fn row_to_stored_picto(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredPicto>
         picto: row_to_picto(row)?,
         input_hash: row.get(9)?,
     })
+}
+
+fn timestamp_from_sql(value: i64, column: usize) -> rusqlite::Result<OffsetDateTime> {
+    OffsetDateTime::from_unix_timestamp(value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
+    })
+}
+
+fn validate_picto_text_field(
+    field: &str,
+    value: &str,
+    allow_empty: bool,
+    max_bytes: usize,
+) -> Result<(), String> {
+    if !allow_empty && value.is_empty() {
+        return Err(format!("{field} must not be empty"));
+    }
+    if value.len() > max_bytes {
+        return Err(format!("{field} must not exceed {max_bytes} bytes"));
+    }
+    if let Some(character) = value
+        .chars()
+        .find(|character| character.is_control() || matches!(character, '\u{2028}' | '\u{2029}'))
+    {
+        return Err(format!(
+            "{field} contains forbidden control or line-separator character U+{:04X}",
+            character as u32
+        ));
+    }
+    Ok(())
 }
 
 fn is_canonical_input_hash(value: &str) -> bool {
@@ -731,6 +819,22 @@ mod tests {
 
     fn input_hash(byte: char) -> String {
         format!("sha256:{}", byte.to_string().repeat(64))
+    }
+
+    fn whole_second_now() -> OffsetDateTime {
+        OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp()).unwrap()
+    }
+
+    fn assert_invalid_picto(result: Result<Picto, GommageError>, field: &str) {
+        match result {
+            Err(GommageError::InvalidPicto(message)) => {
+                assert!(
+                    message.contains(field),
+                    "expected {field:?} in validation error, got {message:?}"
+                );
+            }
+            other => panic!("expected InvalidPicto for {field}, got {other:?}"),
+        }
     }
 
     #[test]
@@ -919,9 +1023,185 @@ mod tests {
         let sk = key();
         let picto = store.create("p1", "any", 1, 60, "r", &sk, false).unwrap();
         assert!(picto.verify(&sk.verifying_key()).is_ok());
+        assert_eq!(picto.created_at.nanosecond(), 0);
+        assert_eq!(picto.ttl_expires_at.nanosecond(), 0);
 
         let wrong = SigningKey::generate(&mut OsRng);
         assert!(picto.verify(&wrong.verifying_key()).is_err());
+    }
+
+    #[test]
+    fn signature_encoding_must_be_canonical() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        let mut picto = store.create("p1", "scope", 1, 60, "r", &sk, false).unwrap();
+        picto.signature_b64.push('=');
+
+        assert!(matches!(
+            picto.verify(&sk.verifying_key()),
+            Err(GommageError::BadSignature)
+        ));
+
+        store
+            .conn
+            .execute(
+                "UPDATE pictos SET signature_b64 = ?1 WHERE id = 'p1'",
+                params![picto.signature_b64],
+            )
+            .unwrap();
+        assert!(matches!(
+            store
+                .find_verified_match("scope", OffsetDateTime::now_utc(), &sk.verifying_key())
+                .unwrap(),
+            PictoLookup::BadSignature { .. }
+        ));
+    }
+
+    #[test]
+    fn creation_rejects_ambiguous_or_empty_signed_text_fields() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+
+        assert_invalid_picto(store.create("", "scope", 1, 60, "r", &sk, false), "id");
+        assert_invalid_picto(store.create("p1", "", 1, 60, "r", &sk, false), "scope");
+        assert_invalid_picto(
+            store.create("p1\nother", "scope", 1, 60, "r", &sk, false),
+            "id",
+        );
+        assert_invalid_picto(
+            store.create("p2", "scope\radmin", 1, 60, "r", &sk, false),
+            "scope",
+        );
+        assert_invalid_picto(
+            store.create("p3", "scope", 1, 60, "tab\treason", &sk, false),
+            "reason",
+        );
+        assert_invalid_picto(
+            store.create("p4", "scope", 1, 60, "nul\0reason", &sk, false),
+            "reason",
+        );
+        assert_invalid_picto(
+            store.create("p5", "scope", 1, 60, "unicode\u{2028}separator", &sk, false),
+            "reason",
+        );
+        assert_invalid_picto(
+            store.create_for_input(
+                "p6",
+                "scope",
+                &format!("SHA256:{}", "a".repeat(64)),
+                1,
+                60,
+                "r",
+                &sk,
+                false,
+            ),
+            "input_hash",
+        );
+        assert_invalid_picto(
+            store.create("p7", "scope", 0, 60, "r", &sk, false),
+            "max_uses",
+        );
+        assert_invalid_picto(store.create("p8", "scope", 1, 0, "r", &sk, false), "ttl");
+        assert_invalid_picto(
+            store.create("p9", "scope", 1, MAX_PICTO_TTL_SECONDS + 1, "r", &sk, false),
+            "ttl",
+        );
+        assert!(store.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn signed_text_field_byte_limits_are_exact() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        let picto = store
+            .create(
+                &"i".repeat(MAX_PICTO_ID_BYTES),
+                &"s".repeat(MAX_PICTO_SCOPE_BYTES),
+                1,
+                60,
+                &"r".repeat(MAX_PICTO_REASON_BYTES),
+                &sk,
+                false,
+            )
+            .unwrap();
+        picto.verify(&sk.verifying_key()).unwrap();
+
+        let mut legacy_oversized = picto.clone();
+        legacy_oversized.id.push('i');
+        legacy_oversized.signature_b64 = base64_encode(
+            &sk.sign(&legacy_oversized.signing_payload_for_input_hash_unchecked(None))
+                .to_bytes(),
+        );
+        assert!(matches!(
+            legacy_oversized.verify(&sk.verifying_key()),
+            Err(GommageError::BadSignature)
+        ));
+
+        assert_invalid_picto(
+            store.create(
+                &"i".repeat(MAX_PICTO_ID_BYTES + 1),
+                "scope",
+                1,
+                60,
+                "r",
+                &sk,
+                false,
+            ),
+            "id",
+        );
+        assert_invalid_picto(
+            store.create(
+                "scope-overflow",
+                &"s".repeat(MAX_PICTO_SCOPE_BYTES + 1),
+                1,
+                60,
+                "r",
+                &sk,
+                false,
+            ),
+            "scope",
+        );
+        assert_invalid_picto(
+            store.create(
+                "reason-overflow",
+                "scope",
+                1,
+                60,
+                &"r".repeat(MAX_PICTO_REASON_BYTES + 1),
+                &sk,
+                false,
+            ),
+            "reason",
+        );
+
+        // The contract is byte-bounded, not character-count bounded.
+        let multibyte_id = "é".repeat((MAX_PICTO_ID_BYTES / 2) + 1);
+        assert!(multibyte_id.chars().count() < MAX_PICTO_ID_BYTES);
+        assert!(multibyte_id.len() > MAX_PICTO_ID_BYTES);
+        assert_invalid_picto(
+            store.create(&multibyte_id, "scope", 1, 60, "r", &sk, false),
+            "id",
+        );
+    }
+
+    #[test]
+    fn verification_rejects_noncanonical_timestamp_representation() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        let picto = store.create("p1", "scope", 1, 60, "r", &sk, false).unwrap();
+        let mut subsecond = picto.clone();
+        subsecond.created_at = subsecond.created_at.replace_nanosecond(1).unwrap();
+
+        // The legacy encoder ignored subseconds. Verification must reject the
+        // non-canonical representation even though the signature bytes match.
+        assert_eq!(
+            picto.signing_payload_for_input_hash_unchecked(None),
+            subsecond.signing_payload_for_input_hash_unchecked(None)
+        );
+        assert!(matches!(
+            subsecond.verify(&sk.verifying_key()),
+            Err(GommageError::BadSignature)
+        ));
     }
 
     #[test]
@@ -1028,6 +1308,153 @@ mod tests {
                 .unwrap(),
             PictoLookup::BadSignature { .. }
         ));
+    }
+
+    #[test]
+    fn input_binding_cannot_be_reinterpreted_as_scope_only_reason_text() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        let approved_input = input_hash('a');
+        let reason = "reviewed exact deployment";
+        let original = store
+            .create_for_input(
+                "p1",
+                "deploy.production",
+                &approved_input,
+                1,
+                600,
+                reason,
+                &sk,
+                false,
+            )
+            .unwrap();
+        let signed_input_bound_payload =
+            original.signing_payload_for_input_hash_unchecked(Some(&approved_input));
+
+        // Under the legacy newline-delimited encoding, moving the input hash
+        // into `reason` produced the exact same signed bytes while changing an
+        // input-bound grant into a scope-only grant.
+        let smuggled_reason = format!("{reason}\ninput_hash={approved_input}");
+        store
+            .conn
+            .execute(
+                "UPDATE pictos SET reason = ?1, input_hash = NULL WHERE id = 'p1'",
+                params![smuggled_reason],
+            )
+            .unwrap();
+        let reinterpreted = store
+            .conn
+            .query_row(
+                r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash
+                   FROM pictos WHERE id = 'p1'"#,
+                [],
+                row_to_stored_picto,
+            )
+            .unwrap();
+        assert_eq!(reinterpreted.input_hash, None);
+        assert_eq!(
+            signed_input_bound_payload,
+            reinterpreted
+                .picto
+                .signing_payload_for_input_hash_unchecked(None)
+        );
+
+        assert!(matches!(
+            store
+                .find_verified_match(
+                    "deploy.production",
+                    OffsetDateTime::now_utc(),
+                    &sk.verifying_key(),
+                )
+                .unwrap(),
+            PictoLookup::BadSignature { .. }
+        ));
+        assert!(matches!(
+            store
+                .consume_verified("p1", OffsetDateTime::now_utc(), &sk.verifying_key())
+                .unwrap(),
+            PictoConsume::BadSignature { .. }
+        ));
+        assert_eq!(store.get("p1").unwrap().unwrap().uses, 0);
+    }
+
+    #[test]
+    fn legacy_id_scope_boundary_collision_is_rejected_from_existing_rows() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        let created_at = whole_second_now();
+        let ttl_expires_at = created_at + time::Duration::seconds(600);
+        let mut originally_signed = Picto {
+            id: "p1".to_string(),
+            scope: "deploy\n1".to_string(),
+            max_uses: 2,
+            uses: 0,
+            ttl_expires_at,
+            created_at,
+            status: PictoStatus::Active,
+            reason: "legacy".to_string(),
+            signature_b64: String::new(),
+        };
+        let signed_bytes = originally_signed.signing_payload_for_input_hash_unchecked(None);
+        originally_signed.signature_b64 = base64_encode(&sk.sign(&signed_bytes).to_bytes());
+
+        let mut reinterpreted = originally_signed.clone();
+        reinterpreted.id = "p1\ndeploy".to_string();
+        reinterpreted.scope = "1".to_string();
+        assert_eq!(
+            signed_bytes,
+            reinterpreted.signing_payload_for_input_hash_unchecked(None)
+        );
+
+        store
+            .conn
+            .execute(
+                r#"INSERT INTO pictos
+                   (id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash)
+                   VALUES (?1, ?2, ?3, 0, ?4, ?5, 'active', ?6, ?7, NULL)"#,
+                params![
+                    reinterpreted.id,
+                    reinterpreted.scope,
+                    reinterpreted.max_uses,
+                    reinterpreted.ttl_expires_at.unix_timestamp(),
+                    reinterpreted.created_at.unix_timestamp(),
+                    reinterpreted.reason,
+                    reinterpreted.signature_b64,
+                ],
+            )
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .find_verified_match("1", OffsetDateTime::now_utc(), &sk.verifying_key(),)
+                .unwrap(),
+            PictoLookup::BadSignature { .. }
+        ));
+    }
+
+    #[test]
+    fn out_of_range_timestamp_in_existing_row_fails_closed() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        store.create("p1", "scope", 1, 60, "r", &sk, false).unwrap();
+        store
+            .conn
+            .execute(
+                "UPDATE pictos SET ttl_expires_at = ?1 WHERE id = 'p1'",
+                params![i64::MAX],
+            )
+            .unwrap();
+
+        assert!(
+            store
+                .find_verified_match("scope", OffsetDateTime::now_utc(), &sk.verifying_key())
+                .is_err()
+        );
+        assert!(
+            store
+                .consume_verified("p1", OffsetDateTime::now_utc(), &sk.verifying_key())
+                .is_err()
+        );
     }
 
     #[test]
