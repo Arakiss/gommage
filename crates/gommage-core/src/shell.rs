@@ -130,6 +130,13 @@ pub(crate) enum GitPushEffect {
     Network,
 }
 
+/// A GitHub pull-request merge bound to one canonical repository and PR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum GhPrMergeEffect {
+    Merge(String),
+    Admin(String),
+}
+
 /// Security-sensitive mutations exposed by the Gommage operator CLI.
 ///
 /// The operation classes are deliberately closed and payload-free. A selected
@@ -3167,6 +3174,337 @@ fn add_synthetic_path(
     add_path_effect(&word, cwd, kind, out);
 }
 
+/// Parse `gh pr merge` into a repository-and-PR-bound effect.
+///
+/// Repository context is accepted only when it is explicit in argv or carried
+/// by a full pull-request URL. The analyzer deliberately does not consult the
+/// process environment, Git remotes, the current directory, or the network.
+pub(crate) fn gh_pr_merge_effects(analysis: &ShellAnalysis) -> EffectSet<GhPrMergeEffect> {
+    let mut out = EffectSet::default();
+    for command in &analysis.commands {
+        if command.effective_head() == Ok("gh") {
+            parse_gh_pr_merge(command.effective_args(), &mut out);
+        }
+    }
+    out
+}
+
+fn parse_gh_pr_merge(args: &[ShellWord], out: &mut EffectSet<GhPrMergeEffect>) {
+    let mut residual = Vec::with_capacity(args.len());
+    let mut repository = None;
+    let mut repository_error = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        let word = &args[index];
+        match word.static_value() {
+            Ok("-R" | "--repo") => {
+                let Some(value) = args.get(index + 1) else {
+                    repository_error = Some("missing-gh-pr-merge-repository");
+                    index += 1;
+                    continue;
+                };
+                match value.static_value() {
+                    Ok(value) => merge_gh_repository(
+                        &mut repository,
+                        canonical_gh_repository(value),
+                        &mut repository_error,
+                    ),
+                    Err(_) => repository_error = Some("dynamic-gh-pr-merge-repository"),
+                }
+                index += 2;
+            }
+            Ok(value) if value.starts_with("--repo=") => {
+                let value = &value["--repo=".len()..];
+                merge_gh_repository(
+                    &mut repository,
+                    canonical_gh_repository(value),
+                    &mut repository_error,
+                );
+                index += 1;
+            }
+            Ok(value) if value.starts_with("-R") && value.len() > 2 => {
+                merge_gh_repository(
+                    &mut repository,
+                    canonical_gh_repository(&value[2..]),
+                    &mut repository_error,
+                );
+                index += 1;
+            }
+            Err(_)
+                if word.raw.starts_with("--repo=")
+                    || (word.raw.starts_with("-R") && word.raw.len() > 2) =>
+            {
+                repository_error = Some("dynamic-gh-pr-merge-repository");
+                index += 1;
+            }
+            _ => {
+                residual.push(word);
+                index += 1;
+            }
+        }
+    }
+
+    let Some(pr_word) = residual.first() else {
+        return;
+    };
+    match pr_word.static_value() {
+        Ok("pr") => {}
+        Err(_) if residual.get(1).and_then(|word| word.static_value().ok()) == Some("merge") => {
+            out.ambiguity("dynamic-gh-command");
+            return;
+        }
+        _ => return,
+    }
+    match residual.get(1).map(|word| word.static_value()) {
+        Some(Ok("merge")) => {}
+        Some(Err(_)) => {
+            out.ambiguity("dynamic-gh-pr-command");
+            return;
+        }
+        _ => return,
+    }
+
+    if let Some(reason) = repository_error {
+        out.ambiguity(reason);
+        return;
+    }
+
+    let mut admin = false;
+    let mut target: Option<&ShellWord> = None;
+    let mut index = 2;
+    while index < residual.len() {
+        let word = residual[index];
+        match word.static_value() {
+            Ok("--admin") => {
+                admin = true;
+                index += 1;
+            }
+            Ok(value) if value.starts_with("--admin=") => {
+                match &value["--admin=".len()..] {
+                    "true" => admin = true,
+                    "false" => admin = false,
+                    _ => {
+                        out.ambiguity("invalid-gh-pr-merge-admin-value");
+                        return;
+                    }
+                }
+                index += 1;
+            }
+            Ok(
+                "--auto" | "-d" | "--delete-branch" | "--disable-auto" | "-m" | "--merge" | "-r"
+                | "--rebase" | "-s" | "--squash",
+            ) => index += 1,
+            Ok(value)
+                if [
+                    "--auto=",
+                    "--delete-branch=",
+                    "--disable-auto=",
+                    "--merge=",
+                    "--rebase=",
+                    "--squash=",
+                ]
+                .iter()
+                .any(|prefix| value.starts_with(prefix)) =>
+            {
+                let Some((_, boolean)) = value.split_once('=') else {
+                    unreachable!("matched option prefix contains equals")
+                };
+                if !matches!(boolean, "true" | "false") {
+                    out.ambiguity("invalid-gh-pr-merge-boolean-value");
+                    return;
+                }
+                index += 1;
+            }
+            Ok(
+                "-A"
+                | "--author-email"
+                | "-b"
+                | "--body"
+                | "-F"
+                | "--body-file"
+                | "--match-head-commit"
+                | "-t"
+                | "--subject",
+            ) => {
+                if residual.get(index + 1).is_none() {
+                    out.ambiguity("missing-gh-pr-merge-option-value");
+                    return;
+                }
+                index += 2;
+            }
+            Ok(value)
+                if [
+                    "--author-email=",
+                    "--body=",
+                    "--body-file=",
+                    "--match-head-commit=",
+                    "--subject=",
+                ]
+                .iter()
+                .any(|prefix| value.starts_with(prefix)) =>
+            {
+                index += 1;
+            }
+            Ok(value)
+                if ["-A", "-b", "-F", "-t"]
+                    .iter()
+                    .any(|prefix| value.starts_with(prefix) && value.len() > prefix.len()) =>
+            {
+                index += 1;
+            }
+            Err(_)
+                if [
+                    "--author-email=",
+                    "--body=",
+                    "--body-file=",
+                    "--match-head-commit=",
+                    "--subject=",
+                    "-A",
+                    "-b",
+                    "-F",
+                    "-t",
+                ]
+                .iter()
+                .any(|prefix| word.raw.starts_with(prefix) && word.raw.len() > prefix.len()) =>
+            {
+                index += 1;
+            }
+            Ok("--help") => return,
+            Ok(value) if value.starts_with('-') => {
+                out.ambiguity("unknown-gh-pr-merge-option");
+                return;
+            }
+            Ok(_) | Err(_) => {
+                if target.replace(word).is_some() {
+                    out.ambiguity("multiple-gh-pr-merge-targets");
+                    return;
+                }
+                index += 1;
+            }
+        }
+    }
+
+    let Some(target) = target else {
+        out.ambiguity("missing-gh-pr-merge-target");
+        return;
+    };
+    let Ok(target) = target.static_value() else {
+        out.ambiguity("dynamic-gh-pr-merge-target");
+        return;
+    };
+    let identity = match canonical_gh_pr_url(target) {
+        Ok(Some((url_repository, number))) => {
+            if repository
+                .as_ref()
+                .is_some_and(|selected| selected != &url_repository)
+            {
+                out.ambiguity("conflicting-gh-pr-merge-repository");
+                return;
+            }
+            format!("{url_repository}#{number}")
+        }
+        Ok(None) => {
+            let Some(number) = canonical_gh_pr_number(target) else {
+                out.ambiguity("unsupported-gh-pr-merge-target");
+                return;
+            };
+            let Some(repository) = repository else {
+                out.ambiguity("missing-gh-pr-merge-repository");
+                return;
+            };
+            format!("{repository}#{number}")
+        }
+        Err(reason) => {
+            out.ambiguity(reason);
+            return;
+        }
+    };
+
+    out.push(GhPrMergeEffect::Merge(identity.clone()));
+    if admin {
+        out.push(GhPrMergeEffect::Admin(identity));
+    }
+}
+
+fn merge_gh_repository(
+    selected: &mut Option<String>,
+    candidate: Result<String, Ambiguity>,
+    error: &mut Option<Ambiguity>,
+) {
+    let Ok(candidate) = candidate else {
+        *error = Some("invalid-gh-pr-merge-repository");
+        return;
+    };
+    match selected {
+        Some(existing) if existing != &candidate => {
+            *error = Some("conflicting-gh-pr-merge-repository")
+        }
+        Some(_) => {}
+        None => *selected = Some(candidate),
+    }
+}
+
+fn canonical_gh_repository(value: &str) -> Result<String, Ambiguity> {
+    let parts: Vec<&str> = value.split('/').collect();
+    let (host, owner, repository) = match parts.as_slice() {
+        [owner, repository] => ("github.com", *owner, *repository),
+        [host, owner, repository] => (*host, *owner, *repository),
+        _ => return Err("invalid-gh-pr-merge-repository"),
+    };
+    if !valid_gh_host(host)
+        || !valid_gh_repository_component(owner)
+        || !valid_gh_repository_component(repository)
+    {
+        return Err("invalid-gh-pr-merge-repository");
+    }
+    Ok(format!(
+        "{}/{}/{}",
+        host.to_ascii_lowercase(),
+        owner.to_ascii_lowercase(),
+        repository.to_ascii_lowercase()
+    ))
+}
+
+fn canonical_gh_pr_url(value: &str) -> Result<Option<(String, u64)>, Ambiguity> {
+    let Some(rest) = value.strip_prefix("https://") else {
+        return if value.contains("://") {
+            Err("invalid-gh-pr-merge-url")
+        } else {
+            Ok(None)
+        };
+    };
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    let parts: Vec<&str> = rest.split('/').collect();
+    let [host, owner, repository, "pull", number] = parts.as_slice() else {
+        return Err("invalid-gh-pr-merge-url");
+    };
+    let repository = canonical_gh_repository(&format!("{host}/{owner}/{repository}"))?;
+    let Some(number) = canonical_gh_pr_number(number) else {
+        return Err("invalid-gh-pr-merge-url");
+    };
+    Ok(Some((repository, number)))
+}
+
+fn canonical_gh_pr_number(value: &str) -> Option<u64> {
+    let number = value.parse::<u64>().ok()?;
+    (number > 0).then_some(number)
+}
+
+fn valid_gh_host(value: &str) -> bool {
+    !matches!(value, "" | "." | "..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':'))
+}
+
+fn valid_gh_repository_component(value: &str) -> bool {
+    !matches!(value, "" | "." | "..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
 /// Parse Git push destination semantics from AST-backed argv.
 pub(crate) fn git_push_effects(analysis: &ShellAnalysis) -> EffectSet<GitPushEffect> {
     let mut out = EffectSet::default();
@@ -3652,6 +3990,73 @@ mod tests {
                 .effects
                 .contains(&GitPushEffect::Destination("refs/tags/v1".into()))
         );
+    }
+
+    #[test]
+    fn gh_pr_merge_identity_is_stable_across_supported_repo_positions() {
+        let expected = GhPrMergeEffect::Merge("github.com/arakiss/galdr#79".into());
+        for command in [
+            "gh pr merge 79 --repo Arakiss/galdr",
+            "gh pr --repo Arakiss/galdr merge 79",
+            "gh -R Arakiss/galdr pr merge 79",
+            "gh pr merge -RArakiss/galdr 79",
+            "gh pr merge --repo=Arakiss/galdr 079",
+            "gh pr merge https://github.com/Arakiss/galdr/pull/79",
+        ] {
+            let effects = gh_pr_merge_effects(&analyze(command));
+            assert_eq!(effects.effects, [expected.clone()], "{command}");
+            assert!(effects.ambiguities.is_empty(), "{command}: {effects:?}");
+        }
+    }
+
+    #[test]
+    fn gh_pr_merge_admin_boolean_is_not_presence_only() {
+        let normal = gh_pr_merge_effects(&analyze(
+            "gh pr merge 79 -R Arakiss/galdr --admin=false --squash",
+        ));
+        assert_eq!(
+            normal.effects,
+            [GhPrMergeEffect::Merge("github.com/arakiss/galdr#79".into())]
+        );
+
+        let admin = gh_pr_merge_effects(&analyze(
+            "gh pr merge 79 -R Arakiss/galdr --admin=true --body \"$BODY\"",
+        ));
+        assert_eq!(
+            admin.effects,
+            [
+                GhPrMergeEffect::Merge("github.com/arakiss/galdr#79".into()),
+                GhPrMergeEffect::Admin("github.com/arakiss/galdr#79".into()),
+            ]
+        );
+        assert!(admin.ambiguities.is_empty(), "{admin:?}");
+    }
+
+    #[test]
+    fn gh_pr_merge_ambiguous_authority_never_emits_a_target() {
+        for (command, reason) in [
+            (
+                "gh pr merge \"$PR\" --repo Arakiss/galdr",
+                "dynamic-gh-pr-merge-target",
+            ),
+            (
+                "gh pr merge 79 --repo \"$REPO\"",
+                "dynamic-gh-pr-merge-repository",
+            ),
+            ("gh pr merge 79", "missing-gh-pr-merge-repository"),
+            (
+                "gh pr merge current-branch --repo Arakiss/galdr",
+                "unsupported-gh-pr-merge-target",
+            ),
+            (
+                "gh pr merge https://github.com/Arakiss/galdr/pull/79 -R Arakiss/gommage",
+                "conflicting-gh-pr-merge-repository",
+            ),
+        ] {
+            let effects = gh_pr_merge_effects(&analyze(command));
+            assert!(effects.effects.is_empty(), "{command}: {effects:?}");
+            assert_eq!(effects.ambiguities, [reason], "{command}: {effects:?}");
+        }
     }
 
     #[test]

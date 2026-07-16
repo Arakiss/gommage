@@ -1,0 +1,5 @@
+{
+  "name": "gh-pr-merge-exact-url-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge https://github.com/Arakiss/galdr/pull/79 --squash --delete-branch" } },
+  "expected": { "kind": "allow", "matched_rule": "allow-gh-pr-merge" }
+}

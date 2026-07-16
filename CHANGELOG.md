@@ -86,6 +86,12 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Fixed
 
+- GitHub pull-request merge effects now bind the canonical host, repository,
+  and PR number from an explicit `-R` / `--repo` selector or exact PR URL.
+  Dynamic targets, ambient `GH_REPO`, current-directory inference, conflicting
+  repositories, and branch-name targets fail closed. Administrative merges are
+  input-bound, and `--admin=false` no longer requests administrative authority.
+  Numeric merge targets without an explicit repository must add `--repo`.
 - `gommage uninstall --purge-home` now validates the selected home and removes
   only Gommage's known inventory. It rejects filesystem roots, the operator
   home and its ancestors, symlinked roots, and unrecognized custom directories;

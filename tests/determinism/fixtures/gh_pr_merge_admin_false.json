@@ -1,0 +1,5 @@
+{
+  "name": "gh-pr-merge-admin-false-remains-a-normal-merge",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 79 --repo Arakiss/galdr --squash --admin=false" } },
+  "expected": { "kind": "allow", "matched_rule": "allow-gh-pr-merge" }
+}

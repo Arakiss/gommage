@@ -322,6 +322,21 @@ fn typed_shell_capabilities(call: &ToolCall) -> Vec<Capability> {
         emit(format!("proc.exec.ambiguous:{reason}"));
     }
 
+    let github = crate::shell::gh_pr_merge_effects(&analysis);
+    for effect in github.effects {
+        emit(match effect {
+            crate::shell::GhPrMergeEffect::Merge(identity) => {
+                format!("gh.pr.merge:{identity}")
+            }
+            crate::shell::GhPrMergeEffect::Admin(identity) => {
+                format!("gh.pr.merge.admin:{identity}")
+            }
+        });
+    }
+    for reason in &github.ambiguities {
+        emit(format!("proc.exec.ambiguous:{reason}"));
+    }
+
     let administration = crate::shell::gommage_admin_effects(&analysis, cwd);
     for effect in administration.effects {
         emit(match effect {
@@ -1462,6 +1477,61 @@ mod tests {
                 || cap.contains("refs/heads/2>&1")
                 || cap.contains("refs/heads/--repo")
         }));
+    }
+
+    #[test]
+    fn typed_gh_pr_merges_bind_repository_pr_and_admin_state() {
+        let mapper = typed_mapper();
+        for command in [
+            "gh pr merge 79 --repo Arakiss/galdr",
+            "gh pr --repo Arakiss/galdr merge 79",
+            "gh -R Arakiss/galdr pr merge 79",
+            "gh pr merge -RArakiss/galdr 79",
+            "gh pr merge https://github.com/Arakiss/galdr/pull/79",
+        ] {
+            let caps = caps_of(&mapper, command);
+            assert!(
+                caps.iter()
+                    .any(|cap| cap == "gh.pr.merge:github.com/arakiss/galdr#79"),
+                "{command}: {caps:?}"
+            );
+            assert!(
+                !caps.iter().any(|cap| cap.starts_with("gh.pr.merge.admin:")),
+                "{command}: {caps:?}"
+            );
+        }
+
+        let admin = caps_of(&mapper, "gh pr merge 79 -R Arakiss/galdr --admin --squash");
+        assert!(
+            admin
+                .iter()
+                .any(|cap| cap == "gh.pr.merge.admin:github.com/arakiss/galdr#79"),
+            "{admin:?}"
+        );
+    }
+
+    #[test]
+    fn typed_gh_pr_merges_fail_closed_without_static_identity() {
+        let mapper = typed_mapper();
+        for command in [
+            "gh pr merge 79",
+            "GH_REPO=Arakiss/galdr gh pr merge 79",
+            "gh pr merge \"$PR\" -R Arakiss/galdr",
+            "gh pr merge 79 -R \"$REPO\"",
+            "gh pr merge branch-name -R Arakiss/galdr",
+            "gh pr merge https://github.com/Arakiss/galdr/pull/79 -R Arakiss/gommage",
+        ] {
+            let caps = caps_of(&mapper, command);
+            assert!(
+                caps.iter()
+                    .any(|cap| cap.starts_with("proc.exec.ambiguous:")),
+                "{command}: {caps:?}"
+            );
+            assert!(
+                !caps.iter().any(|cap| cap.starts_with("gh.pr.merge:")),
+                "{command}: {caps:?}"
+            );
+        }
     }
 
     #[test]

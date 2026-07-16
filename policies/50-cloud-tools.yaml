@@ -140,19 +140,20 @@
 - name: gate-gh-pr-merge-admin
   decision: ask_picto
   required_scope: "gh.pr.merge.admin"
+  bind_input: true
   match:
     all_capability:
-      - "gh.pr.merge.admin:<pr>"
-      - "gh.pr.merge:<pr>"
-      - "proc.exec:**gh pr merge**"
+      - "gh.pr.merge.admin:*"
+      - "gh.pr.merge:*"
+      - "proc.exec:*"
   reason: "administrative PR merges bypass branch protection — picto required"
 
 - name: allow-gh-pr-merge
   decision: allow
   match:
     all_capability:
-      - "gh.pr.merge:<pr>"
-      - "proc.exec:**gh pr merge**"
+      - "gh.pr.merge:*"
+      - "proc.exec:*"
   reason: "routine PR merges rely on repository branch protection and required checks"
 
 - name: gate-gh-release-create

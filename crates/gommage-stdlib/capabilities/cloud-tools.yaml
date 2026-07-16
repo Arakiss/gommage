@@ -115,20 +115,8 @@
     - "aws.read:<any>"
 
 # --- gh (GitHub CLI) -------------------------------------------------------
-- name: bash-gh-pr-merge-admin
-  tool: Bash
-  match_input:
-    command: "^\\s*gh\\s+pr\\s+merge\\b.*\\s--admin(?:[=\\s]|$)"
-  emit:
-    - "gh.pr.merge.admin:<pr>"
-
-- name: bash-gh-pr-merge
-  tool: Bash
-  match_input:
-    command: "^\\s*gh\\s+pr\\s+merge\\b"
-  emit:
-    - "gh.pr.merge:<pr>"
-
+# PR merge effects are emitted by the typed Bash analyzer. Repository and PR
+# identity must be static, so a mapper regex cannot safely reconstruct them.
 - name: bash-gh-release-create
   tool: Bash
   match_input:

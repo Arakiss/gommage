@@ -165,6 +165,26 @@ expansions, resolve aliases or sourced functions, or reconstruct generated argv
 from commands such as `eval` and static `xargs`; the original raw
 `proc.exec:<command>` remains visible for those cases.
 
+GitHub pull-request merges are typed shell effects. A statically identified
+`gh pr merge` emits a target-bound capability in this form:
+
+```text
+gh.pr.merge:github.com/<owner>/<repository>#<pull-request-number>
+```
+
+The target identity must come from either an exact GitHub pull-request URL or
+an exact numeric target paired with an explicit static `-R` / `--repo`
+selector. Gommage deliberately does not infer the repository from the shell's
+current directory, a local Git remote, or any network lookup: none of those is
+part of the canonical `ToolCall`. A missing repository selector for a numeric
+target, a dynamic target or repository, and unsupported target shapes emit
+`proc.exec.ambiguous:*` and fail closed under the reference policy. An active
+`--admin` flag additionally emits
+`gh.pr.merge.admin:github.com/<owner>/<repository>#<pull-request-number>`;
+`--admin=false` remains a normal merge. Administrative merge approvals are
+input-bound, so an approval for one reviewed command cannot authorize another
+merge command even when both share the administrative scope.
+
 Gommage's own administrative CLI is a typed shell effect too. Parsed invocations
 emit exactly one of `gommage.authorize`, `gommage.reconfigure`, or
 `gommage.disable`; the classifier recognizes absolute binary paths,

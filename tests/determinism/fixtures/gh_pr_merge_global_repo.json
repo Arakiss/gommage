@@ -1,0 +1,5 @@
+{
+  "name": "gh-pr-merge-global-repository-position-is-allowed",
+  "call": { "tool": "Bash", "input": { "command": "gh -R Arakiss/galdr pr merge 79 --squash" } },
+  "expected": { "kind": "allow", "matched_rule": "allow-gh-pr-merge" }
+}

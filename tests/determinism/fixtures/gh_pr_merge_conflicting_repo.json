@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-conflicting-repositories-fail-closed",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge https://github.com/Arakiss/galdr/pull/79 --repo Arakiss/gommage --squash" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}
