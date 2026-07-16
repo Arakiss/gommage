@@ -338,9 +338,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -362,9 +360,12 @@ jobs:
         with:
           # When workflow_dispatch-triggered, check out the tag provided via input.
           ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
       - name: Resolve and validate release tag
         shell: bash
         run: |
+          set -euo pipefail
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             upload_tag="${{ github.event.inputs.tag }}"
           else
@@ -372,16 +373,14 @@ jobs:
           fi
           expected_ref="refs/tags/${upload_tag}"
           if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
-            echo "::error::Release signatures are verified against ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
+            echo "::error::Release builds are tied to ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
             exit 1
           fi
           echo "UPLOAD_TAG=${upload_tag}" >> "$GITHUB_ENV"
-          echo "SIGNER_IDENTITY=https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${expected_ref}" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Install cross toolchain (linux-aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         timeout-minutes: 10
@@ -419,37 +418,22 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           (cd dist && shasum -a 256 "${{ matrix.asset }}.tar.gz" \
               > "${{ matrix.asset }}.tar.gz.sha256")
-      - name: Sign + verify artifact
-        shell: bash
-        run: |
-          artifact="dist/${{ matrix.asset }}.tar.gz"
-          bundle="${artifact}.sigstore.json"
-          cosign sign-blob --yes "${artifact}" --bundle "${bundle}"
-          cosign verify-blob "${artifact}" \
-            --bundle "${bundle}" \
-            --certificate-identity "${SIGNER_IDENTITY}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
-      - name: Attest artifact provenance
-        id: attest-artifact-primary
-        continue-on-error: true
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+      - name: Upload unsigned build output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          subject-path: dist/${{ matrix.asset }}.tar.gz
-      - name: Retry artifact provenance attestation
-        if: ${{ steps.attest-artifact-primary.outcome == 'failure' }}
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
-        with:
-          subject-path: dist/${{ matrix.asset }}.tar.gz
-      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
-        with:
-          tag_name: ${{ env.UPLOAD_TAG }}
-          files: |
+          name: release-${{ matrix.asset }}-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
             dist/${{ matrix.asset }}.tar.gz
             dist/${{ matrix.asset }}.tar.gz.sha256
-            dist/${{ matrix.asset }}.tar.gz.sigstore.json
 
-  release-evidence:
-    name: release evidence
+  # Repository code and dependency build scripts execute only in the read-only
+  # job above. This job receives release authority but never checks out or
+  # executes repository code: it validates, signs, attests, and uploads the
+  # exact archives transferred through the workflow artifact service.
+  publish-binaries:
+    name: sign and publish binaries
     if: >
       vars.GOMMAGE_RELEASE_HOLD != 'true'
       && (
@@ -458,16 +442,112 @@ jobs:
       )
     needs: build-binaries
     runs-on: ubuntu-latest
-    env:
-      UPLOAD_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    timeout-minutes: 20
     permissions:
+      actions: read
       contents: write
       id-token: write
       attestations: write
     steps:
+      - name: Resolve and validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            upload_tag="${{ github.event.inputs.tag }}"
+          else
+            upload_tag="${GITHUB_REF#refs/tags/}"
+          fi
+          expected_ref="refs/tags/${upload_tag}"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "::error::Release signatures are tied to ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
+            exit 1
+          fi
+          echo "UPLOAD_TAG=${upload_tag}" >> "${GITHUB_ENV}"
+          echo "SIGNER_IDENTITY=https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${expected_ref}" >> "${GITHUB_ENV}"
+      - name: Download exact build outputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-*-${{ github.sha }}
+          merge-multiple: true
+          path: dist
+      - name: Validate release inventory and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected=(
+            gommage-x86_64-linux
+            gommage-aarch64-linux
+            gommage-x86_64-darwin
+            gommage-aarch64-darwin
+          )
+          for asset in "${expected[@]}"; do
+            test -f "dist/${asset}.tar.gz"
+            test -f "dist/${asset}.tar.gz.sha256"
+            (cd dist && shasum -a 256 -c "${asset}.tar.gz.sha256")
+          done
+
+          actual_count="$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [[ "${actual_count}" != "8" ]]; then
+            echo "::error::Expected exactly eight unsigned build files, found ${actual_count}."
+            find dist -maxdepth 1 -type f -print
+            exit 1
+          fi
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign and verify every archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for artifact in dist/*.tar.gz; do
+            bundle="${artifact}.sigstore.json"
+            cosign sign-blob --yes "${artifact}" --bundle "${bundle}"
+            cosign verify-blob "${artifact}" \
+              --bundle "${bundle}" \
+              --certificate-identity "${SIGNER_IDENTITY}" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          done
+      - name: Attest archive provenance
+        id: attest-artifact-primary
+        continue-on-error: true
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: dist/*.tar.gz
+      - name: Retry archive provenance attestation
+        if: ${{ steps.attest-artifact-primary.outcome == 'failure' }}
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: dist/*.tar.gz
+      - name: Upload verified release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${UPLOAD_TAG}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+
+  build-release-evidence:
+    name: build release evidence
+    if: >
+      vars.GOMMAGE_RELEASE_HOLD != 'true'
+      && (
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gommage-cli-v'))
+        || github.event_name == 'workflow_dispatch'
+      )
+    runs-on: ubuntu-latest
+    env:
+      UPLOAD_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    permissions:
+      contents: read
+    steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
       - name: Resolve and validate release tag
         shell: bash
         run: |
@@ -493,6 +573,65 @@ jobs:
           output-file: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
           upload-artifact: false
           upload-release-assets: false
+      - name: Upload unsigned release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-sbom-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
+
+  release-evidence:
+    name: release evidence
+    if: >
+      vars.GOMMAGE_RELEASE_HOLD != 'true'
+      && (
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gommage-cli-v'))
+        || github.event_name == 'workflow_dispatch'
+      )
+    needs:
+      - publish-binaries
+      - build-release-evidence
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Resolve and validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            upload_tag="${{ github.event.inputs.tag }}"
+          else
+            upload_tag="${GITHUB_REF#refs/tags/}"
+          fi
+          expected_ref="refs/tags/${upload_tag}"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "::error::Release evidence is tied to ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
+            exit 1
+          fi
+          echo "UPLOAD_TAG=${upload_tag}" >> "${GITHUB_ENV}"
+      - name: Download exact release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-sbom-${{ github.sha }}
+          path: dist
+      - name: Validate release evidence inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="dist/gommage-${UPLOAD_TAG}.cdx.json"
+          test -s "${expected}"
+          actual_count="$(find dist -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [[ "${actual_count}" != "1" ]]; then
+            echo "::error::Expected one SBOM file, found ${actual_count}."
+            find dist -maxdepth 1 -type f -print
+            exit 1
+          fi
       - name: Upload SBOM release asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -529,16 +668,15 @@ jobs:
     permissions:
       contents: read
     env:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       CARGO_NET_RETRY: 10
       CARGO_HTTP_TIMEOUT: 120
       CARGO_HTTP_MULTIPLEXING: false
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       UPLOAD_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Resolve and validate release tag
@@ -556,6 +694,8 @@ jobs:
           fi
           echo "UPLOAD_TAG=${upload_tag}" >> "$GITHUB_ENV"
       - name: Verify crates.io token
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         shell: bash
         run: |
           if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
@@ -563,8 +703,12 @@ jobs:
             exit 1
           fi
       - name: Verify release assets before registry publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: sh scripts/check-release-assets.sh --tag "$UPLOAD_TAG" --require-sbom
       - name: Verify crates.io publish readiness
         run: sh scripts/check-crates-publish-readiness.sh
       - name: Publish crates in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: sh scripts/publish-crates.sh --execute

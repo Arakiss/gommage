@@ -63,10 +63,17 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Release automation now dispatches `ci.yml` for generated release-please PR
   branches after workspace dependency pin repair, eliminating the manual empty
   commit workaround for required release PR checks.
-- `ci.yml` and `audit.yml` now run trusted `pull_request_target` checks only
-  for same-repository `release-please--branches--*` PRs, so generated release
-  PRs receive real PR checks without broadening elevated-token execution to
-  forks or arbitrary branches.
+- Generated release PRs now receive read-only workflow-dispatch checks bound to
+  their exact head SHA. No workflow executes pull-request code through
+  `pull_request_target`; external Actions are pinned to immutable commits and a
+  regression check enforces those pins.
+- Release archives and SBOMs are produced in read-only jobs, then transferred
+  to separate signing and upload jobs that do not check out or execute
+  repository code. Registry and GitHub credentials are scoped to the single
+  steps that need them, with a CI gate protecting that boundary.
+- Coverage-guided fuzz targets continuously exercise shell mapping, policy
+  evaluation, and configuration parsers from a checked-in adversarial seed
+  corpus. Rust and workflow sources also run through CodeQL.
 - `gommage tui --snapshot --view onboarding` adds a first-minute operator guide
   with safe setup, beta gate, report bundle, and rollback commands.
 - `docs/beta-readiness.md` and a beta-readiness issue template for tracking

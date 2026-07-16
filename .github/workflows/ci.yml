@@ -158,6 +158,8 @@ jobs:
         run: sh scripts/check-local-agent-files.sh
       - name: Verify immutable GitHub Action pins
         run: sh scripts/check-workflow-action-pins.sh
+      - name: Verify release authority boundaries
+        run: sh scripts/check-release-authority-boundaries.sh
       - name: Verify installer release resolution
         run: sh scripts/check-installer-release-resolution.sh
       - name: Verify stdlib root mirrors
