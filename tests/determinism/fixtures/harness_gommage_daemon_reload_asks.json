@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-daemon-reload-asks",
+  "note": "Reload changes the live policy and mapper authority, so the CLI path requires reconfiguration authorization even before admin IPC is split from the decision socket.",
+  "call": { "tool": "Bash", "input": { "command": "gommage daemon reload" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.reconfigure", "bind_input": true, "matched_rule": "gate-gommage-reconfigure" }
+}

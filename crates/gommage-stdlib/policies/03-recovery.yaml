@@ -12,7 +12,6 @@
       - "proc.exec:gommage -h*"
       - "proc.exec:gommage --version*"
       - "proc.exec:gommage -V*"
-      - "proc.exec:gommage init*"
       - "proc.exec:gommage verify*"
       - "proc.exec:gommage doctor*"
       - "proc.exec:gommage smoke*"
@@ -31,7 +30,6 @@
       - "proc.exec:**/gommage -h*"
       - "proc.exec:**/gommage --version*"
       - "proc.exec:**/gommage -V*"
-      - "proc.exec:**/gommage init*"
       - "proc.exec:**/gommage verify*"
       - "proc.exec:**/gommage doctor*"
       - "proc.exec:**/gommage smoke*"
@@ -79,13 +77,6 @@
       - "proc.exec:systemctl --user status gommage-daemon.service*"
   reason: "the user-level Gommage daemon must stay inspectable during recovery"
 
-- name: allow-gommage-systemd-reload
-  decision: allow
-  match:
-    all_capability:
-      - "proc.exec:systemctl --user daemon-reload"
-  reason: "the user-level service manager must be reloadable during recovery"
-
 - name: allow-claude-settings-inspection
   decision: allow
   match:
@@ -115,15 +106,3 @@
     all_capability:
       - "proc.exec:ls *settings.json.gommage-bak-*"
   reason: "Claude settings backups must be discoverable during recovery"
-
-- name: allow-claude-settings-backup-restore
-  decision: allow
-  match:
-    any_capability:
-      - "proc.exec:cp ~/.claude/settings.json.gommage-bak-* ~/.claude/settings.json"
-      - "proc.exec:mv ~/.claude/settings.json.gommage-bak-* ~/.claude/settings.json"
-      - "proc.exec:cp ${HOME}/.claude/settings.json.gommage-bak-* ${HOME}/.claude/settings.json"
-      - "proc.exec:mv ${HOME}/.claude/settings.json.gommage-bak-* ${HOME}/.claude/settings.json"
-    all_capability:
-      - "fs.write:${HOME}/.claude/settings.json"
-  reason: "a validated Claude settings backup must be restorable from inside the session"

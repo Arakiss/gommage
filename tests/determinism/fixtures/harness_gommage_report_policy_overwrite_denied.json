@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-report-policy-overwrite-denied",
+  "note": "A report output path must retain exact filesystem policy coverage when it targets active policy.",
+  "call": { "tool": "Bash", "input": { "command": "gommage report bundle --redact --output ~/.gommage/policy.d/05-harness-integrity.yaml --force" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-home-tamper" }
+}

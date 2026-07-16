@@ -1,6 +1,6 @@
 {
-  "name": "gommage-daemon-user-recovery-still-allowed",
-  "note": "GUARD: 03-recovery.yaml allows the gommage-daemon user-scope recovery commands and loads before 35-system.yaml (03 < 35), so they keep working after the new persistence gates land. The new systemctl gate only surfaces sched.systemd:write for system-scope (default/--system) units, never --user, so this recovery command stays allowed. If a regression made --user match the system gate, this fixture would flip from allow to ask_picto.",
+  "name": "generic-user-service-reload-fails-closed",
+  "note": "A generic user service-manager reload is a mutation path, not a recovery inspection command. Without a typed Gommage service target it must not receive a blanket recovery allow.",
   "call": { "tool": "Bash", "input": { "command": "systemctl --user daemon-reload" } },
-  "expected": { "kind": "allow" }
+  "expected": { "kind": "gommage", "hard_stop": false }
 }

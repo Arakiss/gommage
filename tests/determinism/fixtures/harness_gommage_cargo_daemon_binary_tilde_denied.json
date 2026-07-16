@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-cargo-daemon-binary-tilde-denied",
+  "note": "The default cargo install path for gommage-daemon is part of the harness decision path.",
+  "call": { "tool": "Bash", "input": { "command": "cat > ~/.cargo/bin/gommage-daemon << 'EOF'\n#!/bin/sh\nEOF" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-binary-tamper" }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-evidence-key-overwrite-denied",
+  "note": "A bounded evidence export must not become a confused-deputy overwrite of the signing key.",
+  "call": { "tool": "Bash", "input": { "command": "gommage approval evidence apr_1 --redact --output ~/.gommage/key.ed25519 --force" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-home-tamper" }
+}

@@ -10,6 +10,10 @@
   emit:
     - "proc.exec:${input.command}"
 
+# Gommage's own authorization, reconfiguration, and disable operations are
+# emitted as exact `gommage.*` capabilities by the quote-preserving AST
+# analyzer. They intentionally have no regex duplicate in this mapper pack.
+
 # --- Git --------------------------------------------------------------------
 # Push destinations, deletion, force semantics, and network effects are emitted
 # directly from the quote-preserving shell AST in gommage-core. Keeping a regex

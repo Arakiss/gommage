@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-pkill-asks",
+  "note": "Killing the named Gommage daemon process disables the live service even when no service manager is involved.",
+  "call": { "tool": "Bash", "input": { "command": "pkill -f gommage-daemon" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.disable", "bind_input": true, "matched_rule": "gate-gommage-disable" }
+}

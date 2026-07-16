@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-evidence-state-overwrite-denied",
+  "note": "A caller-selected evidence path must not overwrite the rebuildable state index or its SQLite sidecars.",
+  "call": { "tool": "Bash", "input": { "command": "gommage approval evidence apr_1 --redact --output ~/.gommage/state.sqlite --force" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-home-tamper" }
+}

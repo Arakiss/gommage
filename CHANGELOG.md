@@ -36,6 +36,21 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   have one canonical path identity, Git push capabilities describe destination
   refs, and dynamic security-relevant operands fail closed as explicit
   `proc.exec.ambiguous:*` capabilities.
+- Gommage administration now maps to exact `gommage.authorize`,
+  `gommage.reconfigure`, and `gommage.disable` capabilities from parsed argv.
+  The closed inventory covers wrappers, global `--home` placement, local Cargo
+  runs, service lifecycle commands, and approval-capable TUI launches; unknown
+  or dynamic forms fail closed instead of falling through raw command globs.
+  A mutating command with an explicit `--home` also emits
+  `gommage.home.mutate:<normalized-path>` so approval names the exact selected
+  authority root without granting generic filesystem access.
+  Bundled administration gates bind each picto to the exact tool input so a
+  scope grant cannot be replayed for a different administrative command.
+- Caller-selected paths consumed inside the Gommage CLI now retain exact typed
+  filesystem effects. Approval callback/evidence, report exports, policy and
+  replay inputs, fixture inputs, project roots, upgrade destinations, and
+  release download directories can no longer bypass file policy by hiding the
+  read or write behind the trusted executable.
 - Bumped determinism-critical dependency pins for `regex`, `rusqlite`,
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
@@ -254,9 +269,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Claude Code native permission import now normalizes `Tool(*)` and `Tool(**)`
   path scopes before grouping so broad read/write rules collapse to one
   capability rule.
-- Stdlib recovery policy keeps Gommage readiness commands, basic inspection,
-  systemd daemon recovery, and Claude settings backup restore commands
-  available after quickstart.
+- Stdlib recovery policy keeps Gommage readiness and inspection commands
+  available after quickstart. Service-manager reloads, initialization, and
+  settings restores are mutation paths and no longer receive recovery allows.
 - `gommage agent status <claude|codex>` reports host-agent hook wiring,
   generated Claude native-permission imports, Codex hook feature flags, and
   Codex sandbox warnings in human and JSON formats.

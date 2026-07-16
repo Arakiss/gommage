@@ -127,10 +127,10 @@
 
 ### Added
 
-- `03-recovery.yaml` keeps Gommage readiness commands, basic inspection,
-  systemd daemon recovery, and Claude settings backup restore commands
+- `03-recovery.yaml` keeps Gommage readiness and basic inspection commands
   available after quickstart while loading after hard-stops and native deny
-  imports.
+  imports. Commands that mutate service or settings state are not recovery
+  allows.
 
 ### Changed
 
@@ -140,6 +140,16 @@
 - Filesystem policies now receive a single canonical resolved path capability;
   Git branch context remains audit metadata instead of an authorizable write
   capability.
+- Harness integrity gates exact semantic Gommage administration capabilities
+  and protects the actual approval log, webhook dead-letter log, expedition,
+  socket, and SQLite sidecar paths. Administrative pictos are input-bound so
+  approval of one command cannot authorize another command with the same scope.
+  Exact `gommage.home.mutate:<path>` effects are covered only alongside their
+  corresponding administration class; they do not authorize generic file
+  writes.
+- Harness integrity denies direct reads of the private signing key and local
+  authorization/audit state. Bounded operator CLI views remain available while
+  arbitrary agent file reads cannot use that data directly.
 
 ## [0.2.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.1.0-alpha.1...gommage-stdlib-v0.2.0-alpha.1) (2026-04-22)
 

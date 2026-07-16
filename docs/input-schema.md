@@ -156,6 +156,43 @@ security-relevant destination is dynamic, it emits
 `proc.exec.ambiguous:<reason>` and the reference policy denies it before any
 generic `proc.exec:*` rule can authorize the command.
 
+Gommage's own administrative CLI is a typed shell effect too. Parsed invocations
+emit exactly one of `gommage.authorize`, `gommage.reconfigure`, or
+`gommage.disable`; the classifier recognizes absolute binary paths,
+transparent wrappers, static shell payloads, global `--home` in any valid
+position, and local `cargo run` selections for the `gommage-cli` package or
+`gommage` binary (including Cargo's built-in `cargo r` alias). Service
+start/restart operations emit reconfigure, while
+uninstall, stop, disable, and name-targeted process termination emit disable.
+Documented inspection and dry-run forms emit no administration capability.
+Unknown or dynamic administration forms emit `proc.exec.ambiguous:*`.
+When one of these operations actually mutates an explicitly selected `--home`,
+the mapper also emits `gommage.home.mutate:<normalized-path>`. This semantic
+effect names the selected authority root; it is not an `fs.write:*` wildcard
+and does not cover caller-selected file operands or another home.
+The bundled rules for all three administration classes set `bind_input: true`:
+the resulting picto only authorizes the exact canonical tool call that was
+reviewed, not another command that happens to share its scope.
+
+File operands used internally by known Gommage commands remain visible to file
+policy. Callback bodies, replay and policy inputs, policy fixtures, and local
+installer paths emit normalized `fs.read:*`; evidence/report outputs, explicit
+upgrade directories, project-init roots, and release download directories emit
+normalized `fs.write:*` paths. Both `--option FILE` and `--option=FILE` forms
+are covered. Dynamic values and parent-relative paths emit
+`proc.exec.ambiguous:*` instead of guessing. This prevents the trusted CLI from
+becoming an alternate reader or writer for a path that direct file tools could
+not access.
+
+The bundled policy denies direct reads of the signing key, picto database,
+approval and webhook delivery logs, signed audit log, and state index. Their
+bounded operator CLI views remain the intended inspection path outside an
+agent-hook decision.
+The reference policy protects the canonical Cargo, user-local, Homebrew,
+MacPorts, and system binary paths. Operators using a custom install root must
+add its exact `fs.write:` paths to their policy until reference mode defines one
+canonical release location.
+
 **Recommendation for strict fs gating.** If you need the filesystem gates to hold tightly, restrict or deny raw `Bash` (gate `proc.exec:*` for the shells you do not trust) and route file access through the dedicated `Read` / `Write` / `Edit` tools, whose path arguments map exactly. See [`THREAT_MODEL.md`](../docs/THREAT_MODEL.md) for the residual shapes that fail closed but do not yet hit a precise gate scope.
 
 ---

@@ -1,0 +1,7 @@
+{
+  "name": "harness-gommage-callback-project-body-asks",
+  "note": "A callback body inside the active project keeps ordinary project-read coverage while the authorization action remains exact-input gated.",
+  "call": { "tool": "Bash", "input": { "command": "gommage approval callback --body /tmp/proj/callback.json --signature placeholder --timestamp 2026-07-16T00:00:00Z --signing-secret placeholder" } },
+  "expected": { "kind": "ask_picto", "required_scope": "gommage.authorize", "bind_input": true, "matched_rule": "gate-gommage-authorize" },
+  "expedition_root": "/tmp/proj"
+}

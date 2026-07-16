@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-key-read-denied",
+  "note": "The signing key must never be exposed through a direct agent file read.",
+  "call": { "tool": "Read", "input": { "file_path": "/__no_home__/.gommage/key.ed25519" } },
+  "expected": { "kind": "gommage", "hard_stop": false, "matched_rule": "deny-gommage-private-state-read" }
+}

@@ -23,7 +23,7 @@ rollback, see [`existing-setups.md`](existing-setups.md).
 
 | Tool | Forwarded input | Capability namespace |
 |---|---|---|
-| `Bash` | `command` | `proc.exec:*`, plus every rule that matches the command (`git.push:*`, `net.out:*`, `pkg.*`, `deploy.*`, `docker.*`, `k8s.*`, `terraform.*`, `aws.*`, `gh.*`) |
+| `Bash` | `command` | `proc.exec:*`, typed filesystem/Git/Gommage administration effects (including exact `gommage.home.mutate:*` roots), plus every compatible mapper rule (`net.out:*`, `pkg.*`, `deploy.*`, `docker.*`, `k8s.*`, `terraform.*`, `aws.*`, `gh.*`) |
 | `Read` | `file_path` | `fs.read:<path>` |
 | `Write` | `file_path` | `fs.write:<path>` |
 | `Edit` | `file_path` | `fs.write:<path>` |

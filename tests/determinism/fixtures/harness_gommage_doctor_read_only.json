@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-doctor-read-only",
+  "note": "A documented inspection command stays outside the administrative mutation scopes.",
+  "call": { "tool": "Bash", "input": { "command": "gommage doctor --json" } },
+  "expected": { "kind": "allow", "matched_rule": "allow-gommage-readiness-commands" }
+}

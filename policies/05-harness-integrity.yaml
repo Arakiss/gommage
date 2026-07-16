@@ -32,10 +32,25 @@
       - "fs.write:${HOME}/.gommage/capabilities.d/**"
       - "fs.write:${HOME}/.gommage/key.ed25519"
       - "fs.write:${HOME}/.gommage/audit.log"
-      - "fs.write:${HOME}/.gommage/pictos.sqlite"
-      - "fs.write:${HOME}/.gommage/approvals.sqlite"
-      - "fs.write:${HOME}/.gommage/state.sqlite"
+      - "fs.write:${HOME}/.gommage/pictos.sqlite*"
+      - "fs.write:${HOME}/.gommage/approvals.jsonl"
+      - "fs.write:${HOME}/.gommage/approval-webhook-dlq.jsonl"
+      - "fs.write:${HOME}/.gommage/state.sqlite*"
+      - "fs.write:${HOME}/.gommage/expedition.json"
+      - "fs.write:${HOME}/.gommage/gommage.sock"
   reason: "Gommage policy, keys, grants, approvals, audit, and state are harness internals"
+
+- name: deny-gommage-private-state-read
+  decision: gommage
+  match:
+    any_capability:
+      - "fs.read:${HOME}/.gommage/key.ed25519"
+      - "fs.read:${HOME}/.gommage/pictos.sqlite*"
+      - "fs.read:${HOME}/.gommage/approvals.jsonl"
+      - "fs.read:${HOME}/.gommage/approval-webhook-dlq.jsonl"
+      - "fs.read:${HOME}/.gommage/audit.log"
+      - "fs.read:${HOME}/.gommage/state.sqlite*"
+  reason: "private keys and authorization payloads must be inspected through bounded Gommage operator commands, not read directly by an agent"
 
 - name: deny-gommage-binary-tamper
   decision: gommage
@@ -44,12 +59,21 @@
       - "fs.write:${HOME}/.local/bin/gommage"
       - "fs.write:${HOME}/.local/bin/gommage-daemon"
       - "fs.write:${HOME}/.local/bin/gommage-mcp"
+      - "fs.write:${HOME}/.cargo/bin/gommage"
+      - "fs.write:${HOME}/.cargo/bin/gommage-daemon"
+      - "fs.write:${HOME}/.cargo/bin/gommage-mcp"
       - "fs.write:/usr/local/bin/gommage"
       - "fs.write:/usr/local/bin/gommage-daemon"
       - "fs.write:/usr/local/bin/gommage-mcp"
       - "fs.write:/opt/homebrew/bin/gommage"
       - "fs.write:/opt/homebrew/bin/gommage-daemon"
       - "fs.write:/opt/homebrew/bin/gommage-mcp"
+      - "fs.write:/opt/local/bin/gommage"
+      - "fs.write:/opt/local/bin/gommage-daemon"
+      - "fs.write:/opt/local/bin/gommage-mcp"
+      - "fs.write:/usr/bin/gommage"
+      - "fs.write:/usr/bin/gommage-daemon"
+      - "fs.write:/usr/bin/gommage-mcp"
   reason: "Gommage binaries are part of the decision path; do not rewrite them from an agent session"
 
 - name: deny-gommage-service-tamper
@@ -62,51 +86,48 @@
       - "fs.write:/etc/systemd/system/gommage-daemon.service"
   reason: "Gommage service definitions control whether the harness is reachable"
 
+- name: gate-gommage-authorize
+  decision: ask_picto
+  required_scope: "gommage.authorize"
+  bind_input: true
+  match:
+    any_capability:
+      - "gommage.authorize"
+      - "gommage.home.mutate:*"
+      - "proc.exec:*"
+    all_capability:
+      - "gommage.authorize"
+      - "proc.exec:*"
+  reason: "minting, activating, revoking, resolving, or externally delivering authorization requests requires an operator picto"
+
 - name: gate-gommage-reconfigure
   decision: ask_picto
   required_scope: "gommage.reconfigure"
+  bind_input: true
   match:
     any_capability:
-      - "proc.exec:gommage quickstart*"
-      - "proc.exec:**/gommage quickstart*"
-      - "proc.exec:gommage policy init --stdlib*"
-      - "proc.exec:**/gommage policy init --stdlib*"
-      - "proc.exec:gommage agent install*"
-      - "proc.exec:**/gommage agent install*"
-      - "proc.exec:gommage daemon install*"
-      - "proc.exec:**/gommage daemon install*"
-      - "proc.exec:gommage repair agent*"
-      - "proc.exec:**/gommage repair agent*"
-      - "proc.exec:gommage upgrade*"
-      - "proc.exec:**/gommage upgrade*"
+      - "gommage.reconfigure"
+      - "gommage.home.mutate:*"
+      - "proc.exec:*"
+      - "sched.launchd:write"
+      - "sched.systemd:write"
     all_capability:
-      - "proc.exec:**gommage **"
+      - "gommage.reconfigure"
+      - "proc.exec:*"
   reason: "reconfiguring Gommage hooks, policy, skills, or binaries requires an operator picto"
 
 - name: gate-gommage-disable
   decision: ask_picto
   required_scope: "gommage.disable"
+  bind_input: true
   match:
     any_capability:
-      - "proc.exec:gommage daemon uninstall*"
-      - "proc.exec:**/gommage daemon uninstall*"
-      - "proc.exec:gommage agent uninstall*"
-      - "proc.exec:**/gommage agent uninstall*"
-      - "proc.exec:gommage uninstall*"
-      - "proc.exec:**/gommage uninstall*"
+      - "gommage.disable"
+      - "gommage.home.mutate:*"
+      - "proc.exec:*"
+      - "sched.launchd:write"
+      - "sched.systemd:write"
     all_capability:
-      - "proc.exec:**gommage **"
-  reason: "removing Gommage requires a signed operator picto"
-
-- name: gate-gommage-service-disable
-  decision: ask_picto
-  required_scope: "gommage.disable"
-  match:
-    any_capability:
-      - "proc.exec:systemctl --user stop gommage-daemon.service*"
-      - "proc.exec:systemctl --user disable --now gommage-daemon.service*"
-      - "proc.exec:launchctl unload *dev.gommage.daemon*"
-      - "proc.exec:launchctl bootout *dev.gommage.daemon*"
-    all_capability:
-      - "proc.exec:**gommage-daemon**"
-  reason: "disabling the Gommage daemon requires a signed operator picto"
+      - "gommage.disable"
+      - "proc.exec:*"
+  reason: "removing Gommage or disabling its service requires a signed operator picto"
