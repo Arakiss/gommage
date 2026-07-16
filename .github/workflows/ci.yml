@@ -4,14 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-  pull_request_target:
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 concurrency:
-  # `pull_request_target` uses the base ref (`refs/heads/main`), so include the
-  # event and PR number to avoid cancelling in-flight `push` CI on main.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -23,18 +19,14 @@ env:
   CARGO_HTTP_TIMEOUT: 120
   CARGO_HTTP_MULTIPLEXING: false
   RUST_BACKTRACE: 1
-  GOMMAGE_CHECKOUT_REF: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
 
 jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: rustfmt
       - run: cargo fmt --all --check
@@ -42,21 +34,17 @@ jobs:
   clippy:
     name: clippy
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.runner }}
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -68,11 +56,9 @@ jobs:
           - os: macos-latest
             runner: macos-15
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: cargo build --workspace
       - run: cargo test --workspace
 
@@ -82,7 +68,6 @@ jobs:
     # contract violation, not a flake.
     name: determinism sweep (x10) — ${{ matrix.os }} / ${{ matrix.locale }}
     runs-on: ${{ matrix.runner }}
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     timeout-minutes: 20
     needs: test
     strategy:
@@ -108,11 +93,9 @@ jobs:
       LC_ALL: ${{ matrix.locale }}
       LANG:   ${{ matrix.locale }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install non-default locale (Linux)
         if: runner.os == 'Linux' && matrix.locale != 'C'
         timeout-minutes: 10
@@ -148,7 +131,7 @@ jobs:
     name: determinism sweep (all)
     runs-on: ubuntu-latest
     needs: determinism
-    if: ${{ always() && (github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--'))) }}
+    if: ${{ always() }}
     steps:
       - name: Roll up matrix result
         run: |
@@ -161,13 +144,10 @@ jobs:
   policy-lint:
     name: policy lint
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Verify internal workspace dependency pins
         run: sh scripts/sync-workspace-internal-deps.sh --check
       - name: Verify crates.io publish readiness
@@ -176,6 +156,8 @@ jobs:
         run: sh scripts/check-doc-release-refs.sh
       - name: Verify local-only agent files are not tracked
         run: sh scripts/check-local-agent-files.sh
+      - name: Verify immutable GitHub Action pins
+        run: sh scripts/check-workflow-action-pins.sh
       - name: Verify installer release resolution
         run: sh scripts/check-installer-release-resolution.sh
       - name: Verify stdlib root mirrors
@@ -198,20 +180,17 @@ jobs:
     name: agent-facing evals
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Build CLI for eval target
         run: cargo build -p gommage-cli
       - name: Run Promptfoo CLI contract evals
         run: |
           GOMMAGE_BIN=./target/debug/gommage \
-            bunx promptfoo@latest eval \
+            bunx promptfoo@0.121.19 eval \
               -c evals/promptfooconfig.yaml \
               --no-progress-bar \
               --no-table \
@@ -221,7 +200,6 @@ jobs:
   operator-smoke:
     name: operator smoke (${{ matrix.os }} / ${{ matrix.agent }})
     runs-on: ${{ matrix.runner }}
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -243,11 +221,9 @@ jobs:
             agent: codex
             daemon_manager: launchd
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Build debug binaries
         run: cargo build --workspace
       - name: Host smoke
@@ -262,7 +238,7 @@ jobs:
         run: |
           GOMMAGE_BIN=target/debug/gommage sh scripts/launch-demo.sh \
             --capture-dir "launch-demo-${{ matrix.os }}"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: operator-smoke-${{ matrix.os }}-${{ matrix.agent }}
@@ -274,12 +250,9 @@ jobs:
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'pull_request_target' || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check advisories bans licenses sources
 
@@ -289,14 +262,13 @@ jobs:
     # Only run on PR-like refs against main — baseline is the target branch tip.
     # Release-please PRs created with GITHUB_TOKEN need the workflow_dispatch
     # fallback because their synchronize events do not start trusted PR jobs.
-    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--')) }}
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
           fetch-depth: 0            # full history so baseline-rev can check out main
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Pre-fetch cargo registry for semver checks
         shell: bash
         run: |
@@ -309,7 +281,8 @@ jobs:
             sleep $((attempt * 10))
           done
           cargo fetch --locked
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
+      - name: Check gommage-core public API
+        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2
         with:
           package: gommage-core
           # `gommage-core` is not on crates.io yet, so the default baseline
@@ -321,17 +294,21 @@ jobs:
           # Use the fully-qualified remote ref so the rev resolves without
           # needing a local branch (fetch-depth: 0 only brings remotes).
           baseline-rev: origin/${{ github.base_ref || 'main' }}
+      - name: Check gommage-audit public API
+        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2
+        with:
+          package: gommage-audit
+          baseline-rev: origin/${{ github.base_ref || 'main' }}
 
   commitlint:
     name: commitlint
     runs-on: ubuntu-latest
-    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]') || (github.event_name == 'pull_request_target' && github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'release-please--branches--')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--')) }}
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]') || (github.event_name == 'workflow_dispatch' && startsWith(github.ref_name, 'release-please--branches--')) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          ref: ${{ env.GOMMAGE_CHECKOUT_REF }}
           fetch-depth: 0
-      - uses: wagoid/commitlint-github-action@v6
+      - uses: wagoid/commitlint-github-action@b948419dd99f3fd78a6548d48f94e3df7f6bf3ed # v6
         if: ${{ github.event_name != 'workflow_dispatch' }}
         with:
           configFile: .commitlintrc.yaml
