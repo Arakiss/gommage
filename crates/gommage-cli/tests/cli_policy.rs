@@ -233,7 +233,7 @@ fn policy_lint_strict_json_passes_stdlib() {
 }
 
 #[test]
-fn policy_layers_json_reports_project_before_user_and_decide_uses_it() {
+fn policy_layers_json_reports_user_before_project_and_project_can_tighten() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     let project = temp.path().join("project");
@@ -298,8 +298,8 @@ fn policy_layers_json_reports_project_before_user_and_decide_uses_it() {
     );
     let report: serde_json::Value = serde_json::from_slice(&layers.stdout).unwrap();
     assert_eq!(report["status"].as_str(), Some("pass"));
-    assert_eq!(report["layers"][0]["name"].as_str(), Some("project"));
-    assert_eq!(report["layers"][1]["name"].as_str(), Some("user"));
+    assert_eq!(report["layers"][0]["name"].as_str(), Some("user"));
+    assert_eq!(report["layers"][1]["name"].as_str(), Some("project"));
     assert_eq!(report["layers"][0]["rules"].as_u64(), Some(1));
     assert_eq!(report["layers"][1]["rules"].as_u64(), Some(1));
 

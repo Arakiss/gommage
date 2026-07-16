@@ -132,7 +132,7 @@ fn build_sandbox_advice(layout: &HomeLayout) -> Result<SandboxAdviceReport> {
         policy_layers: layers
             .into_iter()
             .map(|layer| SandboxPolicyLayer {
-                name: layer.name,
+                name: layer.name().to_string(),
                 dir: path_display(&layer.dir),
             })
             .collect(),

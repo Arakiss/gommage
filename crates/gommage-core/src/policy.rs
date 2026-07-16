@@ -7,6 +7,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const POLICY_HASH_SCHEMA: &[u8] = b"gommage-policy-v2\0";
+const PATH_NORMALIZER_SCHEMA: &[u8] = b"home-alias-v1\0";
+
 /// The raw YAML shape of a decision. Kept flat to make policy files read well.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -141,19 +144,93 @@ pub struct Policy {
     pub(crate) path_normalizer: PathNormalizer,
 }
 
+/// Closed policy-layer roles in their only valid load order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyLayerKind {
+    /// Organization-controlled policy loaded first.
+    #[serde(rename = "org")]
+    Organization,
+    /// Operator-controlled policy loaded after organization policy.
+    User,
+    /// Repository-controlled, tightening-only policy loaded last.
+    Project,
+}
+
+impl PolicyLayerKind {
+    /// Stable public label used in provenance and reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Organization => "org",
+            Self::User => "user",
+            Self::Project => "project",
+        }
+    }
+
+    const fn rank(self) -> u8 {
+        match self {
+            Self::Organization => 0,
+            Self::User => 1,
+            Self::Project => 2,
+        }
+    }
+}
+
+/// One canonical policy layer and its source directory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyLayer {
-    pub name: String,
+    /// Security role that determines ordering and allowed decisions.
+    pub kind: PolicyLayerKind,
+    /// Directory containing this layer's ordered YAML policy files.
     pub dir: PathBuf,
 }
 
 impl PolicyLayer {
-    pub fn new(name: impl Into<String>, dir: impl Into<PathBuf>) -> Self {
+    /// Construct an organization-controlled layer.
+    pub fn organization(dir: impl Into<PathBuf>) -> Self {
         Self {
-            name: name.into(),
+            kind: PolicyLayerKind::Organization,
             dir: dir.into(),
         }
     }
+
+    /// Construct an operator-controlled user layer.
+    pub fn user(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            kind: PolicyLayerKind::User,
+            dir: dir.into(),
+        }
+    }
+
+    /// Construct a repository-controlled, tightening-only project layer.
+    pub fn project(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            kind: PolicyLayerKind::Project,
+            dir: dir.into(),
+        }
+    }
+
+    /// Return the stable public layer label.
+    pub const fn name(&self) -> &'static str {
+        self.kind.as_str()
+    }
+}
+
+fn validate_policy_layers(layers: &[PolicyLayer]) -> Result<(), GommageError> {
+    let mut previous: Option<PolicyLayerKind> = None;
+    for layer in layers {
+        if let Some(previous) = previous
+            && previous.rank() >= layer.kind.rank()
+        {
+            return Err(GommageError::Policy(format!(
+                "policy layers must be unique and ordered org, user, project; found {} after {}",
+                layer.name(),
+                previous.as_str()
+            )));
+        }
+        previous = Some(layer.kind);
+    }
+    Ok(())
 }
 
 impl Policy {
@@ -174,7 +251,8 @@ impl Policy {
         layers: &[PolicyLayer],
         env: &HashMap<String, String>,
     ) -> Result<Self, GommageError> {
-        if layers.len() == 1 && layers[0].name == "user" {
+        validate_policy_layers(layers)?;
+        if layers.len() == 1 && layers[0].kind == PolicyLayerKind::User {
             return Self::load_from_dir(&layers[0].dir, env);
         }
 
@@ -182,7 +260,7 @@ impl Policy {
         for (layer_index, layer) in layers.iter().enumerate() {
             for (file_index, file) in collect_policy_files(&layer.dir)?.into_iter().enumerate() {
                 files.push(LayeredPolicyFile {
-                    layer_name: layer.name.clone(),
+                    layer_name: layer.name().to_string(),
                     layer_index,
                     layer_root: layer.dir.clone(),
                     file_index,
@@ -199,7 +277,7 @@ impl Policy {
         env: &HashMap<String, String>,
         source_label: &str,
     ) -> Result<Self, GommageError> {
-        let substituted = substitute_env(s, env);
+        let substituted = substitute_env(s, env)?;
         let path_normalizer = PathNormalizer::from_env(env);
         let raw_rules: Vec<RawRule> = serde_yaml::from_str(&substituted)?;
         let path = PathBuf::from(source_label);
@@ -219,6 +297,7 @@ impl Policy {
         }
         use sha2::Digest as _;
         let mut h = sha2::Sha256::new();
+        update_policy_hash_context(&mut h, &path_normalizer);
         h.update(b"file\0");
         h.update(source_label.as_bytes());
         h.update(b"\0content\0");
@@ -369,10 +448,16 @@ fn load_policy_files(
     let mut version = sha2::Sha256::new();
     let path_normalizer = PathNormalizer::from_env(env);
     use sha2::Digest as _;
+    update_policy_hash_context(&mut version, &path_normalizer);
 
     for file in files {
         let raw = fs::read_to_string(&file.path)?;
-        let substituted = substitute_env(&raw, env);
+        let substituted = substitute_env(&raw, env).map_err(|error| {
+            GommageError::Policy(format!(
+                "policy variable substitution failed in {}: {error}",
+                file.path.display()
+            ))
+        })?;
         match hash_mode {
             HashMode::Legacy { root } => {
                 update_policy_hash(&mut version, root, &file.path, &substituted);
@@ -389,6 +474,13 @@ fn load_policy_files(
         }
         let raw_rules: Vec<RawRule> = serde_yaml::from_str(&substituted)?;
         for (index, raw) in raw_rules.into_iter().enumerate() {
+            if file.layer_name == "project" && raw.decision == RuleDecision::Allow {
+                return Err(GommageError::Policy(format!(
+                    "project policy {} rule {index} ({}) uses decision=allow; project layers may only tighten operator policy with ask_picto or gommage",
+                    file.path.display(),
+                    raw.name
+                )));
+            }
             rules.push(compile_rule(
                 raw,
                 RuleSource {
@@ -409,6 +501,20 @@ fn load_policy_files(
         version_hash,
         path_normalizer,
     })
+}
+
+fn update_policy_hash_context(hash: &mut sha2::Sha256, normalizer: &PathNormalizer) {
+    use sha2::Digest as _;
+    hash.update(POLICY_HASH_SCHEMA);
+    hash.update(PATH_NORMALIZER_SCHEMA);
+    match normalizer.home.as_deref() {
+        Some(home) => {
+            hash.update(b"home\0some\0");
+            hash.update(home.as_bytes());
+            hash.update(b"\0");
+        }
+        None => hash.update(b"home\0none\0"),
+    }
 }
 
 fn update_policy_hash(
@@ -528,20 +634,43 @@ fn compile_globs(
 }
 
 /// Substitute `${NAME}` and `${NAME:-default}` references in `input` using `env`.
-/// Unknown vars with no default become empty string and log a warning — the
-/// policy loader catches mistyped names via the downstream glob that ends up
-/// being nonsensical, but we don't hard-fail (otherwise policy files with
-/// `${PROJECT_NAME}` would fail on hosts where that isn't set).
-pub fn substitute_env(input: &str, env: &HashMap<String, String>) -> String {
+///
+/// Missing and empty values fail closed unless the expression supplies a
+/// non-empty default. This prevents a path policy such as
+/// `fs.write:${EXPEDITION_ROOT}/**` from silently broadening to `fs.write:/**`.
+pub fn substitute_env(input: &str, env: &HashMap<String, String>) -> Result<String, GommageError> {
     let re = regex::Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}").unwrap();
-    re.replace_all(input, |caps: &regex::Captures<'_>| {
-        let name = &caps[1];
-        let default = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        env.get(name)
-            .cloned()
-            .unwrap_or_else(|| default.to_string())
-    })
-    .into_owned()
+    let mut output = String::with_capacity(input.len());
+    let mut previous_end = 0;
+
+    for captures in re.captures_iter(input) {
+        let expression = captures
+            .get(0)
+            .expect("the complete substitution expression is always captured");
+        output.push_str(&input[previous_end..expression.start()]);
+
+        let name = &captures[1];
+        let configured = env.get(name).filter(|value| !value.trim().is_empty());
+        let fallback = captures
+            .get(2)
+            .map(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty());
+        let replacement = configured.map(String::as_str).or(fallback).ok_or_else(|| {
+            GommageError::Policy(format!(
+                "policy variable {name} is unset or empty and has no non-empty default"
+            ))
+        })?;
+        output.push_str(replacement);
+        previous_end = expression.end();
+    }
+
+    output.push_str(&input[previous_end..]);
+    if output.contains("${") {
+        return Err(GommageError::Policy(
+            "policy contains an unsupported or unterminated variable expression".to_string(),
+        ));
+    }
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -557,14 +686,34 @@ mod tests {
 
     #[test]
     fn env_substitution() {
-        let out = substitute_env("allow fs.read:${EXPEDITION_ROOT}/**", &env());
+        let out = substitute_env("allow fs.read:${EXPEDITION_ROOT}/**", &env()).unwrap();
         assert_eq!(out, "allow fs.read:/home/user/project/**");
     }
 
     #[test]
     fn env_substitution_with_default() {
-        let out = substitute_env("x ${NONEXISTENT:-fallback} y", &HashMap::new());
+        let out = substitute_env("x ${NONEXISTENT:-fallback} y", &HashMap::new()).unwrap();
         assert_eq!(out, "x fallback y");
+    }
+
+    #[test]
+    fn env_substitution_uses_default_for_empty_values() {
+        let mut env = HashMap::new();
+        env.insert("EMPTY".to_string(), String::new());
+
+        let out = substitute_env("x ${EMPTY:-fallback} y", &env).unwrap();
+
+        assert_eq!(out, "x fallback y");
+    }
+
+    #[test]
+    fn env_substitution_rejects_missing_empty_and_malformed_values() {
+        let mut env = HashMap::new();
+        env.insert("EMPTY".to_string(), "   ".to_string());
+
+        for input in ["${MISSING}", "${EMPTY}", "${MISSING:-}", "${lowercase}"] {
+            assert!(substitute_env(input, &env).is_err(), "accepted {input:?}");
+        }
     }
 
     #[test]
@@ -650,6 +799,33 @@ mod tests {
     }
 
     #[test]
+    fn policy_hash_binds_path_normalizer_configuration() {
+        let yaml = r#"
+- name: allow-home-a
+  decision: allow
+  match:
+    any_capability: ["fs.read:/home/a/**"]
+"#;
+        let mut env_a = HashMap::new();
+        env_a.insert("HOME".into(), "/home/a".into());
+        let mut env_b = HashMap::new();
+        env_b.insert("HOME".into(), "/home/b".into());
+
+        let policy_a = Policy::from_yaml_string(yaml, &env_a, "10-default.yaml").unwrap();
+        let policy_b = Policy::from_yaml_string(yaml, &env_b, "10-default.yaml").unwrap();
+
+        assert_eq!(
+            evaluate(&[Capability::new("fs.read:~/x")], &policy_a).decision,
+            Decision::Allow
+        );
+        assert_ne!(
+            evaluate(&[Capability::new("fs.read:~/x")], &policy_b).decision,
+            Decision::Allow
+        );
+        assert_ne!(policy_a.version_hash, policy_b.version_hash);
+    }
+
+    #[test]
     fn layered_policy_preserves_layer_order() {
         let org = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
@@ -667,8 +843,9 @@ mod tests {
         std::fs::write(
             project.path().join("10-project.yaml"),
             r#"
-- name: project-allow-secret
-  decision: allow
+- name: project-ask-secret
+  decision: ask_picto
+  required_scope: "project:secret"
   match: { any_capability: ["fs.write:/repo/secret"] }
 "#,
         )
@@ -685,17 +862,17 @@ mod tests {
 
         let policy = Policy::load_from_layers(
             &[
-                PolicyLayer::new("org", org.path()),
-                PolicyLayer::new("project", project.path()),
-                PolicyLayer::new("user", user.path()),
+                PolicyLayer::organization(org.path()),
+                PolicyLayer::user(user.path()),
+                PolicyLayer::project(project.path()),
             ],
             &HashMap::new(),
         )
         .unwrap();
 
         assert_eq!(policy.rules[0].name, "org-deny-secret");
-        assert_eq!(policy.rules[1].name, "project-allow-secret");
-        assert_eq!(policy.rules[2].name, "user-allow-all");
+        assert_eq!(policy.rules[1].name, "user-allow-all");
+        assert_eq!(policy.rules[2].name, "project-ask-secret");
     }
 
     #[test]
@@ -703,32 +880,74 @@ mod tests {
         let a = tempfile::tempdir().unwrap();
         let b = tempfile::tempdir().unwrap();
         let yaml = r#"
-- name: allow-read
-  decision: allow
+- name: deny-read
+  decision: gommage
   match:
     any_capability: ["fs.read:/repo/**"]
+  reason: "test policy"
 "#;
         std::fs::write(a.path().join("10-default.yaml"), yaml).unwrap();
         std::fs::write(b.path().join("10-default.yaml"), yaml).unwrap();
 
         let org_user = Policy::load_from_layers(
             &[
-                PolicyLayer::new("org", a.path()),
-                PolicyLayer::new("user", b.path()),
+                PolicyLayer::organization(a.path()),
+                PolicyLayer::user(b.path()),
             ],
             &HashMap::new(),
         )
         .unwrap();
         let project_user = Policy::load_from_layers(
-            &[
-                PolicyLayer::new("project", a.path()),
-                PolicyLayer::new("user", b.path()),
-            ],
+            &[PolicyLayer::user(b.path()), PolicyLayer::project(a.path())],
             &HashMap::new(),
         )
         .unwrap();
 
         assert_ne!(org_user.version_hash, project_user.version_hash);
+    }
+
+    #[test]
+    fn layered_policy_rejects_noncanonical_or_duplicate_order() {
+        let user = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+
+        for layers in [
+            vec![
+                PolicyLayer::project(project.path()),
+                PolicyLayer::user(user.path()),
+            ],
+            vec![
+                PolicyLayer::user(user.path()),
+                PolicyLayer::user(user.path()),
+            ],
+        ] {
+            let error = Policy::load_from_layers(&layers, &HashMap::new()).unwrap_err();
+            assert!(
+                error.to_string().contains("ordered org, user, project"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn policy_loader_rejects_unresolved_variables_before_yaml_parsing() {
+        for value in [None, Some(""), Some("   ")] {
+            let mut env = HashMap::new();
+            if let Some(value) = value {
+                env.insert("EXPEDITION_ROOT".to_string(), value.to_string());
+            }
+            let error = Policy::from_yaml_string(
+                r#"
+- name: unsafe-root
+  decision: allow
+  match: { any_capability: ["fs.write:${EXPEDITION_ROOT}/**"] }
+"#,
+                &env,
+                "unsafe.yaml",
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("EXPEDITION_ROOT"), "{error}");
+        }
     }
 
     #[test]

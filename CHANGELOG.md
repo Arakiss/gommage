@@ -13,6 +13,19 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Changed
 
+- Policy evaluation now resolves every normalized capability independently,
+  preserves first-match ordering only within one layer and capability, and
+  combines layer contributions conservatively. A deny beats an unresolved
+  capability, which beats an approval request, which beats allow; distinct
+  approval scopes in one call fail closed instead of silently choosing one.
+- Policy layers now use closed `org`, `user`, and `project` roles in canonical
+  order. Project policy is tightening-only and cannot contain `allow` rules.
+  Missing or empty policy variables fail loading unless they have a non-empty
+  default, and an inactive expedition uses a non-matching root sentinel rather
+  than expanding `${EXPEDITION_ROOT}/**` to `/**`.
+- Policy version hashes now bind the hash schema and effective home-alias
+  normalizer configuration, so approvals cannot survive a semantic change
+  that leaves the YAML bytes unchanged.
 - Shell command effects now come from an exact-pinned, quote-preserving
   `brush-parser` AST instead of handcrafted token scanning. Filesystem effects
   have one canonical path identity, Git push capabilities describe destination
@@ -32,6 +45,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Fixed
 
+- Remote `scp`, `rsync`, `curl` upload, and `wget` upload approval rules now
+  cover their intrinsic local-read effects without widening the corresponding
+  local-only commands.
 - Filesystem policy evaluation now normalizes leading home aliases (`~/`,
   `$HOME/`, `${HOME}/`) for `fs.read`, `fs.search`, and `fs.write`
   capabilities before matching rules. Bash redirects such as

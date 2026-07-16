@@ -94,6 +94,6 @@ fn project_init_resolves_relative_root_before_writing_policy() {
             .join("relative-project/.gommage/policy.d/20-project.yaml"),
     )
     .unwrap();
-    assert!(!policy.contains("fs.write:relative-project/**"));
-    assert!(policy.contains("/relative-project/**"));
+    assert!(!policy.contains("fs.write:relative-project/.env"));
+    assert!(policy.contains("/relative-project/.env"));
 }

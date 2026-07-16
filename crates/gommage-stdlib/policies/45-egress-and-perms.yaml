@@ -16,6 +16,10 @@
   decision: ask_picto
   required_scope: "net.scp:out"
   match:
+    any_capability:
+      - "net.scp:out"
+      - "proc.exec:**scp **"
+      - "fs.read:**"
     all_capability:
       - "net.scp:out"
       - "proc.exec:**scp **"
@@ -25,6 +29,10 @@
   decision: ask_picto
   required_scope: "net.rsync:out"
   match:
+    any_capability:
+      - "net.rsync:out"
+      - "proc.exec:**rsync **"
+      - "fs.read:**"
     all_capability:
       - "net.rsync:out"
       - "proc.exec:**rsync **"
@@ -43,6 +51,10 @@
   decision: ask_picto
   required_scope: "net.out.post"
   match:
+    any_capability:
+      - "net.out.post"
+      - "proc.exec:**curl **"
+      - "fs.read:**"
     all_capability:
       - "net.out.post"
       - "proc.exec:**curl **"
@@ -52,6 +64,10 @@
   decision: ask_picto
   required_scope: "net.out.post"
   match:
+    any_capability:
+      - "net.out.post"
+      - "proc.exec:**wget **"
+      - "fs.read:**"
     all_capability:
       - "net.out.post"
       - "proc.exec:**wget **"

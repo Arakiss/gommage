@@ -5,7 +5,9 @@
 //! that stays pure in `evaluator.rs`.
 
 use crate::{
-    ApprovalStore, CapabilityMapper, PictoStore, Policy, error::GommageError, policy::PolicyLayer,
+    ApprovalStore, CapabilityMapper, PictoStore, Policy,
+    error::GommageError,
+    policy::{PolicyLayer, PolicyLayerKind},
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand_core::OsRng;
@@ -15,6 +17,12 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+
+/// A deterministic absolute path that shipped expedition-scoped rules cannot
+/// match while no expedition is active. Creating this path requires root on
+/// Unix-like hosts, so an unprivileged agent cannot turn the sentinel into a
+/// writable project root.
+pub const NO_ACTIVE_EXPEDITION_ROOT: &str = "/__gommage_no_active_expedition__";
 
 /// The canonical location of the Gommage home directory.
 /// Respects `$GOMMAGE_HOME`; falls back to `~/.gommage`.
@@ -34,6 +42,10 @@ pub fn default_policy_env() -> HashMap<String, String> {
     if let Ok(home) = std::env::var("HOME") {
         env.insert("HOME".into(), home);
     }
+    env.insert(
+        "EXPEDITION_ROOT".into(),
+        NO_ACTIVE_EXPEDITION_ROOT.to_string(),
+    );
     env
 }
 
@@ -44,20 +56,40 @@ pub fn active_policy_layers(
     layout: &HomeLayout,
     expedition: Option<&Expedition>,
 ) -> Result<Vec<PolicyLayer>, GommageError> {
+    let org_dir = explicit_policy_dir(ORG_POLICY_DIR_ENV)?;
+    let project_dir = explicit_policy_dir(PROJECT_POLICY_DIR_ENV)?;
+    Ok(assemble_policy_layers(
+        layout,
+        expedition,
+        org_dir,
+        project_dir,
+    ))
+}
+
+fn assemble_policy_layers(
+    layout: &HomeLayout,
+    expedition: Option<&Expedition>,
+    org_dir: Option<PathBuf>,
+    project_dir: Option<PathBuf>,
+) -> Vec<PolicyLayer> {
     let mut layers = Vec::new();
-    if let Some(dir) = explicit_policy_dir(ORG_POLICY_DIR_ENV)? {
-        push_policy_layer(&mut layers, "org", dir);
+    if let Some(dir) = org_dir {
+        push_policy_layer(&mut layers, PolicyLayerKind::Organization, dir);
     }
-    if let Some(dir) = explicit_policy_dir(PROJECT_POLICY_DIR_ENV)? {
-        push_policy_layer(&mut layers, "project", dir);
+    push_policy_layer(
+        &mut layers,
+        PolicyLayerKind::User,
+        layout.policy_dir.clone(),
+    );
+    if let Some(dir) = project_dir {
+        push_policy_layer(&mut layers, PolicyLayerKind::Project, dir);
     } else if let Some(expedition) = expedition {
         let dir = expedition.root.join(".gommage").join("policy.d");
         if dir.is_dir() {
-            push_policy_layer(&mut layers, "project", dir);
+            push_policy_layer(&mut layers, PolicyLayerKind::Project, dir);
         }
     }
-    push_policy_layer(&mut layers, "user", layout.policy_dir.clone());
-    Ok(layers)
+    layers
 }
 
 pub fn load_active_policy(
@@ -87,11 +119,15 @@ fn explicit_policy_dir(var: &str) -> Result<Option<PathBuf>, GommageError> {
     Ok(Some(path))
 }
 
-fn push_policy_layer(layers: &mut Vec<PolicyLayer>, name: &str, dir: PathBuf) {
+fn push_policy_layer(layers: &mut Vec<PolicyLayer>, kind: PolicyLayerKind, dir: PathBuf) {
     if layers.iter().any(|layer| layer.dir == dir) {
         return;
     }
-    layers.push(PolicyLayer::new(name, dir));
+    layers.push(match kind {
+        PolicyLayerKind::Organization => PolicyLayer::organization(dir),
+        PolicyLayerKind::User => PolicyLayer::user(dir),
+        PolicyLayerKind::Project => PolicyLayer::project(dir),
+    });
 }
 
 pub struct HomeLayout {
@@ -290,6 +326,7 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Capability, Decision, evaluate};
     use tempfile::tempdir;
 
     #[test]
@@ -335,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn active_policy_layers_include_project_before_user() {
+    fn active_policy_layers_include_user_before_project() {
         let td = tempdir().unwrap();
         let home = td.path().join("home");
         let project = td.path().join("project");
@@ -352,9 +389,83 @@ mod tests {
         let layers = active_policy_layers(&layout, Some(&expedition)).unwrap();
 
         assert_eq!(layers.len(), 2);
-        assert_eq!(layers[0].name, "project");
-        assert_eq!(layers[0].dir, project_policy);
-        assert_eq!(layers[1].name, "user");
-        assert_eq!(layers[1].dir, layout.policy_dir);
+        assert_eq!(layers[0].name(), "user");
+        assert_eq!(layers[0].dir, layout.policy_dir);
+        assert_eq!(layers[1].name(), "project");
+        assert_eq!(layers[1].dir, project_policy);
+    }
+
+    #[test]
+    fn active_policy_layers_are_org_user_project_with_stable_indices() {
+        let td = tempdir().unwrap();
+        let org = td.path().join("org");
+        let user = td.path().join("home/policy.d");
+        let project = td.path().join("project");
+        for dir in [&org, &user, &project] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        fs::write(
+            org.join("10-org.yaml"),
+            "- name: org-deny\n  decision: gommage\n  match: { any_capability: [\"cap:org\"] }\n  reason: org\n",
+        )
+        .unwrap();
+        fs::write(
+            user.join("10-user.yaml"),
+            "- name: user-allow\n  decision: allow\n  match: { any_capability: [\"cap:user\"] }\n",
+        )
+        .unwrap();
+        fs::write(
+            project.join("10-project.yaml"),
+            "- name: project-ask\n  decision: ask_picto\n  required_scope: project:test\n  match: { any_capability: [\"cap:project\"] }\n",
+        )
+        .unwrap();
+        let layout = HomeLayout::at(&td.path().join("home"));
+
+        let layers =
+            assemble_policy_layers(&layout, None, Some(org.clone()), Some(project.clone()));
+        assert_eq!(
+            layers.iter().map(PolicyLayer::name).collect::<Vec<_>>(),
+            vec!["org", "user", "project"]
+        );
+
+        let policy = Policy::load_from_layers(&layers, &HashMap::new()).unwrap();
+        assert_eq!(
+            policy
+                .rules
+                .iter()
+                .map(|rule| (rule.source.layer.as_str(), rule.source.layer_index))
+                .collect::<Vec<_>>(),
+            vec![("org", 0), ("user", 1), ("project", 2)]
+        );
+    }
+
+    #[test]
+    fn default_policy_env_uses_a_non_root_expedition_sentinel() {
+        let env = default_policy_env();
+
+        assert_eq!(
+            env.get("EXPEDITION_ROOT").map(String::as_str),
+            Some(NO_ACTIVE_EXPEDITION_ROOT)
+        );
+        assert_ne!(env["EXPEDITION_ROOT"], "/");
+    }
+
+    #[test]
+    fn inactive_expedition_never_authorizes_root_paths() {
+        let policy = Policy::from_yaml_string(
+            r#"
+- name: expedition-read
+  decision: allow
+  match:
+    any_capability: ["fs.read:${EXPEDITION_ROOT}/**"]
+"#,
+            &default_policy_env(),
+            "inactive-expedition.yaml",
+        )
+        .unwrap();
+
+        let result = evaluate(&[Capability::new("fs.read:/etc/passwd")], &policy);
+
+        assert_ne!(result.decision, Decision::Allow);
     }
 }

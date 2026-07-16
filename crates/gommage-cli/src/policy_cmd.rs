@@ -955,7 +955,8 @@ fn parse_raw_policy_rules(
     for file in files {
         let raw = std::fs::read_to_string(file)
             .with_context(|| format!("reading policy file {}", file.display()))?;
-        let substituted = substitute_env(&raw, env);
+        let substituted = substitute_env(&raw, env)
+            .with_context(|| format!("substituting policy variables in {}", file.display()))?;
         let rules: Vec<RawRule> = serde_yaml::from_str(&substituted)
             .with_context(|| format!("parsing policy file {}", file.display()))?;
         for (index, rule) in rules.into_iter().enumerate() {
@@ -1219,7 +1220,7 @@ fn build_policy_layer_report(
         let files = collect_policy_files(&layer.dir)?;
         let records = parse_raw_policy_rules(&files, env)?;
         entries.push(PolicyLayerEntry {
-            name: layer.name,
+            name: layer.name().to_string(),
             dir: path_display(&layer.dir),
             files: files.len(),
             rules: records.len(),

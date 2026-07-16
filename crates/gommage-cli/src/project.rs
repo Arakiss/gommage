@@ -205,15 +205,18 @@ fn project_policy(root: &str) -> String {
 # - an expedition is active from this project root; or
 # - GOMMAGE_PROJECT_POLICY_DIR points at this policy.d directory.
 #
-# Keep this file reviewed like code. Add fixtures in ../policy-fixtures.yaml
-# before trusting a new allow/ask/deny behavior.
+# Project policy is tightening-only: it may ask for approval or deny, but it
+# cannot grant permissions that the operator's user policy did not grant.
+# Keep this file reviewed like code and add fixtures in
+# ../policy-fixtures.yaml before trusting new behavior.
 
-- name: project-allow-expedition-writes
-  decision: allow
+- name: project-protect-local-environment
+  decision: gommage
   match:
     any_capability:
-      - "fs.write:{root}/**"
-  reason: "project policy allows writes inside the active expedition root"
+      - "fs.write:{root}/.env"
+      - "fs.write:{root}/.env.local"
+  reason: "project policy protects local environment credentials"
 "#
     )
 }
@@ -222,14 +225,14 @@ fn project_fixtures(root: &str) -> String {
     format!(
         r#"version: 1
 cases:
-  - name: project_allows_expedition_write
-    description: Project policy permits writes inside the active expedition root.
+  - name: project_protects_local_environment
+    description: Project policy blocks writes to local environment credentials.
     tool: Write
     input:
-      file_path: "{root}/README.md"
+      file_path: "{root}/.env.local"
     expect:
-      decision: allow
-      matched_rule: project-allow-expedition-writes
+      decision: gommage
+      matched_rule: project-protect-local-environment
 "#
     )
 }
@@ -237,6 +240,9 @@ cases:
 const PROJECT_README: &str = r#"# Gommage Project Policy
 
 This directory contains project-local Gommage policy and fixtures.
+
+Project policy is tightening-only. It can require approval or deny an action,
+but it cannot add permissions beyond the operator-controlled user policy.
 
 Use it as a reviewed project layer, not as hidden runtime state:
 

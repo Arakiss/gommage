@@ -299,7 +299,7 @@ fn negative_allow_condition_can_only_withdraw_a_grant() {
 }
 
 #[test]
-fn lower_layers_can_tighten_but_never_relax() {
+fn project_layers_cannot_relax_operator_policy() {
     let project = tempfile::tempdir().unwrap();
     let user = tempfile::tempdir().unwrap();
     fs::write(
@@ -322,34 +322,20 @@ fn lower_layers_can_tighten_but_never_relax() {
     )
     .unwrap();
 
-    let policy = Policy::load_from_layers(
+    let error = Policy::load_from_layers(
         &[
-            PolicyLayer::new("project", project.path()),
-            PolicyLayer::new("user", user.path()),
+            PolicyLayer::user(user.path()),
+            PolicyLayer::project(project.path()),
         ],
         &HashMap::new(),
     )
-    .unwrap();
-    let result = evaluate(&[capability("cap:A")], &policy);
+    .unwrap_err();
 
-    assert_eq!(
-        result.decision,
-        Decision::Gommage {
-            reason: "user policy denies A".to_string(),
-            hard_stop: false,
-        }
-    );
-    let contributions = &provenance(&result, "cap:A").contributions;
-    assert_eq!(
-        contributions
-            .iter()
-            .map(|entry| (entry.layer.as_str(), entry.layer_index))
-            .collect::<Vec<_>>(),
-        vec![("project", 0), ("user", 1)]
-    );
-    assert_eq!(
-        result.matched_rule.as_ref().map(|rule| rule.name.as_str()),
-        Some("user-deny-a")
+    assert!(
+        error
+            .to_string()
+            .contains("project layers may only tighten"),
+        "{error}"
     );
 }
 
@@ -379,8 +365,8 @@ fn project_deny_tightens_an_earlier_allow() {
 
     let policy = Policy::load_from_layers(
         &[
-            PolicyLayer::new("user", user.path()),
-            PolicyLayer::new("project", project.path()),
+            PolicyLayer::user(user.path()),
+            PolicyLayer::project(project.path()),
         ],
         &HashMap::new(),
     )

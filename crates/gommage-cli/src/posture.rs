@@ -145,7 +145,7 @@ fn build_posture_report(layout: &HomeLayout) -> Result<PostureReport> {
     let layers = active_policy_layers(layout, expedition.as_ref())?
         .into_iter()
         .map(|layer| PostureLayer {
-            name: layer.name,
+            name: layer.name().to_string(),
             dir: path_display(&layer.dir),
         })
         .collect::<Vec<_>>();

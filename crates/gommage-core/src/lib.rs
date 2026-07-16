@@ -36,6 +36,6 @@ pub use evaluator::{
 pub use hardstop::HardStopHit;
 pub use mapper::CapabilityMapper;
 pub use picto::{Picto, PictoConsume, PictoLookup, PictoReadStore, PictoStatus, PictoStore};
-pub use policy::{Match, Policy, PolicyLayer, Rule, RuleDecision, RuleSource};
+pub use policy::{Match, Policy, PolicyLayer, PolicyLayerKind, Rule, RuleDecision, RuleSource};
 pub use shell::shell_write_targets;
 pub use toolcall::ToolCall;
