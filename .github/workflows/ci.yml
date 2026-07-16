@@ -161,7 +161,9 @@ jobs:
       - name: Verify release authority boundaries
         run: sh scripts/check-release-authority-boundaries.sh
       - name: Verify SemVer workflow is not a no-op
-        run: sh scripts/check-semver-workflow.sh
+        run: |
+          sh scripts/check-semver-workflow.sh
+          sh scripts/test-select-semver-release-type.sh
       - name: Verify installer release resolution
         run: sh scripts/check-installer-release-resolution.sh
       - name: Verify stdlib root mirrors
@@ -285,39 +287,17 @@ jobs:
             sleep $((attempt * 10))
           done
           cargo fetch --locked
-      - name: Select effective release type
+      - name: Select intended release type
         id: semver-mode
         shell: bash
         env:
           BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
           set -euo pipefail
-
-          release_type_for() {
-            local output_name="$1"
-            local manifest="$2"
-            local current baseline
-
-            current="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$manifest" | head -n 1)"
-            baseline="$(git show "origin/${BASE_REF}:${manifest}" \
-              | sed -n 's/^version = "\([^"]*\)"/\1/p' \
-              | head -n 1)"
-            test -n "$current"
-            test -n "$baseline"
-
-            if [ "$current" = "$baseline" ]; then
-              # cargo-semver-checks otherwise treats an unchanged version as a
-              # major release and skips every compatibility lint.
-              echo "${output_name}=patch" >> "$GITHUB_OUTPUT"
-            else
-              # An explicit version change must carry its own SemVer claim.
-              # Leaving this empty makes cargo-semver-checks derive the type.
-              echo "${output_name}=" >> "$GITHUB_OUTPUT"
-            fi
-          }
-
-          release_type_for core crates/gommage-core/Cargo.toml
-          release_type_for audit crates/gommage-audit/Cargo.toml
+          echo "core=$(scripts/select-semver-release-type.sh \
+            "origin/${BASE_REF}" crates/gommage-core)" >> "$GITHUB_OUTPUT"
+          echo "audit=$(scripts/select-semver-release-type.sh \
+            "origin/${BASE_REF}" crates/gommage-audit)" >> "$GITHUB_OUTPUT"
       - name: Check gommage-core public API
         uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2
         with:

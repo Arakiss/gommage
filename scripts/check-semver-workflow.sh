@@ -1,7 +1,7 @@
 #!/bin/sh
-# Ensure unchanged package versions do not turn the SemVer check into a
-# no-op. cargo-semver-checks treats an unchanged version as a major release,
-# which skips compatibility lints unless the workflow supplies a release type.
+# Ensure unchanged package versions do not turn the SemVer check into a no-op.
+# The release type must come from package-scoped Conventional Commits until
+# release-please updates manifests, rather than from an unchanged version.
 set -eu
 
 workflow="${1:-.github/workflows/ci.yml}"
@@ -21,15 +21,18 @@ require_literal() {
 }
 
 require_literal 'id: semver-mode' \
-  'missing version-aware release-type selection'
-require_literal 'release_type_for core crates/gommage-core/Cargo.toml' \
-  'gommage-core does not select an effective release type'
-require_literal 'release_type_for audit crates/gommage-audit/Cargo.toml' \
-  'gommage-audit does not select an effective release type'
-# These are intentionally literal workflow expressions and shell fragments.
+  'missing commit-aware release-type selection'
+require_literal 'scripts/select-semver-release-type.sh' \
+  'release type is not derived from package-scoped Conventional Commits'
+require_literal 'scripts/test-select-semver-release-type.sh' \
+  'release-type selection regression tests are not wired into CI'
 # shellcheck disable=SC2016
-require_literal 'echo "${output_name}=patch" >> "$GITHUB_OUTPUT"' \
-  'unchanged versions are not forced through patch compatibility checks'
+require_literal '"origin/${BASE_REF}" crates/gommage-core' \
+  'gommage-core does not select an intended release type'
+# shellcheck disable=SC2016
+require_literal '"origin/${BASE_REF}" crates/gommage-audit' \
+  'gommage-audit does not select an intended release type'
+# These are intentionally literal workflow expressions.
 # shellcheck disable=SC2016
 require_literal 'release-type: ${{ steps.semver-mode.outputs.core }}' \
   'gommage-core action does not consume the selected release type'
@@ -39,4 +42,4 @@ require_literal 'release-type: ${{ steps.semver-mode.outputs.audit }}' \
 require_literal "baseline-rev: origin/\${{ github.base_ref || 'main' }}" \
   'SemVer actions do not compare against the pull-request base'
 
-echo "SemVer workflow checks unchanged versions with patch compatibility"
+echo "SemVer workflow enforces package-scoped Conventional Commit intent"
