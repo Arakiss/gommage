@@ -1,0 +1,1 @@
+cd /tmp/project && printf data > src/lib.rs; git push origin main

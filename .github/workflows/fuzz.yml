@@ -46,13 +46,18 @@ jobs:
           workspaces: fuzz -> target
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --version "${CARGO_FUZZ_VERSION}" --locked
+      - name: Validate seed corpus
+        run: cargo test --manifest-path fuzz/Cargo.toml
       - name: Build target
         run: cargo fuzz build "${{ matrix.target }}"
       - name: Run target
-        run: >-
-          cargo fuzz run "${{ matrix.target }}" --
-          -max_total_time="${FUZZ_TIME}"
-          -rss_limit_mb=3072
+        run: |
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          cargo fuzz run "${{ matrix.target }}" \
+            "fuzz/corpus/${{ matrix.target }}" \
+            "fuzz/seeds/${{ matrix.target }}" -- \
+            -max_total_time="${FUZZ_TIME}" \
+            -rss_limit_mb=3072
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
