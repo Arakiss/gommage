@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use gommage_core::{
-    Capability, Decision, MatchedRule, Policy, evaluate, runtime::default_policy_env,
+    Capability, CapabilityProvenance, Decision, MatchedRule, Policy, evaluate,
+    runtime::default_policy_env,
 };
 use serde::Serialize;
 use std::{
@@ -76,6 +77,8 @@ struct ReplayEntry {
     original_matched_rule: Option<MatchedRule>,
     replayed_matched_rule: Option<MatchedRule>,
     matched_rule_changed: bool,
+    original_capability_provenance: Vec<CapabilityProvenance>,
+    replayed_capability_provenance: Vec<CapabilityProvenance>,
     original_policy_version: String,
     replayed_policy_version: String,
     policy_version_changed: bool,
@@ -131,6 +134,8 @@ fn build_replay_report(audit_path: &Path, policy_path: &Path) -> Result<ReplayRe
             matched_rule_changed: entry.matched_rule != replay.matched_rule,
             original_matched_rule: entry.matched_rule,
             replayed_matched_rule: replay.matched_rule,
+            original_capability_provenance: entry.capability_provenance,
+            replayed_capability_provenance: replay.capability_provenance,
             policy_version_changed: entry.policy_version != replay.policy_version,
             original_policy_version: entry.policy_version,
             replayed_policy_version: replay.policy_version,

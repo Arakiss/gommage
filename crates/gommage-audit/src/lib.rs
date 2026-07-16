@@ -14,7 +14,7 @@
 //! and at most the last line is corrupt — everything before is still valid.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use gommage_core::{Capability, Decision, EvalResult, MatchedRule, ToolCall};
+use gommage_core::{Capability, CapabilityProvenance, Decision, EvalResult, MatchedRule, ToolCall};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
@@ -50,6 +50,10 @@ pub struct AuditEntry {
     pub tool: String,
     pub input_hash: String,
     pub capabilities: Vec<Capability>,
+    /// Deterministic per-capability policy provenance. Older signed entries do
+    /// not contain this additive field and deserialize to an empty vector.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capability_provenance: Vec<CapabilityProvenance>,
     pub decision: Decision,
     pub matched_rule: Option<MatchedRule>,
     pub policy_version: String,
@@ -204,6 +208,7 @@ impl AuditWriter {
             tool: call.tool.clone(),
             input_hash: call.input_hash(),
             capabilities: eval.capabilities.clone(),
+            capability_provenance: eval.capability_provenance.clone(),
             decision: eval.decision.clone(),
             matched_rule: eval.matched_rule.clone(),
             policy_version: eval.policy_version.clone(),
@@ -258,7 +263,7 @@ impl AuditWriter {
 /// and verifying. We emit the fields in a fixed order so byte-output is stable
 /// across serde versions.
 fn canonical_bytes(e: &AuditEntry) -> Vec<u8> {
-    let obj = serde_json::json!({
+    let mut obj = serde_json::json!({
         "v": e.version,
         "id": e.id,
         "ts": e.ts,
@@ -270,6 +275,15 @@ fn canonical_bytes(e: &AuditEntry) -> Vec<u8> {
         "policy_version": e.policy_version,
         "expedition": e.expedition,
     });
+    if !e.capability_provenance.is_empty() {
+        obj.as_object_mut()
+            .expect("canonical audit entry is an object")
+            .insert(
+                "capability_provenance".to_string(),
+                serde_json::to_value(&e.capability_provenance)
+                    .expect("serializing capability provenance cannot fail"),
+            );
+    }
     // Sorted key rendering.
     canonical_render(&obj).into_bytes()
 }

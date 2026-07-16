@@ -7,112 +7,133 @@
 - name: allow-kubectl-readonly
   decision: allow
   match:
-    any_capability:
+    all_capability:
       - "k8s.read:<any>"
+      - "proc.exec:**kubectl **"
   reason: "kubectl read-only commands are safe"
 
-- name: allow-kubectl-exec-port-forward
+- name: allow-kubectl-exec
   decision: allow
   match:
-    any_capability:
+    all_capability:
       - "k8s.exec:<pod>"
+      - "proc.exec:**kubectl **exec**"
+  reason: "debug-level kubectl exec is typically needed in-session"
+
+- name: allow-kubectl-port-forward
+  decision: allow
+  match:
+    all_capability:
       - "k8s.port-forward:<resource>"
-  reason: "debug-level kubectl ops are typically needed in-session"
+      - "proc.exec:**kubectl **port-forward**"
+  reason: "debug-level kubectl port-forward is typically needed in-session"
 
 - name: gate-kubectl-apply
   decision: ask_picto
   required_scope: "k8s.apply"
   match:
-    any_capability:
+    all_capability:
       - "k8s.apply:<manifest>"
+      - "proc.exec:**kubectl **apply**"
   reason: "kubectl apply mutates cluster state"
 
 - name: gate-kubectl-delete
   decision: ask_picto
   required_scope: "k8s.delete"
   match:
-    any_capability:
+    all_capability:
       - "k8s.delete:*"
+      - "proc.exec:**kubectl **delete**"
   reason: "kubectl delete needs a picto"
 
 - name: gate-kubectl-rollout-restart
   decision: ask_picto
   required_scope: "k8s.rollout"
   match:
-    any_capability:
+    all_capability:
       - "k8s.rollout:restart"
+      - "proc.exec:**kubectl **rollout restart**"
   reason: "rollout restart causes downtime — picto required"
 
 - name: gate-kubectl-scale
   decision: ask_picto
   required_scope: "k8s.scale"
   match:
-    any_capability:
+    all_capability:
       - "k8s.scale:<resource>"
+      - "proc.exec:**kubectl **scale**"
   reason: "scaling mutates cluster capacity — picto required"
 
 # --- terraform ------------------------------------------------------------
 - name: allow-terraform-readonly
   decision: allow
   match:
-    any_capability:
+    all_capability:
       - "terraform.read:<any>"
+      - "proc.exec:**terraform **"
   reason: "terraform plan/init/validate/fmt/output are non-destructive"
 
 - name: gate-terraform-apply
   decision: ask_picto
   required_scope: "terraform.apply"
   match:
-    any_capability:
+    all_capability:
       - "terraform.apply:<plan>"
+      - "proc.exec:**terraform **apply**"
   reason: "terraform apply mutates infrastructure"
 
 - name: gate-terraform-destroy
   decision: ask_picto
   required_scope: "terraform.destroy"
   match:
-    any_capability:
+    all_capability:
       - "terraform.destroy:<any>"
+      - "proc.exec:**terraform **destroy**"
   reason: "terraform destroy tears down infrastructure — picto required"
 
 # --- aws ------------------------------------------------------------------
 - name: allow-aws-readonly
   decision: allow
   match:
-    any_capability:
+    all_capability:
       - "aws.read:<any>"
+      - "proc.exec:**aws **"
   reason: "aws describe-/list-/get- are read-only"
 
 - name: gate-aws-s3-rm
   decision: ask_picto
   required_scope: "aws.s3.rm"
   match:
-    any_capability:
+    all_capability:
       - "aws.s3.rm:**"
+      - "proc.exec:**aws s3 rm **"
   reason: "aws s3 rm deletes objects — picto required"
 
 - name: gate-aws-s3-rb
   decision: ask_picto
   required_scope: "aws.s3.rb"
   match:
-    any_capability:
+    all_capability:
       - "aws.s3.rb:**"
+      - "proc.exec:**aws s3 rb **"
   reason: "aws s3 rb deletes a bucket — picto required"
 
 - name: gate-aws-iam
   decision: ask_picto
   required_scope: "aws.iam"
   match:
-    any_capability:
+    all_capability:
       - "aws.iam:*"
+      - "proc.exec:**aws iam **"
   reason: "aws iam write actions need a picto"
 
 - name: gate-aws-ec2-terminate
   decision: ask_picto
   required_scope: "aws.ec2.terminate"
   match:
-    any_capability:
+    all_capability:
       - "aws.ec2.terminate:<instance>"
+      - "proc.exec:**aws ec2 terminate-instances**"
   reason: "ec2 terminate destroys compute — picto required"
 
 # --- gh (GitHub CLI) ------------------------------------------------------
@@ -120,31 +141,36 @@
   decision: ask_picto
   required_scope: "gh.pr.merge.admin"
   match:
-    any_capability:
+    all_capability:
       - "gh.pr.merge.admin:<pr>"
+      - "gh.pr.merge:<pr>"
+      - "proc.exec:**gh pr merge**"
   reason: "administrative PR merges bypass branch protection — picto required"
 
 - name: allow-gh-pr-merge
   decision: allow
   match:
-    any_capability:
+    all_capability:
       - "gh.pr.merge:<pr>"
+      - "proc.exec:**gh pr merge**"
   reason: "routine PR merges rely on repository branch protection and required checks"
 
 - name: gate-gh-release-create
   decision: ask_picto
   required_scope: "gh.release.create"
   match:
-    any_capability:
+    all_capability:
       - "gh.release.create:*"
+      - "proc.exec:**gh release create **"
   reason: "release cuts a tag; irreversible in the registry sense"
 
 - name: gate-gh-workflow-run
   decision: ask_picto
   required_scope: "gh.workflow.run"
   match:
-    any_capability:
+    all_capability:
       - "gh.workflow.run:*"
+      - "proc.exec:**gh workflow run **"
   reason: "triggering a workflow costs CI minutes and may deploy"
 
 - name: gate-gh-repo-delete

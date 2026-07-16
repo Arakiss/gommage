@@ -2,7 +2,7 @@ use crate::{Capability, error::GommageError};
 use globset::{Glob, GlobMatcher};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -64,9 +64,19 @@ pub struct Rule {
     pub source: RuleSource,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleSource {
+    /// Stable name supplied for the policy layer (`org`, `project`, `user`,
+    /// or `inline` for policies compiled from a string).
+    pub layer: String,
+    /// Position of the layer in the load request. This remains distinct from
+    /// the name so repeated layer names still have deterministic ordering.
+    pub layer_index: usize,
+    /// Source policy file for compatibility provenance and operator tooling.
     pub file: PathBuf,
+    /// Lexicographic position of the file inside its layer.
+    pub file_index: usize,
+    /// Declaration position of the rule inside its source file.
     pub index: usize,
 }
 
@@ -106,6 +116,19 @@ impl Match {
             .iter()
             .all(|p| !caps.iter().any(|c| p.is_match(c.as_str())))
     }
+
+    /// Returns `true` when this match clause positively covers `capability`.
+    ///
+    /// Whole-set matching decides whether a rule is eligible. Coverage is
+    /// narrower: only a positive `any_capability` or `all_capability` pattern
+    /// can authorize or restrict an individual capability. Negative patterns
+    /// are conditions and never provide coverage by themselves.
+    pub fn covers(&self, capability: &crate::Capability) -> bool {
+        self.any_capability
+            .iter()
+            .chain(&self.all_capability)
+            .any(|pattern| pattern.is_match(capability.as_str()))
+    }
 }
 
 /// A canvas is the active compiled policy for the current expedition. It is
@@ -144,8 +167,9 @@ impl Policy {
         )
     }
 
-    /// Load policy files from ordered layers. Earlier layers have higher
-    /// precedence because evaluation is first-match-wins.
+    /// Load policy files from ordered layers. Evaluation preserves first-match
+    /// ordering inside each layer while aggregating contributions from all
+    /// layers conservatively.
     pub fn load_from_layers(
         layers: &[PolicyLayer],
         env: &HashMap<String, String>,
@@ -155,11 +179,13 @@ impl Policy {
         }
 
         let mut files = Vec::new();
-        for layer in layers {
-            for file in collect_policy_files(&layer.dir)? {
+        for (layer_index, layer) in layers.iter().enumerate() {
+            for (file_index, file) in collect_policy_files(&layer.dir)?.into_iter().enumerate() {
                 files.push(LayeredPolicyFile {
                     layer_name: layer.name.clone(),
+                    layer_index,
                     layer_root: layer.dir.clone(),
+                    file_index,
                     path: file.path,
                 });
             }
@@ -179,7 +205,17 @@ impl Policy {
         let path = PathBuf::from(source_label);
         let mut rules = Vec::new();
         for (index, raw) in raw_rules.into_iter().enumerate() {
-            rules.push(compile_rule(raw, path.clone(), index, &path_normalizer)?);
+            rules.push(compile_rule(
+                raw,
+                RuleSource {
+                    layer: "inline".to_string(),
+                    layer_index: 0,
+                    file: path.clone(),
+                    file_index: 0,
+                    index,
+                },
+                &path_normalizer,
+            )?);
         }
         use sha2::Digest as _;
         let mut h = sha2::Sha256::new();
@@ -220,14 +256,12 @@ impl PathNormalizer {
     }
 
     fn normalize_capabilities(&self, caps: &[Capability]) -> Vec<Capability> {
-        let mut out = Vec::with_capacity(caps.len());
-        let mut seen = HashSet::new();
-        for cap in caps {
-            let normalized = self.normalize_capability_str(cap.as_str());
-            if seen.insert(normalized.clone()) {
-                out.push(Capability::new(normalized));
-            }
-        }
+        let mut out: Vec<Capability> = caps
+            .iter()
+            .map(|cap| Capability::new(self.normalize_capability_str(cap.as_str())))
+            .collect();
+        out.sort_by(|left, right| left.as_str().as_bytes().cmp(right.as_str().as_bytes()));
+        out.dedup_by(|left, right| left.as_str() == right.as_str());
         out
     }
 
@@ -284,7 +318,9 @@ fn is_path_capability_namespace(namespace: &str) -> bool {
 #[derive(Debug)]
 struct LayeredPolicyFile {
     layer_name: String,
+    layer_index: usize,
     layer_root: PathBuf,
+    file_index: usize,
     path: PathBuf,
 }
 
@@ -313,9 +349,12 @@ fn collect_policy_files(dir: &Path) -> Result<Vec<LayeredPolicyFile>, GommageErr
 
     Ok(files
         .into_iter()
-        .map(|path| LayeredPolicyFile {
+        .enumerate()
+        .map(|(file_index, path)| LayeredPolicyFile {
             layer_name: "user".to_string(),
+            layer_index: 0,
             layer_root: dir.to_path_buf(),
+            file_index,
             path,
         })
         .collect())
@@ -352,8 +391,13 @@ fn load_policy_files(
         for (index, raw) in raw_rules.into_iter().enumerate() {
             rules.push(compile_rule(
                 raw,
-                file.path.clone(),
-                index,
+                RuleSource {
+                    layer: file.layer_name.clone(),
+                    layer_index: file.layer_index,
+                    file: file.path.clone(),
+                    file_index: file.file_index,
+                    index,
+                },
                 &path_normalizer,
             )?);
         }
@@ -412,8 +456,7 @@ fn update_layered_policy_hash(
 
 fn compile_rule(
     raw: RawRule,
-    file: PathBuf,
-    index: usize,
+    source: RuleSource,
     path_normalizer: &PathNormalizer,
 ) -> Result<Rule, GommageError> {
     // Validate decision/field combinations early — a policy with inconsistent
@@ -436,6 +479,18 @@ fn compile_rule(
             raw.name
         )));
     }
+    if raw.r#match.any_capability.is_empty() && raw.r#match.all_capability.is_empty() {
+        return Err(GommageError::Policy(format!(
+            "rule {:?}: at least one positive any_capability or all_capability pattern is required",
+            raw.name
+        )));
+    }
+    if raw.decision != RuleDecision::Allow && !raw.r#match.none_capability.is_empty() {
+        return Err(GommageError::Policy(format!(
+            "rule {:?}: none_capability is only valid with decision=allow",
+            raw.name
+        )));
+    }
 
     let r#match = Match {
         any_capability: compile_globs(&raw.r#match.any_capability, path_normalizer)?,
@@ -451,7 +506,7 @@ fn compile_rule(
         bind_input: raw.bind_input,
         r#match,
         reason: raw.reason,
-        source: RuleSource { file, index },
+        source,
     })
 }
 
@@ -793,12 +848,12 @@ mod tests {
         assert_eq!(
             normalized,
             vec![
-                Capability::new("fs.write:/home/operator/.gommage/policy.d/x.yaml"),
                 Capability::new("fs.read:/home/operator"),
                 Capability::new("fs.search:/home/operator/src"),
-                Capability::new("fs.write:~other/.gommage/policy.d/x.yaml"),
+                Capability::new("fs.write:/home/operator/.gommage/policy.d/x.yaml"),
                 Capability::new("fs.write:/home/operator2/settings.json"),
                 Capability::new("fs.write:relative/path"),
+                Capability::new("fs.write:~other/.gommage/policy.d/x.yaml"),
                 Capability::new("proc.exec:$HOME/bin/tool"),
             ]
         );

@@ -4,30 +4,42 @@
   decision: ask_picto
   required_scope: "net.fetch"
   match:
-    any_capability:
+    all_capability:
       - "net.fetch:*"
+      - "net.out:*"
   reason: "fetching arbitrary URLs can disclose prompts or pull untrusted content; require picto"
 
 - name: ask-web-search
   decision: ask_picto
   required_scope: "net.search"
   match:
-    any_capability:
+    all_capability:
       - "net.search:web"
+      - "net.search.query:*"
   reason: "web search leaves the local trust boundary; require picto"
 
 - name: ask-mcp-write
   decision: ask_picto
   required_scope: "mcp.write"
   match:
-    any_capability:
+    all_capability:
       - "mcp.write:*"
+      - "mcp.call:*"
   reason: "MCP write-like tools execute outside Gommage's direct control; require picto"
+
+- name: ask-mcp-read
+  decision: ask_picto
+  required_scope: "mcp.call"
+  match:
+    all_capability:
+      - "mcp.read:*"
+      - "mcp.call:*"
+  reason: "MCP read-like tools execute outside Gommage's direct control; require picto"
 
 - name: ask-mcp-generic
   decision: ask_picto
   required_scope: "mcp.call"
   match:
-    any_capability:
+    all_capability:
       - "mcp.call:*"
   reason: "unclassified MCP tools require an explicit picto by default"

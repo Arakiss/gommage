@@ -1,5 +1,5 @@
 use super::*;
-use gommage_core::Decision;
+use gommage_core::{CapabilityProvenance, CapabilityProvenanceStatus, Decision};
 use rand_core::OsRng;
 use serde_json::json;
 use tempfile::tempdir;
@@ -19,11 +19,34 @@ fn append_and_verify() {
         matched_rule: None,
         capabilities: vec![Capability::new("proc.exec:ls")],
         policy_version: "sha256:test".into(),
+        capability_provenance: vec![CapabilityProvenance {
+            capability: Capability::new("proc.exec:ls"),
+            status: CapabilityProvenanceStatus::PolicyBypassed,
+            effective_decision: Some(Decision::Allow),
+            contributions: Vec::new(),
+        }],
     };
-    w.append(&call, &eval, Some("expedition-x")).unwrap();
+    let entry = w.append(&call, &eval, Some("expedition-x")).unwrap();
+    assert_eq!(entry.capability_provenance, eval.capability_provenance);
     w.append(&call, &eval, Some("expedition-x")).unwrap();
     let n = verify_log(&path, &sk.verifying_key()).unwrap();
     assert_eq!(n, 2);
+}
+
+#[test]
+fn legacy_entries_deserialize_without_capability_provenance() {
+    let entry: AuditEntry = serde_json::from_str(
+        r#"{"v":1,"id":"audit_legacy","ts":"2026-04-24T00:00:00Z","tool":"Bash","input_hash":"sha256:input","capabilities":["proc.exec:ls"],"decision":{"kind":"allow"},"matched_rule":null,"policy_version":"sha256:old","expedition":null,"sig":"ed25519:test"}"#,
+    )
+    .unwrap();
+
+    assert!(entry.capability_provenance.is_empty());
+    assert!(
+        serde_json::to_value(entry)
+            .unwrap()
+            .get("capability_provenance")
+            .is_none()
+    );
 }
 
 #[test]
@@ -55,6 +78,7 @@ fn recent_stream_items_summarizes_decisions_and_events() {
         matched_rule: None,
         capabilities: vec![Capability::new("proc.exec:ls")],
         policy_version: "sha256:test".into(),
+        capability_provenance: Vec::new(),
     };
     w.append(&call, &eval, Some("expedition-x")).unwrap();
     w.append_event(AuditEvent::PictoRevoked { id: "p1".into() })
@@ -113,6 +137,7 @@ fn mixed_decision_and_event_log_verifies() {
         matched_rule: None,
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
+        capability_provenance: Vec::new(),
     };
     w.append(&call, &eval, Some("exp")).unwrap();
     w.append_event(AuditEvent::PictoRevoked { id: "p1".into() })
@@ -141,6 +166,7 @@ fn explain_reports_total_verified_and_no_anomalies_on_clean_log() {
         matched_rule: None,
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
+        capability_provenance: Vec::new(),
     };
     for _ in 0..3 {
         w.append(&call, &eval, Some("exp")).unwrap();
@@ -171,12 +197,14 @@ fn explain_flags_policy_version_change() {
         matched_rule: None,
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
+        capability_provenance: Vec::new(),
     };
     let eval_b = EvalResult {
         decision: Decision::Allow,
         matched_rule: None,
         capabilities: vec![],
         policy_version: "sha256:v2".into(),
+        capability_provenance: Vec::new(),
     };
     w.append(&call, &eval_a, None).unwrap();
     w.append(&call, &eval_b, None).unwrap();
@@ -208,6 +236,7 @@ fn explain_flags_bad_signature_but_keeps_walking() {
         matched_rule: None,
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
+        capability_provenance: Vec::new(),
     };
     w.append(&call, &eval, None).unwrap();
     w.append(&call, &eval, None).unwrap();
@@ -244,6 +273,7 @@ fn tampered_line_fails() {
         matched_rule: None,
         capabilities: vec![],
         policy_version: "sha256:test".into(),
+        capability_provenance: Vec::new(),
     };
     w.append(&call, &eval, None).unwrap();
     drop(w);

@@ -4,14 +4,17 @@
   decision: ask_picto
   required_scope: "deploy.vercel:prod"
   match:
-    any_capability:
+    all_capability:
       - "deploy.vercel:<prod-or-preview>"
+      - "net.out:vercel.com"
+      - "proc.exec:**vercel **"
   reason: "vercel production deploys require a picto"
 
 - name: ask-docker-push
   decision: ask_picto
   required_scope: "docker.push"
   match:
-    any_capability:
+    all_capability:
       - "docker.push:**"
+      - "proc.exec:**docker push **"
   reason: "docker pushes require a picto (registry-wide action)"

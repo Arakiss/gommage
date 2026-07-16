@@ -70,6 +70,16 @@ fn replay_json_reports_changed_decision_and_skips_events() {
         report["entries"][0]["replayed_matched_rule"]["name"].as_str(),
         Some("allow-main-push-now")
     );
+    assert_eq!(
+        report["entries"][0]["original_capability_provenance"]
+            .as_array()
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        report["entries"][0]["replayed_capability_provenance"][0]["status"].as_str(),
+        Some("resolved")
+    );
 }
 
 #[test]

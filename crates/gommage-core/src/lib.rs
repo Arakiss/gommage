@@ -29,10 +29,13 @@ pub use approval_webhook::{
 };
 pub use capability::Capability;
 pub use error::GommageError;
-pub use evaluator::{Decision, EvalResult, MatchedRule, evaluate, evaluate_bypass};
+pub use evaluator::{
+    CapabilityProvenance, CapabilityProvenanceStatus, Decision, EvalResult, MatchedRule,
+    RuleContribution, evaluate, evaluate_bypass,
+};
 pub use hardstop::HardStopHit;
 pub use mapper::CapabilityMapper;
 pub use picto::{Picto, PictoConsume, PictoLookup, PictoReadStore, PictoStatus, PictoStore};
-pub use policy::{Match, Policy, PolicyLayer, Rule, RuleDecision};
+pub use policy::{Match, Policy, PolicyLayer, Rule, RuleDecision, RuleSource};
 pub use shell::shell_write_targets;
 pub use toolcall::ToolCall;

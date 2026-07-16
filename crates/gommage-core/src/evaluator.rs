@@ -1,5 +1,6 @@
 use crate::{Capability, Policy, Rule, RuleDecision, hardstop};
 use serde::{Deserialize, Serialize};
+use std::{cmp::Ordering, collections::BTreeMap};
 
 /// The final decision the daemon will return to the agent.
 ///
@@ -41,68 +42,161 @@ pub struct MatchedRule {
     pub index: usize,
 }
 
+/// How one normalized capability participated in policy evaluation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityProvenanceStatus {
+    /// At least one policy layer contributed a decision for the capability.
+    Resolved,
+    /// No policy layer contributed, so the call fails closed.
+    Unresolved,
+    /// This capability triggered a compiled-in hard-stop.
+    HardStop,
+    /// Evaluation stopped after a sibling capability triggered a hard-stop.
+    SkippedDueToHardStop,
+    /// Policy evaluation was explicitly bypassed for this capability.
+    PolicyBypassed,
+}
+
+/// One layer's first matching rule for a normalized capability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleContribution {
+    /// Stable layer name retained from policy loading.
+    pub layer: String,
+    /// Layer precedence in the ordered load request.
+    pub layer_index: usize,
+    /// Source file order inside the layer.
+    pub file_index: usize,
+    /// Compatibility rule provenance.
+    pub rule: MatchedRule,
+    /// Decision contributed by this layer for the capability.
+    pub decision: Decision,
+}
+
+/// Complete deterministic provenance for one normalized capability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityProvenance {
+    /// Normalized capability this provenance describes.
+    pub capability: Capability,
+    /// Whether the capability resolved, failed closed, or was skipped.
+    pub status: CapabilityProvenanceStatus,
+    /// Conservative resolution of this capability's layer contributions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_decision: Option<Decision>,
+    /// At most one first-match contribution per policy layer.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contributions: Vec<RuleContribution>,
+}
+
 /// The full result of evaluation: decision + provenance + the capabilities that
 /// were in play at the time. Stored in audit so `gommage explain` can be exact.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EvalResult {
     pub decision: Decision,
     pub matched_rule: Option<MatchedRule>,
     pub capabilities: Vec<Capability>,
     pub policy_version: String,
+    /// Per-capability provenance. The default preserves deserialization of
+    /// evaluation results recorded before compositional policy evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capability_provenance: Vec<CapabilityProvenance>,
 }
 
 /// Pure evaluation. Given the set of capabilities produced by the mapper and a
 /// compiled policy, produce a decision.
 ///
 /// Ordering rules (**do not change without updating the determinism suite**):
-///   1. Hardcoded hardstop check (always first, cannot be bypassed by policy).
-///   2. Iterate `policy.rules` in declared order. First rule whose match clause
-///      accepts the capabilities wins.
-///   3. If no rule matches, fail closed: `Gommage { reason: "no rule matched (fail-closed)" }`.
+///   1. Normalize, byte-sort, and deduplicate capabilities.
+///   2. Check hardcoded hard-stops (always first, cannot be bypassed by policy).
+///   3. Resolve each capability independently, preserving first-match only
+///      inside one layer and one capability.
+///   4. Aggregate all layer contributions conservatively: deny beats ask,
+///      ask beats allow, and an unresolved capability fails closed.
 pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
     let caps = policy.normalize_capabilities(caps);
     if let Some(hit) = hardstop::check(&caps) {
+        let decision = hard_stop_decision(&hit);
+        let matched_rule = hard_stop_matched_rule(&hit);
         return EvalResult {
-            decision: Decision::Gommage {
-                reason: format!(
-                    "hard-stop {}: pattern {:?} matched {}",
-                    hit.name, hit.pattern, hit.capability
-                ),
-                hard_stop: true,
-            },
-            matched_rule: Some(MatchedRule {
-                name: format!("<hardcoded:{}>", hit.name),
-                file: "<compiled-in>".to_string(),
-                index: 0,
-            }),
+            decision: decision.clone(),
+            matched_rule: Some(matched_rule.clone()),
+            capability_provenance: hard_stop_provenance(
+                &caps,
+                &hit.capability,
+                &decision,
+                &matched_rule,
+            ),
             capabilities: caps,
             policy_version: policy.version_hash.clone(),
         };
     }
 
-    for rule in &policy.rules {
-        if rule.r#match.matches(&caps) {
-            return EvalResult {
-                decision: decision_from_rule(rule),
-                matched_rule: Some(MatchedRule {
-                    name: rule.name.clone(),
-                    file: rule.source.file.to_string_lossy().to_string(),
-                    index: rule.source.index,
-                }),
-                capabilities: caps,
-                policy_version: policy.version_hash.clone(),
-            };
+    let mut capability_provenance = Vec::with_capacity(caps.len());
+    for capability in &caps {
+        let contributions = resolve_capability(capability, &caps, policy);
+        if contributions.is_empty() {
+            capability_provenance.push(CapabilityProvenance {
+                capability: capability.clone(),
+                status: CapabilityProvenanceStatus::Unresolved,
+                effective_decision: None,
+                contributions,
+            });
+        } else {
+            let (effective_decision, _) = aggregate_contributions(&contributions);
+            capability_provenance.push(CapabilityProvenance {
+                capability: capability.clone(),
+                status: CapabilityProvenanceStatus::Resolved,
+                effective_decision: Some(effective_decision),
+                contributions,
+            });
         }
     }
 
+    let unresolved = capability_provenance
+        .iter()
+        .find(|entry| entry.status == CapabilityProvenanceStatus::Unresolved);
+    let mut contributions: Vec<&RuleContribution> = capability_provenance
+        .iter()
+        .flat_map(|entry| entry.contributions.iter())
+        .collect();
+    contributions.sort_by(|left, right| compare_contributions(left, right));
+
+    let policy_denies: Vec<&RuleContribution> = contributions
+        .iter()
+        .copied()
+        .filter(|entry| matches!(entry.decision, Decision::Gommage { .. }))
+        .collect();
+    let (decision, matched_rule) = if !policy_denies.is_empty() {
+        aggregate_contributions(&policy_denies)
+    } else if let Some(unresolved) = unresolved {
+        (
+            Decision::Gommage {
+                reason: format!(
+                    "capability {} unresolved by all policy layers (fail-closed)",
+                    unresolved.capability
+                ),
+                hard_stop: false,
+            },
+            None,
+        )
+    } else if caps.is_empty() {
+        (
+            Decision::Gommage {
+                reason: "no capabilities to authorize (fail-closed)".to_string(),
+                hard_stop: false,
+            },
+            None,
+        )
+    } else {
+        aggregate_contributions(&contributions)
+    };
+
     EvalResult {
-        decision: Decision::Gommage {
-            reason: "no rule matched (fail-closed)".to_string(),
-            hard_stop: false,
-        },
-        matched_rule: None,
+        decision,
+        matched_rule,
         capabilities: caps,
         policy_version: policy.version_hash.clone(),
+        capability_provenance,
     }
 }
 
@@ -117,30 +211,240 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
 /// truth shared by the `gommage-mcp` hook binary and the `gommage mcp` CLI
 /// adapter, without core depending on the (unpublished) stdlib assets.
 pub fn evaluate_bypass(caps: Vec<Capability>) -> EvalResult {
+    let caps = sort_and_deduplicate(caps);
     if let Some(hit) = hardstop::check(&caps) {
+        let decision = hard_stop_decision(&hit);
+        let matched_rule = hard_stop_matched_rule(&hit);
         return EvalResult {
-            decision: Decision::Gommage {
-                reason: format!(
-                    "hard-stop {}: pattern {:?} matched {}",
-                    hit.name, hit.pattern, hit.capability
-                ),
-                hard_stop: true,
-            },
-            matched_rule: Some(MatchedRule {
-                name: format!("<hardcoded:{}>", hit.name),
-                file: "<compiled-in>".to_string(),
-                index: 0,
-            }),
+            decision: decision.clone(),
+            matched_rule: Some(matched_rule.clone()),
+            capability_provenance: hard_stop_provenance(
+                &caps,
+                &hit.capability,
+                &decision,
+                &matched_rule,
+            ),
             capabilities: caps,
             policy_version: "bypass:compiled-hardstop".to_string(),
         };
     }
+    let capability_provenance = caps
+        .iter()
+        .cloned()
+        .map(|capability| CapabilityProvenance {
+            capability,
+            status: CapabilityProvenanceStatus::PolicyBypassed,
+            effective_decision: Some(Decision::Allow),
+            contributions: Vec::new(),
+        })
+        .collect();
     EvalResult {
         decision: Decision::Allow,
         matched_rule: None,
         capabilities: caps,
         policy_version: "bypass:policy-skipped".to_string(),
+        capability_provenance,
     }
+}
+
+fn resolve_capability(
+    capability: &Capability,
+    caps: &[Capability],
+    policy: &Policy,
+) -> Vec<RuleContribution> {
+    let mut contributions = Vec::new();
+    let mut current_layer = None;
+    let mut layer_resolved = false;
+
+    for rule in &policy.rules {
+        if current_layer != Some(rule.source.layer_index) {
+            current_layer = Some(rule.source.layer_index);
+            layer_resolved = false;
+        }
+        if layer_resolved {
+            continue;
+        }
+        if rule.r#match.matches(caps) && rule.r#match.covers(capability) {
+            contributions.push(contribution_from_rule(rule));
+            layer_resolved = true;
+        }
+    }
+
+    contributions
+}
+
+fn contribution_from_rule(rule: &Rule) -> RuleContribution {
+    RuleContribution {
+        layer: rule.source.layer.clone(),
+        layer_index: rule.source.layer_index,
+        file_index: rule.source.file_index,
+        rule: matched_rule_from_rule(rule),
+        decision: decision_from_rule(rule),
+    }
+}
+
+fn matched_rule_from_rule(rule: &Rule) -> MatchedRule {
+    MatchedRule {
+        name: rule.name.clone(),
+        file: rule.source.file.to_string_lossy().to_string(),
+        index: rule.source.index,
+    }
+}
+
+fn aggregate_contributions(
+    contributions: &[impl std::borrow::Borrow<RuleContribution>],
+) -> (Decision, Option<MatchedRule>) {
+    let contributions: Vec<&RuleContribution> = contributions
+        .iter()
+        .map(std::borrow::Borrow::borrow)
+        .collect();
+
+    let denies: Vec<&RuleContribution> = contributions
+        .iter()
+        .copied()
+        .filter(|entry| matches!(entry.decision, Decision::Gommage { .. }))
+        .collect();
+    if let Some(primary) = denies.first() {
+        let reason = match &primary.decision {
+            Decision::Gommage { reason, .. } => reason.clone(),
+            _ => unreachable!("deny contribution changed kind"),
+        };
+        let hard_stop = denies.iter().any(|entry| {
+            matches!(
+                entry.decision,
+                Decision::Gommage {
+                    hard_stop: true,
+                    ..
+                }
+            )
+        });
+        return (
+            Decision::Gommage { reason, hard_stop },
+            Some(primary.rule.clone()),
+        );
+    }
+
+    let asks: Vec<&RuleContribution> = contributions
+        .iter()
+        .copied()
+        .filter(|entry| matches!(entry.decision, Decision::AskPicto { .. }))
+        .collect();
+    if let Some(primary) = asks.first() {
+        let mut scopes: BTreeMap<String, (String, bool)> = BTreeMap::new();
+        for contribution in &asks {
+            let Decision::AskPicto {
+                required_scope,
+                reason,
+                bind_input,
+            } = &contribution.decision
+            else {
+                unreachable!("ask contribution changed kind");
+            };
+            let aggregate = scopes
+                .entry(required_scope.clone())
+                .or_insert_with(|| (reason.clone(), false));
+            aggregate.1 |= bind_input;
+        }
+
+        if scopes.len() > 1 {
+            let scopes = scopes.keys().cloned().collect::<Vec<_>>().join(", ");
+            return (
+                Decision::Gommage {
+                    reason: format!(
+                        "multiple Picto scopes required ({scopes}); split the call before requesting authorization"
+                    ),
+                    hard_stop: false,
+                },
+                Some(primary.rule.clone()),
+            );
+        }
+
+        let (required_scope, (reason, bind_input)) = scopes
+            .into_iter()
+            .next()
+            .expect("at least one ask contribution has one scope");
+        return (
+            Decision::AskPicto {
+                required_scope,
+                reason,
+                bind_input,
+            },
+            Some(primary.rule.clone()),
+        );
+    }
+
+    (
+        Decision::Allow,
+        contributions.first().map(|entry| entry.rule.clone()),
+    )
+}
+
+fn compare_contributions(left: &RuleContribution, right: &RuleContribution) -> Ordering {
+    left.layer_index
+        .cmp(&right.layer_index)
+        .then_with(|| left.file_index.cmp(&right.file_index))
+        .then_with(|| left.rule.index.cmp(&right.rule.index))
+        .then_with(|| left.layer.as_bytes().cmp(right.layer.as_bytes()))
+        .then_with(|| left.rule.file.as_bytes().cmp(right.rule.file.as_bytes()))
+        .then_with(|| left.rule.name.as_bytes().cmp(right.rule.name.as_bytes()))
+}
+
+fn sort_and_deduplicate(mut caps: Vec<Capability>) -> Vec<Capability> {
+    caps.sort_by(|left, right| left.as_str().as_bytes().cmp(right.as_str().as_bytes()));
+    caps.dedup_by(|left, right| left.as_str() == right.as_str());
+    caps
+}
+
+fn hard_stop_decision(hit: &hardstop::HardStopHit) -> Decision {
+    Decision::Gommage {
+        reason: format!(
+            "hard-stop {}: pattern {:?} matched {}",
+            hit.name, hit.pattern, hit.capability
+        ),
+        hard_stop: true,
+    }
+}
+
+fn hard_stop_matched_rule(hit: &hardstop::HardStopHit) -> MatchedRule {
+    MatchedRule {
+        name: format!("<hardcoded:{}>", hit.name),
+        file: "<compiled-in>".to_string(),
+        index: 0,
+    }
+}
+
+fn hard_stop_provenance(
+    caps: &[Capability],
+    hit: &Capability,
+    decision: &Decision,
+    matched_rule: &MatchedRule,
+) -> Vec<CapabilityProvenance> {
+    caps.iter()
+        .cloned()
+        .map(|capability| {
+            if &capability == hit {
+                CapabilityProvenance {
+                    capability,
+                    status: CapabilityProvenanceStatus::HardStop,
+                    effective_decision: Some(decision.clone()),
+                    contributions: vec![RuleContribution {
+                        layer: "<compiled-in>".to_string(),
+                        layer_index: 0,
+                        file_index: 0,
+                        rule: matched_rule.clone(),
+                        decision: decision.clone(),
+                    }],
+                }
+            } else {
+                CapabilityProvenance {
+                    capability,
+                    status: CapabilityProvenanceStatus::SkippedDueToHardStop,
+                    effective_decision: None,
+                    contributions: Vec::new(),
+                }
+            }
+        })
+        .collect()
 }
 
 fn decision_from_rule(rule: &Rule) -> Decision {

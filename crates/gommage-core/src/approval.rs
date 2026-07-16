@@ -371,6 +371,7 @@ mod tests {
             }),
             capabilities: vec![Capability::new("git.push:refs/heads/main")],
             policy_version: "sha256:test".to_string(),
+            capability_provenance: Vec::new(),
         }
     }
 

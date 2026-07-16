@@ -74,6 +74,23 @@
       - "fs.write:/etc/profile.d/**"
   reason: "login/shell rc files run code on every new shell; refusing to make the agent persistent"
 
+- name: allow-shell-project-reads
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:**cat **"
+      - "proc.exec:**head **"
+      - "proc.exec:**tail **"
+      - "proc.exec:**less **"
+      - "proc.exec:**od **"
+      - "proc.exec:**xxd **"
+      - "proc.exec:**base64 **"
+      - "proc.exec:**strings **"
+      - "proc.exec:**file **"
+    all_capability:
+      - "fs.read:${EXPEDITION_ROOT}/**"
+  reason: "shell reads within the current expedition's root are allowed"
+
 - name: allow-project-reads
   decision: allow
   match:
@@ -88,6 +105,20 @@
       - "fs.search:${EXPEDITION_ROOT}/**"
   reason: "searches within the current expedition's root are allowed"
 
+- name: allow-shell-project-writes
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:**tee **"
+      - "proc.exec:**cp **"
+      - "proc.exec:**install **"
+      - "proc.exec:**sed **"
+      - "proc.exec:**dd **"
+      - "proc.exec:**>**"
+    all_capability:
+      - "fs.write:${EXPEDITION_ROOT}/**"
+  reason: "shell writes within the current expedition's root are allowed"
+
 - name: allow-project-writes
   decision: allow
   match:
@@ -95,10 +126,44 @@
       - "fs.write:${EXPEDITION_ROOT}/**"
   reason: "writes within the current expedition's root are allowed"
 
-- name: allow-tmp-writes
+- name: allow-shell-tmp-writes
   decision: allow
   match:
     any_capability:
+      - "proc.exec:**tee **"
+      - "proc.exec:**cp **"
+      - "proc.exec:**install **"
+      - "proc.exec:**sed **"
+      - "proc.exec:**dd **"
+      - "proc.exec:**>**"
+    all_capability:
       - "fs.write:/tmp/**"
+  reason: "shell writes to ephemeral tmp paths are allowed"
+
+- name: allow-tmp-writes
+  decision: allow
+  match:
+    all_capability:
+      - "fs.write:/tmp/**"
+  reason: "ephemeral tmp paths are fair game"
+
+- name: allow-shell-var-tmp-writes
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:**tee **"
+      - "proc.exec:**cp **"
+      - "proc.exec:**install **"
+      - "proc.exec:**sed **"
+      - "proc.exec:**dd **"
+      - "proc.exec:**>**"
+    all_capability:
+      - "fs.write:/var/tmp/**"
+  reason: "shell writes to ephemeral var tmp paths are allowed"
+
+- name: allow-var-tmp-writes
+  decision: allow
+  match:
+    all_capability:
       - "fs.write:/var/tmp/**"
   reason: "ephemeral tmp paths are fair game"
