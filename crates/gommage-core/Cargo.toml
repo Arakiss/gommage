@@ -5,11 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Policy engine, capability mapper, and picto store for the Gommage permission harness."
+description = "Policy engine, capability mapper, and authorization authority for Gommage."
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+serde_json_canonicalizer.workspace = true
 serde_yaml.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

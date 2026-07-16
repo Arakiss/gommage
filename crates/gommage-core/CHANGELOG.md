@@ -198,6 +198,12 @@ enforced by `cargo-semver-checks` in CI.
 
 ### Added
 
+- An opt-in Authority v2 API with a single `BEGIN IMMEDIATE` SQLite writer,
+  RFC 8785 JCS/domain-separated Ed25519 envelopes, separate grant and ledger
+  keys, immutable approval requests, single-use grants bound to the exact
+  build/integration/tool/input/policy/capability context, signed state
+  revisions, atomic allow evidence, and externally anchorable checkpoints. The
+  API deliberately cannot import active or pending v1 grants.
 - `PictoLookup` and `PictoConsume` result types for verified picto lookup and
   verified transactional consumption.
 - Capability mapper stdlib now maps Claude Code `MultiEdit` calls to
@@ -216,6 +222,9 @@ enforced by `cargo-semver-checks` in CI.
 - Known Gommage file operands emit normalized `fs.read:*` or `fs.write:*`
   capabilities, including attached option values and local Cargo invocations;
   dynamic and parent-relative paths fail closed.
+- `serde_json_canonicalizer = 0.3.2` is pinned as a determinism-critical
+  dependency; signed Authority v2 types reject floats, duplicate members,
+  unknown fields, unsafe I-JSON integers, and noncanonical stored bytes.
 - Picto lookup/consume paths can now verify ed25519 signatures before granting
   an otherwise gated action.
 - Policy hashes now use relative file paths plus substituted effective contents
