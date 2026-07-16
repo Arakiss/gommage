@@ -16,6 +16,8 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Bumped determinism-critical dependency pins for `regex`, `rusqlite`,
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
+- Pinned `serde_json_canonicalizer` as a determinism-critical dependency for
+  Authority v2's RFC 8785 signed envelopes.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
   instead of an eight-tab information dump. It captures state before rendering,
   keeps the selected request, scope, input-binding boundary, draft,
@@ -38,6 +40,12 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- `gommage-core` now exposes an opt-in Authority v2 substrate: one SQLite
+  transactional writer for approval deduplication, single-use grants bound to
+  the exact build/integration/tool/input/policy/capability context, signed
+  append-only state revisions, atomic allow evidence, and externally anchorable
+  ledger checkpoints. Existing Picto and approval paths remain unchanged until
+  a later control-plane migration integrates the API.
 - `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes
   only the canonical observed tool input as well as its scope.
 - `gommage daemon reload` reloads policy and capability mappers in the running

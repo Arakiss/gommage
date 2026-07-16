@@ -1,14 +1,17 @@
-//! gommage-core — the policy engine, capability mapper, and picto store.
+//! gommage-core — policy, capability mapping, and authorization authority.
 //!
 //! This crate is intentionally free of runtime dependencies (no tokio, no clap, no I/O
-//! beyond SQLite for the picto store). Its job is to be a pure, testable kernel:
+//! beyond SQLite authorization stores). Its job is to be a testable kernel:
 //! `(ToolCall, Policy) → Decision` with deterministic semantics.
 
 pub mod approval;
 pub mod approval_webhook;
+pub mod authority;
 pub mod capability;
+pub mod crypto_envelope;
 pub mod error;
 pub mod evaluator;
+pub mod grant_v2;
 pub mod hardstop;
 pub mod mapper;
 pub mod picto;
@@ -27,9 +30,24 @@ pub use approval_webhook::{
     PreparedApprovalWebhook, approval_callback_nonce, approval_webhook_generic_payload,
     deliver_prepared_approval_webhook, prepare_approval_webhook,
 };
+pub use authority::{
+    ApprovalRequestV2, ApprovalResolutionKindV2, ApprovalResolutionV2, ApproveCommand,
+    ApproveResult, Authority, AuthorityConfig, AuthorityError, AuthorityMetadata,
+    AuthorizationContextV2, ConsumeCommand, ConsumeResult, CreateRequestCommand,
+    CreateRequestResult, CutoverStateV2, DenyCommand, DenyResult, FreshnessVerdict,
+    GrantNotUsableReason, LedgerCheckpointV2, LedgerEntryV2, LedgerPayloadV2, LedgerVerification,
+    RevokeCommand, RevokeResult, SignedLedgerCheckpointV2, VerifiedLedgerEntryV2,
+};
 pub use capability::Capability;
+pub use crypto_envelope::{
+    CryptoEnvelopeError, EnvelopeDomain, KeyBound, KeyPurpose, MAX_CANONICAL_BYTES, SignedJcs,
+};
 pub use error::GommageError;
 pub use evaluator::{Decision, EvalResult, MatchedRule, evaluate, evaluate_bypass};
+pub use grant_v2::{
+    DEFAULT_GRANT_TTL_SECONDS, GrantClaimFields, GrantClaimV2, GrantStateV2, GrantStatusV2,
+    GrantV2Error, MAX_GRANT_TTL_SECONDS, SignedGrantClaimV2, SignedGrantStateV2,
+};
 pub use hardstop::HardStopHit;
 pub use mapper::CapabilityMapper;
 pub use picto::{Picto, PictoConsume, PictoLookup, PictoReadStore, PictoStatus, PictoStore};
