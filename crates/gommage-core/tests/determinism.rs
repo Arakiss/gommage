@@ -32,13 +32,20 @@ struct Fixture {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Expected {
-    Allow,
+    Allow {
+        #[serde(default)]
+        matched_rule: Option<String>,
+    },
     Gommage {
         #[serde(default)]
         hard_stop: Option<bool>,
+        #[serde(default)]
+        matched_rule: Option<String>,
     },
     AskPicto {
         required_scope: String,
+        #[serde(default)]
+        matched_rule: Option<String>,
     },
 }
 
@@ -106,10 +113,13 @@ fn run_fixture(fixture: &Fixture, mapper: &CapabilityMapper) -> EvalResult {
 
 fn assert_matches_expected(path: &Path, fx: &Fixture, eval: &EvalResult) {
     match (&fx.expected, &eval.decision) {
-        (Expected::Allow, Decision::Allow) => {}
+        (Expected::Allow { matched_rule }, Decision::Allow) => {
+            assert_expected_rule(path, fx, eval, matched_rule.as_deref());
+        }
         (
             Expected::Gommage {
                 hard_stop: expected_hs,
+                matched_rule,
             },
             Decision::Gommage { hard_stop, .. },
         ) => {
@@ -122,10 +132,12 @@ fn assert_matches_expected(path: &Path, fx: &Fixture, eval: &EvalResult) {
                     path.display()
                 );
             }
+            assert_expected_rule(path, fx, eval, matched_rule.as_deref());
         }
         (
             Expected::AskPicto {
                 required_scope: expected_scope,
+                matched_rule,
             },
             Decision::AskPicto { required_scope, .. },
         ) => {
@@ -136,6 +148,7 @@ fn assert_matches_expected(path: &Path, fx: &Fixture, eval: &EvalResult) {
                 fx.name,
                 path.display()
             );
+            assert_expected_rule(path, fx, eval, matched_rule.as_deref());
         }
         (exp, got) => panic!(
             "fixture {:?} at {}:\n  expected: {exp:?}\n  got:      {got:?}\n  caps:     {:?}",
@@ -144,6 +157,21 @@ fn assert_matches_expected(path: &Path, fx: &Fixture, eval: &EvalResult) {
             eval.capabilities
         ),
     }
+}
+
+fn assert_expected_rule(path: &Path, fx: &Fixture, eval: &EvalResult, expected: Option<&str>) {
+    let Some(expected) = expected else {
+        return;
+    };
+    let actual = eval.matched_rule.as_ref().map(|rule| rule.name.as_str());
+    assert_eq!(
+        Some(expected),
+        actual,
+        "fixture {:?} at {}: matched rule mismatch\n  expected: {expected:?}\n  got:      {actual:?}\n  caps:     {:?}",
+        fx.name,
+        path.display(),
+        eval.capabilities
+    );
 }
 
 #[test]

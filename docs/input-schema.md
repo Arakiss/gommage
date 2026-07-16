@@ -53,9 +53,28 @@ Gommage treats every path it sees in `input.*` fields as an **opaque UTF-8 strin
 - Apply Unicode normalisation (NFC / NFD / NFKC / NFKD).
 - Decode percent-encoded bytes.
 
-A policy pattern like `fs.write:${EXPEDITION_ROOT}/**` matches the **literal string** in the capability. If the agent says `file_path = "/Users/you/proj/src/x.rs"`, the capability is `fs.write:/Users/you/proj/src/x.rs` and the glob is matched against that string. If the hook payload instead says `file_path = "src/x.rs"` with `cwd = "/Users/you/proj"`, the adapter adds `__gommage_file_path = "/Users/you/proj/src/x.rs"` so the stdlib emits both the raw and resolved forms.
+There is one deterministic lexical alias rule after mapping and before policy
+matching: for path-shaped filesystem capabilities (`fs.read`, `fs.search`,
+`fs.write`), leading `~`, `~/`, `$HOME/`, and `${HOME}/` are rewritten to the
+same `HOME` value that was supplied to policy loading. This does not touch
+`~user`, other environment variables, relative paths, symlinks, or `..`
+segments. It only makes shell-spelled home paths and native absolute home paths
+reach the same rule.
+
+A policy pattern like `fs.write:${EXPEDITION_ROOT}/**` matches the **capability
+string after this lexical home-alias step**. If the agent says
+`file_path = "/Users/you/proj/src/x.rs"`, the capability is
+`fs.write:/Users/you/proj/src/x.rs` and the glob is matched against that string.
+If the hook payload instead says `file_path = "src/x.rs"` with
+`cwd = "/Users/you/proj"`, the adapter adds
+`__gommage_file_path = "/Users/you/proj/src/x.rs"` so the stdlib emits both the
+raw and resolved forms.
 
 **Why no normalisation?** Every normalisation is a small inference step that depends on filesystem state at decision time. Resolving a symlink today is a different decision than resolving it tomorrow. Gommage's contract is that the decision is a pure function of the input — so the input must carry whatever semantics the agent wants honoured. Agents that want canonicalised behaviour should canonicalise in their tool-call construction (`realpath`, Node `fs.realpath`, etc.) before emitting.
+
+The home-alias rewrite above is not filesystem normalisation: it reads no
+filesystem state, uses the policy load environment already needed for `${HOME}`
+patterns, and preserves relative-path hard-stop semantics.
 
 **Implication for policy authors**: for real hook traffic, prefer the resolved stdlib capabilities (`fs.write:/absolute/path` and, when available, `fs.write.git_branch:<branch>:/absolute/path`) for project-scoped gates. For raw daemon `ToolCall` JSON that did not pass through the hook adapter, your patterns still need to account for the literal paths the caller supplied, or rely on the fail-closed default to deny the rest.
 

@@ -23,6 +23,10 @@ use gommage_core::{
 use proptest::prelude::*;
 use std::collections::HashMap;
 
+fn repo_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
 // ----------------------------------------------------------------------------
 // 1. Capability mapper fuzz
 // ----------------------------------------------------------------------------
@@ -50,8 +54,7 @@ fn arb_tool_call() -> impl Strategy<Value = ToolCall> {
 }
 
 fn shipped_mapper() -> CapabilityMapper {
-    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    CapabilityMapper::load_from_dir(&repo_root.join("capabilities"))
+    CapabilityMapper::load_from_dir(&repo_root().join("capabilities"))
         .expect("loading shipped mapper")
 }
 
@@ -65,6 +68,94 @@ proptest! {
     fn mapper_never_panics_on_arbitrary_tool_call(call in arb_tool_call()) {
         let m = shipped_mapper();
         let _ = m.map(&call);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 1b. Home path spelling equivalence
+// ----------------------------------------------------------------------------
+
+fn shipped_policy(home: &str) -> Policy {
+    let mut env = HashMap::<String, String>::new();
+    env.insert("HOME".to_string(), home.to_string());
+    env.insert(
+        "EXPEDITION_ROOT".to_string(),
+        "/__no_expedition__".to_string(),
+    );
+    Policy::load_from_dir(&repo_root().join("policies"), &env).expect("loading shipped policy")
+}
+
+fn bash_redirect_to(path: &str) -> ToolCall {
+    ToolCall {
+        tool: "Bash".to_string(),
+        input: serde_json::json!({ "command": format!("printf x > {path}") }),
+    }
+}
+
+fn decision_summary(eval: &gommage_core::EvalResult) -> (Decision, Option<String>) {
+    (
+        eval.decision.clone(),
+        eval.matched_rule.as_ref().map(|rule| rule.name.clone()),
+    )
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 128,
+        ..ProptestConfig::default()
+    })]
+
+    #[test]
+    fn home_path_spellings_decide_identically(
+        suffix in prop::sample::select(vec![
+            "/.gommage/policy.d/x.yaml",
+            "/.gommage/capabilities.d/x.yaml",
+            "/.gommage/key.ed25519",
+            "/.claude/settings.json",
+            "/.claude/hooks/pretool.sh",
+            "/.codex/hooks.json",
+            "/.codex/hooks/pretool.sh",
+            "/.local/bin/gommage",
+            "/.local/bin/gommage-daemon",
+            "/.local/bin/gommage-mcp",
+            "/.zshrc",
+            "/notes.txt",
+        ])
+    ) {
+        let home = "/__home__";
+        let policy = shipped_policy(home);
+        let mapper = shipped_mapper();
+        let absolute = format!("{home}{suffix}");
+        let expected = {
+            let caps = mapper.map(&bash_redirect_to(&absolute));
+            let eval = evaluate(&caps, &policy);
+            decision_summary(&eval)
+        };
+
+        for spelling in [
+            absolute.clone(),
+            format!("~{suffix}"),
+            format!("$HOME{suffix}"),
+            format!("${{HOME}}{suffix}"),
+        ] {
+            let caps = mapper.map(&bash_redirect_to(&spelling));
+            let eval = evaluate(&caps, &policy);
+            prop_assert_eq!(
+                decision_summary(&eval),
+                expected.clone(),
+                "home spelling {:?} diverged from absolute {:?}; caps: {:?}",
+                spelling,
+                absolute,
+                eval.capabilities
+            );
+            prop_assert!(
+                eval.capabilities
+                    .iter()
+                    .any(|cap| cap.as_str() == format!("fs.write:{absolute}")),
+                "evaluation did not retain the canonical fs.write capability for {spelling:?}; caps: {:?}",
+                eval.capabilities
+            );
+        }
     }
 }
 

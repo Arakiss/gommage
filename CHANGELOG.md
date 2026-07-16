@@ -25,6 +25,17 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   a key, migrate a legacy database, or leave WAL/SHM sidecars; commands that
   need runtime state retain the explicit initialization path.
 
+### Fixed
+
+- Filesystem policy evaluation now normalizes leading home aliases (`~/`,
+  `$HOME/`, `${HOME}/`) for `fs.read`, `fs.search`, and `fs.write`
+  capabilities before matching rules. Bash redirects such as
+  `cat >> ~/.gommage/policy.d/x.yaml` now hit the same harness-integrity rules
+  as native absolute-path writes to `${HOME}/.gommage/...`. `Policy` now owns
+  that load-time normalization context, so downstream Rust callers must build
+  it through `load_from_dir`, `load_from_layers`, or `from_yaml_string` instead
+  of a struct literal.
+
 ### Added
 
 - `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes

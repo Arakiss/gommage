@@ -101,7 +101,12 @@ sandboxing and host-agent config review for that boundary.
 
 An agent operating on a repo containing hostile content — a symlinked `README.md` pointing at `/etc/shadow`, a project-local `.gommage/policy.d/` override placed under the repo by an attacker, a file named `../../../etc/passwd` — should not be able to extract capabilities Gommage wouldn't otherwise grant.
 
-Gommage's input specification (see Section 3) treats paths as **opaque strings**: no symlink resolution, no relative-path collapsing, no case-folding. The capability mapper renders `fs.read:<literal path as sent by the agent>`. Globs in policy match on that literal.
+Gommage's input specification (see Section 3) treats paths as **opaque strings**:
+no symlink resolution, no relative-path collapsing, no case-folding. The only
+path rewrite is deterministic and lexical: before policy matching, path-shaped
+filesystem capabilities (`fs.read`, `fs.search`, `fs.write`) normalize leading
+`~`, `~/`, `$HOME/`, and `${HOME}/` to the same `HOME` value used when loading
+policy. Globs in policy match on that capability string.
 
 **Implication**: your policy patterns should account for likely variations. For example, `fs.write:${EXPEDITION_ROOT}/**` does NOT match `fs.write:/symlink/to/expedition/root/x.txt` because Gommage does not resolve the symlink — the agent would have to produce the canonical path in its tool call for the allow to apply. This is deliberate: the decision boundary is the _string the agent emits_, not the filesystem state.
 
@@ -212,8 +217,9 @@ What the evaluator **does not** read, by deliberate omission:
 
 What the mapper does with paths:
 
-- Paths in `tool_input` are passed through as **opaque UTF-8 strings** — no normalization, canonicalization, or symlink resolution.
-- Path globs in policy patterns (`fs.write:**/node_modules/**`) match the **string** the agent emitted, not a resolved filesystem path.
+- Paths in `tool_input` are passed through as **opaque UTF-8 strings** — no `realpath`, relative-segment collapse, case-folding, Unicode normalization, or symlink resolution.
+- Before policy matching, path-shaped filesystem capabilities (`fs.read`, `fs.search`, `fs.write`) normalize only leading home aliases (`~`, `~/`, `$HOME/`, `${HOME}/`) to the `HOME` value supplied at policy load. Relative paths stay relative.
+- Path globs in policy patterns (`fs.write:**/node_modules/**`) match that deterministic capability string, not a resolved filesystem path.
 
 What is considered a "heuristic" and therefore **NOT** in Gommage:
 

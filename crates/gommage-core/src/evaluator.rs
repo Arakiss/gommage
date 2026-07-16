@@ -60,7 +60,8 @@ pub struct EvalResult {
 ///      accepts the capabilities wins.
 ///   3. If no rule matches, fail closed: `Gommage { reason: "no rule matched (fail-closed)" }`.
 pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
-    if let Some(hit) = hardstop::check(caps) {
+    let caps = policy.normalize_capabilities(caps);
+    if let Some(hit) = hardstop::check(&caps) {
         return EvalResult {
             decision: Decision::Gommage {
                 reason: format!(
@@ -74,13 +75,13 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
                 file: "<compiled-in>".to_string(),
                 index: 0,
             }),
-            capabilities: caps.to_vec(),
+            capabilities: caps,
             policy_version: policy.version_hash.clone(),
         };
     }
 
     for rule in &policy.rules {
-        if rule.r#match.matches(caps) {
+        if rule.r#match.matches(&caps) {
             return EvalResult {
                 decision: decision_from_rule(rule),
                 matched_rule: Some(MatchedRule {
@@ -88,7 +89,7 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
                     file: rule.source.file.to_string_lossy().to_string(),
                     index: rule.source.index,
                 }),
-                capabilities: caps.to_vec(),
+                capabilities: caps,
                 policy_version: policy.version_hash.clone(),
             };
         }
@@ -100,7 +101,7 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
             hard_stop: false,
         },
         matched_rule: None,
-        capabilities: caps.to_vec(),
+        capabilities: caps,
         policy_version: policy.version_hash.clone(),
     }
 }

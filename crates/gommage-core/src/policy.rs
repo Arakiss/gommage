@@ -1,8 +1,8 @@
-use crate::error::GommageError;
+use crate::{Capability, error::GommageError};
 use globset::{Glob, GlobMatcher};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -115,6 +115,7 @@ impl Match {
 pub struct Policy {
     pub rules: Vec<Rule>,
     pub version_hash: String,
+    pub(crate) path_normalizer: PathNormalizer,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,11 +174,12 @@ impl Policy {
         source_label: &str,
     ) -> Result<Self, GommageError> {
         let substituted = substitute_env(s, env);
+        let path_normalizer = PathNormalizer::from_env(env);
         let raw_rules: Vec<RawRule> = serde_yaml::from_str(&substituted)?;
         let path = PathBuf::from(source_label);
         let mut rules = Vec::new();
         for (index, raw) in raw_rules.into_iter().enumerate() {
-            rules.push(compile_rule(raw, path.clone(), index)?);
+            rules.push(compile_rule(raw, path.clone(), index, &path_normalizer)?);
         }
         use sha2::Digest as _;
         let mut h = sha2::Sha256::new();
@@ -188,8 +190,95 @@ impl Policy {
         Ok(Policy {
             rules,
             version_hash: format!("sha256:{}", hex::encode(h.finalize())),
+            path_normalizer,
         })
     }
+
+    /// Return the canonical capability form policy evaluation should use.
+    ///
+    /// The mapper deliberately stays pure and preserves the tool-call string it
+    /// saw. Policy loading, however, already has the `${HOME}` substitution
+    /// environment, so this is the single place where home aliases can be
+    /// compared safely: `~/x`, `$HOME/x`, `${HOME}/x`, and `/abs/home/x`
+    /// become the same filesystem capability while relative paths stay
+    /// relative.
+    pub fn normalize_capabilities(&self, caps: &[Capability]) -> Vec<Capability> {
+        self.path_normalizer.normalize_capabilities(caps)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PathNormalizer {
+    home: Option<String>,
+}
+
+impl PathNormalizer {
+    fn from_env(env: &HashMap<String, String>) -> Self {
+        Self {
+            home: env.get("HOME").and_then(|home| normalize_home_value(home)),
+        }
+    }
+
+    fn normalize_capabilities(&self, caps: &[Capability]) -> Vec<Capability> {
+        let mut out = Vec::with_capacity(caps.len());
+        let mut seen = HashSet::new();
+        for cap in caps {
+            let normalized = self.normalize_capability_str(cap.as_str());
+            if seen.insert(normalized.clone()) {
+                out.push(Capability::new(normalized));
+            }
+        }
+        out
+    }
+
+    fn normalize_capability_str(&self, capability: &str) -> String {
+        let Some((namespace, payload)) = capability.split_once(':') else {
+            return capability.to_string();
+        };
+        if !is_path_capability_namespace(namespace) {
+            return capability.to_string();
+        }
+        let Some(path) = self.normalize_home_path(payload) else {
+            return capability.to_string();
+        };
+        format!("{namespace}:{path}")
+    }
+
+    fn normalize_home_path(&self, path: &str) -> Option<String> {
+        let home = self.home.as_deref()?;
+        if path == "~" || path == "$HOME" || path == "${HOME}" {
+            return Some(home.to_string());
+        }
+        for prefix in ["~/", "$HOME/", "${HOME}/"] {
+            if let Some(rest) = path.strip_prefix(prefix) {
+                return Some(join_home(home, rest));
+            }
+        }
+        None
+    }
+}
+
+fn normalize_home_value(home: &str) -> Option<String> {
+    if home.is_empty() {
+        return None;
+    }
+    let trimmed = home.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Some("/".to_string());
+    }
+    Some(trimmed.to_string())
+}
+
+fn join_home(home: &str, rest: &str) -> String {
+    if home == "/" {
+        format!("/{rest}")
+    } else {
+        format!("{home}/{rest}")
+    }
+}
+
+fn is_path_capability_namespace(namespace: &str) -> bool {
+    matches!(namespace, "fs.read" | "fs.search" | "fs.write")
 }
 
 #[derive(Debug)]
@@ -239,6 +328,7 @@ fn load_policy_files(
 ) -> Result<Policy, GommageError> {
     let mut rules: Vec<Rule> = Vec::new();
     let mut version = sha2::Sha256::new();
+    let path_normalizer = PathNormalizer::from_env(env);
     use sha2::Digest as _;
 
     for file in files {
@@ -260,7 +350,12 @@ fn load_policy_files(
         }
         let raw_rules: Vec<RawRule> = serde_yaml::from_str(&substituted)?;
         for (index, raw) in raw_rules.into_iter().enumerate() {
-            rules.push(compile_rule(raw, file.path.clone(), index)?);
+            rules.push(compile_rule(
+                raw,
+                file.path.clone(),
+                index,
+                &path_normalizer,
+            )?);
         }
     }
 
@@ -268,6 +363,7 @@ fn load_policy_files(
     Ok(Policy {
         rules,
         version_hash,
+        path_normalizer,
     })
 }
 
@@ -314,7 +410,12 @@ fn update_layered_policy_hash(
     hash.update(b"\0");
 }
 
-fn compile_rule(raw: RawRule, file: PathBuf, index: usize) -> Result<Rule, GommageError> {
+fn compile_rule(
+    raw: RawRule,
+    file: PathBuf,
+    index: usize,
+    path_normalizer: &PathNormalizer,
+) -> Result<Rule, GommageError> {
     // Validate decision/field combinations early — a policy with inconsistent
     // fields should fail at load, not at evaluation.
     if raw.decision == RuleDecision::AskPicto && raw.required_scope.is_none() {
@@ -337,9 +438,9 @@ fn compile_rule(raw: RawRule, file: PathBuf, index: usize) -> Result<Rule, Gomma
     }
 
     let r#match = Match {
-        any_capability: compile_globs(&raw.r#match.any_capability)?,
-        all_capability: compile_globs(&raw.r#match.all_capability)?,
-        none_capability: compile_globs(&raw.r#match.none_capability)?,
+        any_capability: compile_globs(&raw.r#match.any_capability, path_normalizer)?,
+        all_capability: compile_globs(&raw.r#match.all_capability, path_normalizer)?,
+        none_capability: compile_globs(&raw.r#match.none_capability, path_normalizer)?,
     };
 
     Ok(Rule {
@@ -354,13 +455,17 @@ fn compile_rule(raw: RawRule, file: PathBuf, index: usize) -> Result<Rule, Gomma
     })
 }
 
-fn compile_globs(pats: &[String]) -> Result<Vec<GlobMatcher>, GommageError> {
+fn compile_globs(
+    pats: &[String],
+    path_normalizer: &PathNormalizer,
+) -> Result<Vec<GlobMatcher>, GommageError> {
     pats.iter()
         .map(|p| {
-            Glob::new(p)
+            let normalized = path_normalizer.normalize_capability_str(p);
+            Glob::new(&normalized)
                 .map(|g| g.compile_matcher())
                 .map_err(|e| GommageError::Glob {
-                    pattern: p.clone(),
+                    pattern: normalized,
                     source: e,
                 })
         })
@@ -387,7 +492,7 @@ pub fn substitute_env(input: &str, env: &HashMap<String, String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Capability;
+    use crate::{Capability, Decision, evaluate};
 
     fn env() -> HashMap<String, String> {
         let mut e = HashMap::new();
@@ -607,5 +712,107 @@ mod tests {
 "#;
         let err = Policy::from_yaml_string(yaml, &HashMap::new(), "t").unwrap_err();
         assert!(matches!(err, GommageError::Policy(_)));
+    }
+
+    #[test]
+    fn home_alias_capability_hits_home_rule_before_broad_allow() {
+        let yaml = r#"
+- name: deny-gommage-home-tamper
+  decision: gommage
+  match:
+    any_capability: ["fs.write:${HOME}/.gommage/policy.d/**"]
+  reason: "protected"
+- name: broad-home-allow
+  decision: allow
+  match:
+    any_capability: ["fs.write:~/.gommage/**"]
+"#;
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/home/operator".to_string());
+        let policy = Policy::from_yaml_string(yaml, &env, "test.yaml").unwrap();
+
+        let eval = evaluate(
+            &[Capability::new("fs.write:~/.gommage/policy.d/x.yaml")],
+            &policy,
+        );
+
+        assert_eq!(
+            eval.matched_rule.as_ref().map(|rule| rule.name.as_str()),
+            Some("deny-gommage-home-tamper")
+        );
+        assert!(matches!(eval.decision, Decision::Gommage { .. }));
+        assert_eq!(
+            eval.capabilities,
+            vec![Capability::new(
+                "fs.write:/home/operator/.gommage/policy.d/x.yaml"
+            )]
+        );
+    }
+
+    #[test]
+    fn tilde_policy_pattern_matches_absolute_capability() {
+        let yaml = r#"
+- name: deny-shell-rc-write
+  decision: gommage
+  match:
+    any_capability: ["fs.write:~/.zshrc"]
+  reason: "protected"
+"#;
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/home/operator".to_string());
+        let policy = Policy::from_yaml_string(yaml, &env, "test.yaml").unwrap();
+
+        let eval = evaluate(
+            &[Capability::new("fs.write:/home/operator/.zshrc")],
+            &policy,
+        );
+
+        assert_eq!(
+            eval.matched_rule.as_ref().map(|rule| rule.name.as_str()),
+            Some("deny-shell-rc-write")
+        );
+    }
+
+    #[test]
+    fn home_alias_normalization_is_prefix_bounded_and_stable() {
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/home/operator/".to_string());
+        let policy = Policy::from_yaml_string("[]", &env, "test.yaml").unwrap();
+
+        let normalized = policy.normalize_capabilities(&[
+            Capability::new("fs.write:~/.gommage/policy.d/x.yaml"),
+            Capability::new("fs.write:/home/operator/.gommage/policy.d/x.yaml"),
+            Capability::new("fs.read:$HOME"),
+            Capability::new("fs.search:${HOME}/src"),
+            Capability::new("fs.write:~other/.gommage/policy.d/x.yaml"),
+            Capability::new("fs.write:/home/operator2/settings.json"),
+            Capability::new("fs.write:relative/path"),
+            Capability::new("proc.exec:$HOME/bin/tool"),
+        ]);
+
+        assert_eq!(
+            normalized,
+            vec![
+                Capability::new("fs.write:/home/operator/.gommage/policy.d/x.yaml"),
+                Capability::new("fs.read:/home/operator"),
+                Capability::new("fs.search:/home/operator/src"),
+                Capability::new("fs.write:~other/.gommage/policy.d/x.yaml"),
+                Capability::new("fs.write:/home/operator2/settings.json"),
+                Capability::new("fs.write:relative/path"),
+                Capability::new("proc.exec:$HOME/bin/tool"),
+            ]
+        );
+    }
+
+    #[test]
+    fn root_home_alias_does_not_introduce_a_double_slash() {
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/".to_string());
+        let policy = Policy::from_yaml_string("[]", &env, "test.yaml").unwrap();
+
+        assert_eq!(
+            policy.normalize_capabilities(&[Capability::new("fs.write:~/config")]),
+            vec![Capability::new("fs.write:/config")]
+        );
     }
 }
