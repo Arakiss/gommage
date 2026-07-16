@@ -17,13 +17,13 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
-  instead of an eight-tab information dump. The approval workbench keeps the
-  selected request, scope, Picto boundary, draft, confirmation, and result in
-  view; terminals below 80x24 safely fall back to a compact guide.
-- Snapshot and watch inspection no longer initialize Gommage homes or migrate
-  Picto databases. Read-only operator views load a captured inspection model,
-  while commands that need runtime state retain the explicit initialization
-  path.
+  instead of an eight-tab information dump. It captures state before rendering,
+  keeps the selected request, scope, input-binding boundary, draft,
+  confirmation, and result in view, and falls back safely below 80x24.
+- Snapshot and bounded watch inspection now use non-initializing policy reads
+  and strict read-only Picto SQLite access. They cannot create a home, generate
+  a key, migrate a legacy database, or leave WAL/SHM sidecars; commands that
+  need runtime state retain the explicit initialization path.
 
 ### Added
 
