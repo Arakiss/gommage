@@ -1,10 +1,11 @@
 # Audit log signature format
 
-The audit log (`$GOMMAGE_HOME/audit.log`) is **line-delimited JSON**: one entry
-per line, each line independently **ed25519-signed**. The signature covers the
-canonical JSON of the entry **minus its `sig` field**, so verification is
-line-local — kill the daemon mid-write and at most the last line is corrupt;
-every line before it stays independently verifiable.
+The audit log (`$GOMMAGE_HOME/audit.log`) is **line-delimited JSON**: one record
+per line, each record independently **ed25519-signed**. The signature covers the
+canonical JSON of that record **minus its `sig` field**, so authentication is
+line-local. This is a per-record signature format, not a hash chain: it proves
+the content of records that are present, but not that records were never
+deleted, reordered, duplicated, or truncated.
 
 The format is implemented in `crates/gommage-audit/src/lib.rs`. The field set
 below is exhaustive; treat it as a frozen contract (audit schema changes are
@@ -12,9 +13,11 @@ breaking — see [`BREAKING_CHANGES.md`](../BREAKING_CHANGES.md)).
 
 ---
 
-## 1. Two entry kinds
+## 1. Record kinds and versions
 
-Every line is one of two records, both at schema version `v: 1`.
+Every line is one of two record kinds. New decisions use schema version `v: 2`;
+lifecycle events remain at `v: 1`. The verifier also accepts legacy `v: 1`
+decision records so existing logs remain readable.
 
 ### Decision entries
 
@@ -22,12 +25,13 @@ Written for each policy decision. Fields, in this order:
 
 | Field | Type | Notes |
 |---|---|---|
-| `v` | integer | Audit schema version (`1`). |
+| `v` | integer | Decision audit schema version (`2` for new records; legacy `1` is verification-only). |
 | `id` | string | UUIDv7 (time-ordered). |
 | `ts` | string | RFC 3339 UTC timestamp. |
 | `tool` | string | The agent tool handle (`"Bash"`, `"Read"`, …). |
 | `input_hash` | string | `sha256:<hex>` over the canonical tool input. |
 | `capabilities` | array of string | Capabilities the mapper emitted. |
+| `capability_provenance` | array of object | Required in v2. One signed entry per normalized capability, including resolution status, effective decision, and the first matching contribution from each policy layer. Absent in legacy v1. |
 | `decision` | object | The `Decision` enum, internally tagged on `kind` (`{"kind":"allow"}`, `{"kind":"gommage","reason":…,"hard_stop":…}`, `{"kind":"ask_picto","required_scope":…,"reason":…,"bind_input":true}`). `bind_input` is omitted when false. |
 | `matched_rule` | object \| null | `{ name, file, index }` of the rule that fired, or null. |
 | `policy_version` | string | `sha256:<hex>` policy version hash in effect. |
@@ -52,8 +56,9 @@ expired, policy reloaded, bypass activated). Distinguished by `"kind":"event"`:
 Example decision line (wrapped for readability; one physical line in the file):
 
 ```json
-{"v":1,"id":"...","ts":"2026-06-04T12:00:00Z","tool":"Bash",
+{"v":2,"id":"...","ts":"2026-06-04T12:00:00Z","tool":"Bash",
  "input_hash":"sha256:...","capabilities":["git.push:refs/heads/main"],
+ "capability_provenance":[{"capability":"git.push:refs/heads/main","status":"resolved","effective_decision":{"kind":"ask_picto","required_scope":"git.push:main","reason":"..."},"contributions":[{"layer":"user","layer_index":0,"file_index":0,"rule":{"name":"gate-main-push","file":"20-git.yaml","index":0},"decision":{"kind":"ask_picto","required_scope":"git.push:main","reason":"..."}}]}],
  "decision":{"kind":"ask_picto","required_scope":"git.push:main","reason":"..."},
  "matched_rule":{"name":"gate-main-push","file":"20-git.yaml","index":0},
  "policy_version":"sha256:...","expedition":null,"sig":"ed25519:..."}
@@ -66,20 +71,25 @@ Example decision line (wrapped for readability; one physical line in the file):
 The per-line signature is computed over a **canonical rendering** of the entry
 with the `sig` field removed:
 
-- Decision entries are canonicalised over `v, id, ts, tool, input_hash,
-  capabilities, decision, matched_rule, policy_version, expedition`.
+- Decision v2 entries are canonicalised over `v, id, ts, tool, input_hash,
+  capabilities, capability_provenance, decision, matched_rule, policy_version,
+  expedition`. Legacy v1 omits `capability_provenance`.
 - Event entries are canonicalised over `v, id, ts, kind, event`.
 
 Canonical rendering sorts object keys lexicographically at every level, preserves
 array order, and uses `serde_json`'s string escaping for strings. This canonical
-form is deliberately independent of `serde_json` field ordering so the signed
-bytes are stable across serde versions. The signature string is
+form is deliberately independent of JSON object field order. Verification
+rejects duplicate object keys at every nesting depth, unsupported schema
+versions, missing or unexpected top-level fields, and malformed signature
+encodings. Nested fields are preserved when reconstructing the received signed
+payload, so an unknown nested mutation is not silently dropped before signature
+verification. The signature string is
 `ed25519:<standard-base64-no-pad>` of the 64-byte ed25519 signature, produced by
 the daemon keypair (`$GOMMAGE_HOME/key.ed25519`).
 
 ---
 
-## 3. Verifying the chain — `gommage audit-verify`
+## 3. Verifying records — `gommage audit-verify`
 
 `gommage audit-verify` walks the whole log and verifies every line against the
 verifying key derived from the daemon keypair:
@@ -100,6 +110,24 @@ The strict walk (`verify_log`) stops at the first line whose signature does not
 verify and reports the line number. The `--explain` report (`explain_log`) keeps
 going, recording each anomaly, so a forensic review sees the whole picture rather
 than only the first failure.
+
+### What verification proves
+
+A successful verification proves that every non-empty record currently in the
+file has an accepted schema and a valid signature under the supplied key. It
+does **not** prove log completeness or append order:
+
+- records can be removed or the file can be truncated without invalidating the
+  signatures of the remaining records;
+- a copied valid record can be duplicated, and ordering is only checked
+  heuristically through timestamps by `--explain`;
+- a holder of `$GOMMAGE_HOME/key.ed25519` can forge valid records;
+- there is no external checkpoint, sequence number, previous-record digest, or
+  transparency service in this format.
+
+For evidence that must survive compromise or prove completeness, export or
+anchor verified log snapshots outside the Gommage home. `state.sqlite` is only
+a rebuildable read model and does not add this guarantee.
 
 ---
 
@@ -144,6 +172,8 @@ evaluation has first-match ordering only within one layer and one capability.
 ## 5. Key management
 
 The signing key is the daemon ed25519 keypair at `$GOMMAGE_HOME/key.ed25519`
-(`chmod 0600`), generated on first daemon start. The same key signs audit lines
-and pictos and verifies picto signatures. Key rotation and compromise handling
-are covered in the root [`THREAT_MODEL.md` §6](../THREAT_MODEL.md#6-key-management).
+(`chmod 0600`), generated when the Gommage home is initialized. The same key
+signs audit lines and pictos and verifies picto signatures. User mode treats the
+operator UID and this key file as trusted: a process under the same UID can read
+or replace both. Key rotation and compromise handling are covered in the root
+[`THREAT_MODEL.md` §6](../THREAT_MODEL.md#6-key-management).

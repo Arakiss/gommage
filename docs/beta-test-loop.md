@@ -10,8 +10,11 @@ Run every command from a normal user shell. Keep native agent sandboxing enabled
 ## 1. Install
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --with-skill --skill-agent claude --verify
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  -o gommage-install.sh
+# Inspect gommage-install.sh before executing it.
+sh gommage-install.sh --with-skill --skill-agent claude --verify
 
 gommage --version
 gommage-mcp --version
@@ -23,13 +26,31 @@ gommage release verify --all-assets --json --require-sbom --require-provenance
 sh scripts/verify-release.sh --json --require-sbom --require-provenance
 ```
 
+The compatibility bootstrap above still comes from mutable `main`; separating
+download and execution does not satisfy the immutable release-install gate. For
+launch evidence, save the reviewed installer commit or use a commit-pinned raw URL.
+The bundled `--with-skill` path also defaults to a mutable skill ref that is not
+covered by the release archive signature; pin and record `--skill-ref` when it
+is part of the evidence set.
+Also exercise an interrupted/failing replacement between the three binaries,
+record file hashes and companion version strings to identify the mixed
+installation, and recover from the per-file backups. The installer is
+sequential, not transactional. The current `gommage verify` output includes
+companion version strings but does not compare their compatibility, so it is
+not the mixed-install detector for this fault test.
+
 Evidence to save:
 
 - installer output showing Sigstore and checksum verification
 - update output showing whether the installed binary matches the latest
   installable release
-- release verification JSON showing checksum, Sigstore, SBOM, and provenance
-  status for the current platform and the full supported platform matrix
+- release verification JSON showing checksum, Sigstore, SBOM, and GitHub
+  artifact-attestation status for the current platform and full supported
+  platform inventory; this authenticates digests and workflow identity, not a
+  hermetic/reproducible build or native execution
+- native execution evidence for each exact released asset digest on its
+  advertised OS/architecture
+- partial-install detection and backup-recovery evidence
 - versions for all three binaries
 - any OS-specific cosign hint if verification cannot run
 
@@ -75,7 +96,9 @@ Expected result:
 - `policy layers --json` shows user policy and any explicit org/project layers
 - `sandbox advise --json` is marked advisory only
 - `state verify --json` reports `ok` after rebuild and states that
-  `state.sqlite` matches the current audit ledger
+  `state.sqlite` matches the current available audit file; state schema v2 uses
+  `source_log: "audit.log"`, not `source_of_truth`; this is not a cryptographic
+  completeness or ordering check
 - bounded TUI watch prints two plain-text frames and no ANSI escapes
 - bounded TUI stream prints recent decision/event rows and no ANSI escapes
 - stream and metrics snapshots show daemon reachability, active pictos, local

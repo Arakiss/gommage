@@ -32,6 +32,12 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   per-capability/layer provenance, marks v1 provenance as unavailable, and
   labels `matched_rule` as an aggregate compatibility summary. The misleading
   synthetic global `rules` and `shadowed_rules` fields have been removed.
+- Public security and release documentation now distinguishes per-record audit
+  authentication from log completeness, signed Picto authority fields from
+  mutable lifecycle state, user-mode diagnostics from a protected managed
+  authority, and release workflow identity from hermetic build or native-runtime
+  evidence. Installer guidance now also documents the mutable bootstrap and
+  sequential, non-atomic binary replacement boundary.
 - Policy evaluation now resolves every normalized capability independently,
   preserves first-match ordering only within one layer and capability, and
   combines layer contributions conservatively. A deny beats an unresolved
@@ -168,7 +174,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   widening hook coverage safely.
 - `gommage update` checks the running CLI against the latest installable
   `gommage-cli-v*` release, and `gommage upgrade` delegates binary or
-  skill-only upgrades to the verified installer path.
+  skill-only upgrades to the release-verifying installer path.
 - `docs/updating.md` explains the update-versus-upgrade contract, pinned
   release installs, `--check`, `--force`, and when to refresh Codex/Claude Code
   skills without changing binaries.
@@ -305,7 +311,7 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - `gommage daemon install|status|uninstall` manages user-level launchd/systemd services so long sessions no longer require a foreground daemon process.
 - Stdlib capability coverage for Claude `Grep`, `WebFetch`, `WebSearch`, and MCP tool names (`mcp__<server>__<tool>`), with conservative picto defaults for web/MCP surfaces.
 - Sigstore keyless signing for release archives plus installer verification of both Cosign bundles and SHA-256 checksums.
-- `scripts/install.sh --with-skill`, `--skill-only`, and `--skill-agent codex|claude|all` so the verified installer can also install/update the Gommage agent skill for Codex and Claude Code.
+- `scripts/install.sh --with-skill`, `--skill-only`, and `--skill-agent codex|claude|all` so the release-archive-verifying installer can also install/update the separately distributed Gommage agent skill for Codex and Claude Code.
 - `gommage doctor` diagnoses the local home, key, policy, capability mapper, audit log, and daemon socket state.
 - `gommage verify` and `gommage verify --json` aggregate doctor, semantic smoke checks, and repeated `--policy-test <file>` fixtures into one readiness gate for installers, CI, and agent skills.
 - `gommage quickstart --self-test` runs the readiness gate after setup, with a
@@ -478,7 +484,8 @@ Initial scaffold. See commit `fcb4dfd` for the full diff.
 - Signed pictos: `ed25519` signatures, SQLite store, TTL ≤24 h, atomic
   `consume()`, status lifecycle (`active`/`pending_confirmation`/`spent`/
   `revoked`/`expired`).
-- Line-signed append-only audit log with `gommage audit-verify`.
+- Line-signed JSONL audit writer with `gommage audit-verify`; signatures were
+  per record and did not establish cryptographic log completeness.
 - CLI subcommands: `init`, `expedition start|end|status`, `grant`, `list`,
   `revoke`, `confirm`, `policy check|lint|hash`, `tail [-f]`, `explain`,
   `audit-verify`, `decide`, `mcp`.

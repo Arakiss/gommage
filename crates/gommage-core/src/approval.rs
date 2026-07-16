@@ -3,8 +3,9 @@
 //! Approval requests are operational state: they let a human review an
 //! `ask_picto` decision and mint a scope- or input-bound picto without editing
 //! policy.
-//! Forensics live in the signed audit log; this store is append-only JSONL so
-//! it remains easy for agents and humans to inspect.
+//! The normal path also emits independently signed audit records. This inbox is
+//! unsigned, append-oriented operational JSONL so it remains easy for agents
+//! and humans to inspect; it is not a cryptographic completeness boundary.
 
 use crate::{Capability, EvalResult, MatchedRule, ToolCall, error::GommageError};
 use serde::{Deserialize, Serialize};

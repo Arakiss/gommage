@@ -20,35 +20,46 @@ host is healthy until the command returns `pass` or an understood, documented
 
 ## Fast Path
 
-1. Prefer the verified GitHub Release installer for users:
-
-```sh
-curl --proto '=https' --tlsv1.2 -sSf \
-  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
-```
-
-2. To install binaries plus this agent skill for Codex and Claude Code:
+1. The current compatibility bootstrap downloads GitHub Release archives, but
+   it is not the immutable reference install path. Download it without piping
+   it to a shell:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
   https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --with-skill --skill-agent codex --skill-agent claude
+  -o gommage-install.sh
+# Inspect gommage-install.sh before executing it.
+sh gommage-install.sh
+```
+
+   The archive is Sigstore- and checksum-verified before binary writes. The
+   bootstrap script itself comes from mutable `main`; review it or commit-pin
+   the URL when that script is inside the threat model. Binary replacement is
+   sequential, not transactional.
+
+2. To install binaries plus this agent skill for Codex and Claude Code:
+
+```sh
+sh gommage-install.sh \
+  --with-skill --skill-agent codex --skill-agent claude
 ```
 
 3. To install or update only this skill:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf \
-  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --skill-only --skill-agent codex --skill-agent claude --no-prompt
+sh gommage-install.sh \
+  --skill-only --skill-agent codex --skill-agent claude --no-prompt
 ```
+
+   Skill files are a separate, unsigned distribution channel and default to
+   mutable `main`. Add `--skill-ref <reviewed-commit>` when reproducibility
+   matters.
 
 4. For a pinned release or custom install directory:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -sSf \
-  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-  | sh -s -- --version gommage-cli-vX.Y.Z-beta.N --bin-dir "$HOME/.local/bin"
+sh gommage-install.sh \
+  --version gommage-cli-vX.Y.Z-beta.N --bin-dir "$HOME/.local/bin"
 ```
 
 5. Set up the target agent. On mature dotfiles or existing hook stacks, inspect
@@ -101,6 +112,11 @@ Treat `verify --json` status as:
 - `pass`: doctor, built-in smoke checks, and requested policy fixtures passed.
 - `warn`: operable, commonly before the first audit entry or without a daemon socket.
 - `fail`: do not trust the hook path until fixed.
+
+`verify` reports the installed daemon and MCP companion version strings, but
+does not compare their compatibility with the CLI. A passing readiness result
+is therefore not proof that a partial installer failure left a coherent
+three-binary set.
 
 On a fresh machine, `verify --json` includes a top-level `hint` and reports
 `smoke.status: "skip"` when doctor already failed. Follow the hint before
@@ -259,7 +275,9 @@ Current beta distribution:
 - The installer verifies Sigstore bundle identity and SHA-256 before extracting.
 - `~/.gommage/state.sqlite` is a local SQLite read-model for fast TUI metrics
   and stream fallback. Rebuild with `gommage state rebuild`; verify with
-  `gommage state verify --json`. The signed `audit.log` remains authoritative.
+  `gommage state verify --json`. The available independently signed records in
+  `audit.log` are the rebuild input, but neither file proves history
+  completeness, order, or uniqueness.
 - Installing the `gommage-mcp` binary does not auto-register a universal MCP
   gateway. New agent hooks invoke `gommage hook --agent <host>` after `quickstart`;
   `gommage-mcp` remains explicit per stdio MCP server with
@@ -268,7 +286,7 @@ Current beta distribution:
 - The installer can also install/update this skill with `--with-skill` or `--skill-only`.
 - `gommage mascot` / `gommage logo` prints the Gommage Gestral terminal logo. Use `--plain` or `NO_COLOR=1` for script-safe output.
 - crates.io is supported for Rust-native source builds; GitHub Releases remain
-  the signed binary install path.
+  the signed binary-archive install path.
 
 Before claiming a newly published version, check `docs/publishing.md` and
 require the package gates there to pass.

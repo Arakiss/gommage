@@ -18,15 +18,22 @@ An AI agent, either by accident or under adversarial prompting, chooses to invok
 - `git push --force origin main`
 - `aws s3 rm s3://prod-data/ --recursive`
 
-Gommage denies via policy (`gommage`) or escalates out-of-band (`ask_picto`). The audit log records the attempt regardless of outcome.
+Gommage denies via policy (`gommage`) or escalates out-of-band (`ask_picto`). A
+successfully handled call on the normal hook and daemon path also emits a signed
+audit record for the attempt.
 
-### 1.2 Host-agent classifier drift
+### 1.2 Host permission variability
 
-The agent's built-in permission layer (e.g. Claude Code's transcript-aware classifier) starts flipping on trivial operations mid-session because of accumulated prior. Gommage gives you a stable, declarative second layer: the same `(mapper, policy, capabilities)` triple produces the same policy decision every time. Picto lookup is separate authorization state, so an active, expired, or spent grant can intentionally change the final result of an `ask_picto` rule.
+Host permission modes, persistent rules, sandbox configuration, and interactive
+approvals can differ between machines and sessions. Gommage adds a declarative
+layer with a narrower contract: the same observed call, mapper, and ordered
+policy layers produce the same policy result every time. Picto lookup is
+separate authorization state, so an active, expired, or spent grant can
+intentionally change the final result of an `ask_picto` rule.
 
 ### 1.3 Grant misuse (pictos)
 
-A one-shot break-glass grant must not become an ambient capability.
+A scoped break-glass grant must not become an ambient capability.
 
 - Pictos have mandatory `max_uses`, TTL ≤ 24 h, ed25519 signature bound to the daemon keypair.
 - Revocation is O(1) and visible in the audit log.
@@ -36,11 +43,24 @@ A one-shot break-glass grant must not become an ambient capability.
   picto cannot satisfy an input-bound rule.
 - `pending_confirmation` status exists for delegated grants that a second human must activate.
 
+Picto schema v1 signs the id, scope, maximum use count, expiry, creation time,
+reason, and optional input hash. Mutable `uses` and `status` fields are not in
+that signature; the SQLite transaction protects them in the normal daemon path.
+Signing and verification reject empty authority identifiers, delimiters and
+control characters in text fields, non-integral or non-UTC timestamps, invalid
+lifetimes/use counts, non-canonical input hashes, and non-canonical signature
+base64. They also cap signed UTF-8 text at 128 bytes for id, 512 for scope, and
+4,096 for reason. This keeps the unversioned newline-delimited v1 payload
+unambiguous for valid rows, including across input-bound and scope-only grants;
+it does not sign mutable `uses` or `status`.
+The same user key signs pictos and audit records. This is a user-mode grant
+mechanism, not a privilege boundary against the account that owns the store.
+
 ### 1.4 Audit gaps
 
-Every decision (`allow`, `gommage`, `ask`) and every authorization-state event (`picto-created`, `picto-confirmed`, `picto-consumed`, `picto-revoked`, `picto-rejected`, policy reload) produces an append-only JSONL entry signed with the daemon keypair. The signature covers the canonical bytes of the entry minus the `sig` field, so killing the daemon mid-write corrupts at most one line; all prior lines stay independently verifiable.
+The normal daemon path appends decisions (`allow`, `gommage`, `ask`) and authorization-state events (`picto-created`, `picto-confirmed`, `picto-consumed`, `picto-revoked`, `picto-rejected`, policy reload) as JSONL records signed with the daemon keypair. Decision records use schema v2 and lifecycle events use schema v1. The signature covers the strict canonical bytes of each record minus the `sig` field; duplicate keys, unexpected top-level fields, malformed canonical values, and bad signatures fail verification.
 
-`gommage audit-verify` walks the full log and returns a count of verified entries (or the line number of the first failure).
+`gommage audit-verify` walks the available file and returns a count of verified records (or the line number of the first failure). Records are independently authenticated: there is no hash chain, signed sequence number, checkpoint, or external witness. Deletion, truncation, reordering, or duplication of otherwise valid records is therefore outside the current cryptographic guarantee.
 
 ### 1.5 Accidental catastrophic destruction
 
@@ -82,6 +102,16 @@ A user with shell access under the same UID as the daemon can:
 
 Gommage **trusts** the local user. The directory is `chmod 0700` and the key is `chmod 0600`, but that is OS-enforced, not Gommage-enforced. If the threat model includes hostile local users, Gommage is the wrong layer.
 
+The daemon listens on one user-local Unix socket and its line-JSON protocol does
+not authenticate peer credentials. A process running as the same UID can call
+the exposed decision, reload, ping, and recent-audit operations. `gommage
+managed status` checks configuration paths, modes, user-service file presence,
+socket presence, hook status, and the current process environment. Its `mode`
+is `user_level`, `user_service_file_present`, or `unconfigured`; it reports
+`status_requires_root: false`, `isolation: "none"`, `tamper_resistance: "none"`,
+and `reference_ready: false` rather than presenting these signals as a protected
+policy authority.
+
 ### 2.2.1 Agent-controlled hook environment
 
 Some hosts let users or agents configure environment variables for hook
@@ -101,32 +131,58 @@ sandboxing and host-agent config review for that boundary.
 
 An agent operating on a repo containing hostile content — a symlinked `README.md` pointing at `/etc/shadow`, a project-local `.gommage/policy.d/` override placed under the repo by an attacker, a file named `../../../etc/passwd` — should not be able to extract capabilities Gommage wouldn't otherwise grant.
 
-Gommage's input specification (see Section 3) treats paths as **opaque strings**:
-no symlink resolution, no relative-path collapsing, no case-folding. The only
-path rewrite is deterministic and lexical: before policy matching, path-shaped
-filesystem capabilities (`fs.read`, `fs.search`, `fs.write`) normalize leading
-`~`, `~/`, `$HOME/`, and `${HOME}/` to the same `HOME` value used when loading
-policy. Globs in policy match on that capability string.
+Gommage never resolves paths through the filesystem: there is no symlink
+resolution, case-folding, or Unicode normalization. Raw paths already present
+in a canonical `ToolCall` remain opaque. For supported hook payloads, the
+adapter can add reserved absolute path fields by resolving relative paths
+lexically against the hook `cwd`; the typed Bash analyzer performs the same
+bounded lexical resolution for statically known operands. Before policy
+matching, path-shaped capabilities also normalize leading `~`, `~/`, `$HOME/`,
+and `${HOME}/` to the `HOME` value used while loading policy. Globs match the
+resulting capability string.
 
-**Implication**: your policy patterns should account for likely variations. For example, `fs.write:${EXPEDITION_ROOT}/**` does NOT match `fs.write:/symlink/to/expedition/root/x.txt` because Gommage does not resolve the symlink — the agent would have to produce the canonical path in its tool call for the allow to apply. This is deliberate: the decision boundary is the _string the agent emits_, not the filesystem state.
+**Implication**: your policy patterns should account for likely variations. For
+example, `fs.write:${EXPEDITION_ROOT}/**` does NOT match
+`fs.write:/symlink/to/expedition/root/x.txt` because Gommage does not resolve
+the symlink. The canonical tool call handed to the mapper—including reserved
+fields added by the host adapter—is the decision boundary, not filesystem
+state.
 
-**Users must**: configure their agent to canonicalize paths before tool use (`realpath`, `fs.realpath` in Node, etc.). Or accept the conservative posture: ambiguous paths get denied by the fail-closed default.
+**Users must**: rely only on adapter path forms they have tested. Integrations
+that do not supply trusted `cwd` metadata must send the intended path identity
+themselves. If symlink identity matters, canonicalize it before tool use
+(`realpath`, `fs.realpath` in Node, etc.) or rely on the conservative
+fail-closed result for unmatched forms.
+
+For Bash payloads, Gommage parses a bounded typed shell AST (64 KiB input, 16
+levels of nesting, and 512 commands) and unwraps the documented transparent
+wrappers such as `command`, `exec`, `env`, `sudo`, `doas`, `timeout`, `nice`,
+and `setsid`. Dynamic or unsupported command forms emit an ambiguous execution
+capability, which the bundled strict policy denies. Runtime behavior that is
+not present in the observed string remains outside the mapper: aliases,
+sourced functions, `eval`-generated commands, static `xargs` input,
+environment-dependent expansion, and symlink targets are examples. A custom
+broad `allow` rule can weaken the bundled policy boundary.
 
 Project-local policy is loaded only when an operator opts into a project layer
 through `GOMMAGE_PROJECT_POLICY_DIR` or starts an expedition whose root contains
-`.gommage/policy.d`. Treat project policy files as reviewed code. Org policy
-from `GOMMAGE_ORG_POLICY_DIR` loads before project policy, and user policy loads
-after project policy; `gommage policy layers --json` shows the exact active
-order and hash.
+`.gommage/policy.d`. Treat project policy files as reviewed code. Active layers
+are ordered organization, user, then project. A project-layer `allow` is
+rejected, so repository-controlled policy can only add `deny` or `ask_picto`
+constraints; it cannot positively authorize a capability. `gommage policy
+layers --json` shows the exact active order and hash.
 
 ### 2.4 Forged or tampered picto store
 
-An attacker with read access to `~/.gommage/pictos.sqlite` who tries to inject a picto row with a stolen signature, or modify an existing picto's scope/TTL:
+An attacker with write access to `~/.gommage/pictos.sqlite` who tries to inject a picto row with a stolen signature, or modify a signed field such as scope, limit, timestamp, reason, or input hash:
 
 - **Signature-based rejection**: at lookup and consume time, Gommage verifies the picto's `signature_b64` against the verifying key derived from the daemon keypair. A tampered row fails verification → rejected → audit entry says "bad signature".
+- **Lifecycle-state limit**: schema v1 does not sign `uses` or `status`. The normal daemon path updates those fields transactionally, but direct mutation by the trusted local user is not detected by `Picto::verify`.
 - **But**: if the attacker has the private key (local user compromise, Section 2.2), forgery succeeds. See 2.2.
 
-`gommage audit-verify --explain` verifies the signed audit trail itself and surfaces `picto_rejected` lifecycle events for tampered rows.
+`gommage audit-verify --explain` verifies each present signed audit record and
+surfaces `picto_rejected` lifecycle events for tampered rows. It does not prove
+that the file contains every record that was originally emitted.
 
 ### 2.5 TOCTOU between Gommage's decision and the agent's execution
 
@@ -155,9 +211,10 @@ past approval command, they could try to authorize an unintended action.
   hash, scope, policy version, and binding mode before it can apply a local
   approve or deny action. A callback for a different request or binding mode
   fails closed.
-- **Audit and confirmation.** One-shot pictos are consumed atomically. The TUI
+- **Audit and confirmation.** Picto use counts are updated atomically by the normal store path. The TUI
   requires an explicit confirmation keystroke. Approval request, resolution,
-  webhook delivery, and picto lifecycle events are signed in the audit log.
+  webhook delivery, and picto lifecycle events emitted by the daemon are
+  independently signed in the audit log.
 - **Current limit.** Gommage does not host an inbound callback receiver. A
   local process must provide the callback body, signature, timestamp, and
   shared-secret configuration to `gommage approval callback`. Outbound generic,
@@ -167,7 +224,7 @@ past approval command, they could try to authorize an unintended action.
 
 A picto's TTL is stored as a Unix timestamp at creation time (daemon clock). If the daemon clock drifts backwards, a picto could live longer than intended. If it drifts forwards, pictos expire faster.
 
-Gommage does not implement NTP verification or clock-source validation. We assume the host clock is monotonic and approximately correct. Enterprise operators should run NTP or equivalent; the audit log records the daemon's clock reading at each decision for forensic purposes.
+Gommage does not implement NTP verification or clock-source validation. It assumes the host wall clock is approximately correct and is not moved backwards unexpectedly. Enterprise operators should run NTP or equivalent; the audit log records the daemon's clock reading at each decision for forensic purposes.
 
 ### 2.8 Unicode and encoding tricks
 
@@ -198,7 +255,7 @@ Capability mapper rules compile user-supplied regex (from `capabilities/*.yaml`)
 
 ## 3. Canonical decision input
 
-The evaluator is pure: `evaluate(capabilities: &[Capability], policy: &Policy) -> EvalResult`. It reads nothing else. The mapper is also pure: `map(tool_call: &ToolCall) -> Vec<Capability>`.
+The evaluator is pure: it receives canonical capabilities and ordered policy layers and reads nothing else. The mapper is also pure: `map(tool_call: &ToolCall) -> Vec<Capability>`.
 
 `ToolCall` is the single frozen input:
 
@@ -217,9 +274,17 @@ What the evaluator **does not** read, by deliberate omission:
 
 What the mapper does with paths:
 
-- Paths in `tool_input` are passed through as **opaque UTF-8 strings** — no `realpath`, relative-segment collapse, case-folding, Unicode normalization, or symlink resolution.
-- Before policy matching, path-shaped filesystem capabilities (`fs.read`, `fs.search`, `fs.write`) normalize only leading home aliases (`~`, `~/`, `$HOME/`, `${HOME}/`) to the `HOME` value supplied at policy load. Relative paths stay relative.
-- Path globs in policy patterns (`fs.write:**/node_modules/**`) match that deterministic capability string, not a resolved filesystem path.
+- Paths already present in canonical `tool_input` are opaque UTF-8 strings: no
+  `realpath`, case-folding, Unicode normalization, or symlink resolution.
+- The hook adapter may add reserved absolute fields by resolving supported
+  relative file-tool paths lexically against its trusted `cwd`. The typed Bash
+  analyzer likewise uses the reserved `cwd` for supported static operands,
+  collapses `.` and repeated separators, and rejects `..` as ambiguous.
+- Before policy matching, path-shaped filesystem capabilities (`fs.read`,
+  `fs.search`, `fs.write`) normalize leading home aliases (`~`, `~/`, `$HOME/`,
+  `${HOME}/`) to the `HOME` value supplied at policy load.
+- Path globs in policy patterns (`fs.write:**/node_modules/**`) match that
+  deterministic capability string, not a filesystem-resolved path.
 
 What is considered a "heuristic" and therefore **NOT** in Gommage:
 
@@ -231,10 +296,11 @@ What **is not** a heuristic (still deterministic, documented behaviour):
 
 - Regex matching against tool inputs to extract capabilities (deterministic, reproducible).
 - Glob matching capabilities against policy patterns (deterministic, `globset` crate).
-- First-match-wins rule evaluation order (deterministic and part of the contract).
+- The first matching contribution within each layer for each capability (deterministic and part of the contract).
+- Restrictive composition across layers and capabilities: `deny` outranks unresolved input, which outranks `ask_picto`, which outranks `allow`.
 - Hardcoded hard-stop set (deterministic, compiled-in list).
 
-The "zero heuristics" claim specifically means: **no component of the decision reads anything outside `(capabilities, policy)`**. Period. CI proves this by running the determinism suite in forward and shuffled order and asserting byte-identical outputs.
+The "zero heuristics" claim specifically means: **the policy evaluator reads nothing outside its canonical capabilities and policy layers**. CI exercises this contract by running the determinism suite in forward and shuffled order and asserting byte-identical outputs.
 
 ---
 
@@ -253,7 +319,7 @@ The "zero heuristics" claim specifically means: **no component of the decision r
                │ line-JSON over Unix socket
                ▼
 ┌──────────────────────────────┐
-│  gommage daemon (trusted)    │  <- signed binary, user-local socket
+│  gommage daemon (trusted)    │  <- trusted binary, user-local socket
 └──────────────┬───────────────┘
                │ reads/writes
                ▼
@@ -269,6 +335,12 @@ The "zero heuristics" claim specifically means: **no component of the decision r
 ```
 
 **TCB (Trusted Computing Base)**: the user's UID, the daemon binary, and the `~/.gommage/` directory. Everything outside that boundary (agent, repo contents, network) is treated as untrusted input.
+
+The current socket protocol does not authenticate peer credentials beyond the
+filesystem boundary supplied by the user-owned home. A future protected or
+multi-user authority would require a distinct service identity, authenticated
+IPC, independently controlled keys and policy, and an explicit migration path;
+that managed reference mode is not shipped today.
 
 `state.sqlite` is inside the trusted home because it may contain indexed audit
 metadata, but it is not trusted for permission decisions. It is a local
@@ -289,22 +361,24 @@ cannot make the evaluator allow a tool call.
 7. **Human-in-the-loop coercion.** If an approver rubber-stamps every `ask`, Gommage cannot save them. The out-of-band channel exists to _enable_ careful review, not enforce it.
 8. **Execution mediation.** Gommage decides and audits; it does not sit in the syscall path of the command. Between Gommage's `allow` and actual execution there is a TOCTOU window Gommage cannot close (Section 2.5).
 9. **Transcript-aware policy.** The evaluator intentionally does not read prior context. If you want history-dependent policy, encode it as expedition state or picto scope.
-10. **Prevention of user misconfiguration.** A policy file that `allow`s everything is your choice. Gommage will load it, log the decisions, and not second-guess.
+10. **Prevention of trusted-layer misconfiguration.** An organization or user policy that broadly allows capabilities weakens the bundled fail-closed posture. Project policy cannot add `allow`; it can tighten a broad trusted rule only for capabilities covered by its own `ask_picto` or deny rules.
+11. **Cryptographic log completeness.** Current signatures authenticate individual records, not the presence, order, or uniqueness of the complete history.
+12. **Protected managed authority.** The current daemon and status checks operate within one trusted UID; they do not provide authenticated multi-user administration or a separately protected policy owner.
 
 ---
 
 ## 6. Key management
 
-- Keypair generated on first `gommage daemon` start via `OsRng`.
-- `~/.gommage/key.ed25519` — private key. 32 bytes, `chmod 0600`. Used for: signing audit log lines, signing pictos, verifying picto signatures.
-- No key rotation command in v0.1 (planned for v0.2: `gommage key rotate` with archived history and retroactive verify).
+- Keypair generated with `OsRng` when the Gommage home is first initialized.
+- `~/.gommage/key.ed25519` — private key. 32 bytes, `chmod 0600`. The same key signs audit records and pictos; the derived public key verifies both.
+- The current CLI has no key-rotation command or independently administered authority key.
 - **If you believe the private key is compromised**: delete `~/.gommage/` (losing audit history is acceptable for compromised state), regenerate, rotate any upstream systems that trusted the compromised key.
 
 ---
 
 ## 7. Reporting vulnerabilities
 
-See `SECURITY.md` (v0.1 final). Until then, email `petruarakiss@gmail.com` with subject `[gommage-security]` and, if possible, encrypt to the maintainer's public key (available on keys.openpgp.org under the same email). Initial response within 72 hours.
+See `SECURITY.md`. Email `petruarakiss@gmail.com` with subject `[gommage-security]` and, if possible, encrypt to the maintainer's public key (available on keys.openpgp.org under the same email). Initial response within 72 hours.
 
 Please do **not** open public GitHub issues for vulnerabilities.
 
@@ -314,5 +388,7 @@ Please do **not** open public GitHub issues for vulnerabilities.
 
 1. `gommage explain <audit-id>` — shows the exact rule that fired, the capabilities in play, and the policy version hash.
 2. Edit `~/.gommage/policy.d/*.yaml` to adjust the rule.
-3. `kill -HUP $(pgrep gommage-daemon)` — daemon reloads without restarting.
-4. New decisions reflect the change; the audit log records the new policy version hash so retroactive review can reconstruct "which policy was in effect when".
+3. `gommage daemon reload` — reload policy and mapper state without restarting.
+4. New decisions reflect the change. The audit record identifies the policy
+   version hash in effect; retain the corresponding policy files separately if
+   you need to reproduce that version later.

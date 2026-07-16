@@ -4,8 +4,9 @@ Codex CLI's `PreToolUse` hook schema is near-identical to Claude Code's: same
 `permissionDecision` / `permissionDecisionReason` contract, slightly different
 config location. The canonical Codex hook adapter is
 `gommage hook --agent codex`, which converts picto-required `ask` decisions to
-denials because Codex does not support interactive hook approval yet. The
-existing `gommage-mcp` binary remains schema-compatible for older hooks and
+denials because Gommage does not yet integrate Pictos with Codex's separate
+`PermissionRequest` event. The existing `gommage-mcp` binary remains
+schema-compatible for older hooks and
 optional gateway use, but new Codex installs point at the CLI adapter.
 
 > **Current Gommage beta scope caveat**:
@@ -22,10 +23,19 @@ Same binaries as the Claude Code setup — one install, both agents.
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
-  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  -o gommage-install.sh
+# Inspect gommage-install.sh before executing it.
+sh gommage-install.sh
 gommage quickstart --agent codex --daemon
 gommage doctor --json
 ```
+
+The compatibility bootstrap above comes from the mutable `main` branch and is
+not the immutable reference install path. Replace `main` with a reviewed commit
+SHA when that script is inside your threat model. It verifies the selected
+release archive before binary writes, but replaces the three binaries
+sequentially rather than as one transaction.
 
 `quickstart` creates `~/.gommage`, installs the bundled policy/capability
 stdlib, writes `~/.codex/hooks.json`, and enables `features.hooks = true` in

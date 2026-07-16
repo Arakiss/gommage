@@ -32,6 +32,11 @@ The installer verifies both:
 If either check fails, installation stops before extracting or writing any
 binary.
 
+This proves that the selected archive digest was signed by the expected
+tag-scoped publishing workflow identity. It does not by itself prove a hermetic
+or reproducible build, the compiler that produced the archive, or that the
+archive executed successfully on its advertised architecture.
+
 For private repository releases, set `GOMMAGE_GITHUB_TOKEN`, `GH_TOKEN`, or
 `GITHUB_TOKEN`; the installer sends it only as a GitHub `Authorization` header
 for release API and asset downloads.
@@ -74,8 +79,15 @@ artifact attestations when present. Use `gommage release verify --all-assets`
 with `--require-sbom --require-provenance` for beta, RC, or package-manager
 release gates that must verify every supported archive.
 
-GitHub artifact attestations are produced with `actions/attest` from the same
-tag-scoped release workflow that builds the archives. Verify them manually with:
+Here, `--require-provenance` means that a GitHub artifact attestation for the
+selected digest must verify against the repository, tag ref, issuer, and
+workflow identity. It is not a claim of hermetic isolation, reproducible builds,
+compiler provenance, or SLSA level. `--all-assets` verifies distribution
+inventory and evidence for every archive; it does not run those archives.
+
+GitHub artifact attestations are produced with `actions/attest` in the same
+tag-scoped workflow after the build jobs transfer their archives to the publish
+job. Verify them manually with:
 
 ```sh
 gh attestation verify "$asset" \
@@ -100,7 +112,9 @@ sh scripts/install.sh --skill-only --skill-agent codex --skill-ref main
 `--skill-only` updates the skill without downloading release binaries or using
 Cosign, which is useful for agent setup flows and documentation smoke tests.
 Remote skill installs default to `--skill-ref main` so old alpha binary tags can
-still be paired with the current setup skill.
+still be paired with the current setup skill. That skill ref is mutable and its
+contents are not covered by the release archive signature; use a reviewed commit
+SHA when a reproducible skill install matters.
 
 Checksum assets are generated with the archive basename. The installer hashes
 the downloaded archive directly and compares the first field of the `.sha256`
@@ -111,6 +125,19 @@ When release-please creates a CLI release, the release workflow dispatches its
 binary-build path from the new tag ref instead of relying on a recursive tag
 push. This keeps the Sigstore identity tied to `refs/tags/<tag>` while using
 only the repository `GITHUB_TOKEN`.
+
+Build jobs have read-only repository permissions and upload unsigned archives.
+The publish job has release authority, does not check out repository code,
+validates the transferred inventory and checksums, then signs, attests, and
+uploads those exact bytes. This split reduces the code that runs with publishing
+authority. The resulting evidence authenticates the transferred digest and
+workflow identity; it cannot retroactively establish how every build process
+produced that digest.
+
+Linux aarch64 is cross-compiled on an x86_64 Linux runner, and the release
+workflow does not natively execute all four packaged archives. Archive presence
+must not be presented as native runtime evidence; record a smoke test for the
+exact released digest on the target architecture when that claim matters.
 
 For manual `workflow_dispatch` backfills, run the workflow from the same tag ref
 that will own the release. The workflow fails closed if the OIDC identity ref

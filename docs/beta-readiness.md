@@ -12,10 +12,10 @@ decision.
 
 Beta means:
 
-- The signed GitHub Release installer works on macOS and Linux for both
-  supported architectures.
-- The default setup path has one command for install and one command for
-  readiness verification.
+- The signed GitHub Release archives install correctly on macOS and Linux for
+  both supported architectures through the documented installer boundary.
+- The compatibility bootstrap is downloaded, inspected, and executed as
+  separate steps; readiness verification remains one explicit command.
 - Claude Code and Codex integration limits are explicit and tested.
 - Machine-readable diagnostics are stable enough for agents, CI, and docs.
 - Policy fixture authoring and regression testing are documented and usable.
@@ -28,7 +28,7 @@ Beta does not mean:
 - Production security certification.
 - Full sandboxing. Gommage remains a policy decision and audit layer.
 - Support for hosts that do not expose a reliable pre-authorisation hook.
-- treating crates.io source builds as a replacement for signed binary release
+- Treating crates.io source builds as a replacement for signed release-archive
   verification.
 
 ## Required evidence
@@ -38,15 +38,19 @@ issue:
 
 | Gate | Evidence |
 |---|---|
-| Installer | Fresh temp-home install from the latest `gommage-cli-v*` release. |
-| Update path | `gommage update --json` reports the current and latest installable release, and `gommage upgrade --dry-run` prints the verified installer command without mutating files. |
+| Installer | Fresh temp-home install from the latest `gommage-cli-v*` release, with the mutable bootstrap called out or replaced by a reviewed commit-pinned installer. |
+| Installer recovery | A fault test interrupts or fails between binary replacements, records file hashes and companion version strings to identify the mixed state, and demonstrates recovery from the per-file backups. Current `gommage verify` reports companion strings but does not compare compatibility; do not use it as proof that the set is coherent or describe the installer as atomic or automatically rolled back. |
+| Update path | `gommage update --json` reports the current and latest installable release, and `gommage upgrade --dry-run` prints the release-verifying installer command without mutating files. |
 | Release assets | `scripts/check-release-assets.sh --json --require-sbom` reports 4 archives, 4 checksums, 4 Sigstore bundles, and a CycloneDX SBOM for current release-line builds. |
-| Release verification | `gommage release verify --all-assets --json --require-sbom --require-provenance` passes for the current release line; `scripts/verify-release.sh --json --require-sbom --require-provenance` remains the current-platform shell fallback. |
+| Release verification | `gommage release verify --all-assets --json --require-sbom --require-provenance` passes for the current release line; `scripts/verify-release.sh --json --require-sbom --require-provenance` remains the current-platform shell fallback. Record this as digest, repository, workflow identity, issuer, and tag-ref evidence—not as a hermetic, reproducible, compiler-provenance, or native-execution claim. |
+| Native release smoke | Each advertised OS/architecture archive is executed on that native architecture, and the evidence records the exact released asset digest. Cross-compilation or archive availability alone does not close this gate. |
+| Release PR head | `ci.yml`, `audit.yml`, `codeql.yml`, and `fuzz.yml` have successful runs whose `headSha` equals the release PR's current head after the last automated repair. The dispatcher only proves run creation; record the completed runs separately. |
+| Branch protection | A fresh branch-protection query records strictness, exact required-check contexts, admin enforcement, signed-commit policy, and force/delete settings. Any dispatched security workflow that is not a required context must still be manually gated on the exact release head. |
 | Binary introspection | `gommage`, `gommage-daemon`, and `gommage-mcp` all support `--version`. |
 | Home setup | `gommage init` and `gommage policy init --stdlib` succeed in a clean home. |
 | Beta gate | `gommage beta check --json --policy-test examples/policy-fixtures.yaml` exits with `pass` or documented `warn` and includes actionable `next` entries. |
 | Readiness gate | `gommage verify --json` exits with `pass` or documented `warn`. |
-| State index | `gommage state rebuild --json`, `gommage state verify --json`, and `gommage state stats --json` prove `state.sqlite` is current and remains a rebuildable read-model over signed `audit.log`. |
+| State index | `gommage state rebuild --json`, `gommage state verify --json`, and `gommage state stats --json` report state schema v2 with `source_log: "audit.log"`, prove `state.sqlite` matches the current snapshot, and keep it a rebuildable read-model over available independently signed records. This is not cryptographic completeness evidence. |
 | Quickstart self-test | `gommage quickstart --self-test` reaches the same readiness gate after setup. |
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
 | Launch demo | `sh scripts/launch-demo.sh` completes in an isolated home and captures ask-picto, one-use picto allow, hard-stop deny, audit verification, state-index verification, policy fixtures, beta check, and TUI snapshot evidence. |
@@ -59,12 +63,12 @@ issue:
 | Agent-facing evals | The `agent-facing evals` CI job and `GOMMAGE_BIN=target/debug/gommage bunx promptfoo@latest eval -c evals/promptfooconfig.yaml --no-progress-bar --no-table --no-cache --no-write` pass for agent contract changes. |
 | Legacy repair | `gommage repair agent claude --dry-run` and `gommage repair agent codex --dry-run` show how old or broken alpha hooks would be rewritten without mutating host config. |
 | Policy fixtures | `examples/policy-fixtures.yaml` passes through `gommage policy test --json`, and any repository-specific fixture additions are documented or linked. |
-| Policy layers | `gommage policy layers --json` reports active org/project/user layer order, rule counts, and the effective policy hash. |
+| Policy layers | `gommage policy layers --json` reports active organization/user/project layer order, rule counts, and the effective policy hash; a fixture proves project `allow` rules are rejected and project policy can only tighten. |
 | MCP gateway | Optional compatibility surface: `gommage-mcp --gateway` has fixtures proving allowed `tools/call` requests are forwarded and denied calls return MCP tool errors without upstream execution. New agent hooks use `gommage hook --agent claude` or `gommage hook --agent codex`. |
 | Sandbox advice | `gommage sandbox advise --json` reports `advisory_only: true` and never claims OS confinement enforcement. |
-| Audit verification | A daemon, `gommage hook`, or legacy MCP decision writes audit and `gommage audit-verify --explain` verifies it. |
+| Audit verification | A daemon, `gommage hook`, or legacy MCP decision writes audit and `gommage audit-verify --explain` verifies strict decision-v2/event-v1 records. The tracking issue explicitly acknowledges that per-record signatures do not prove log completeness, order, or uniqueness. |
 | Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host, including companion versions, selected-agent beta check, repair dry-runs, bounded TUI captures, report bundle, and rollback dry-run. |
-| CI | `ci`, `audit`, and `scorecard` are green on the release commit. `release` is green for publication commits, or intentionally skipped when `GOMMAGE_RELEASE_HOLD=true` is active during repository maintenance. |
+| CI | `ci`, `audit`, `codeql`, and `fuzz` are green on the exact release commit; `scorecard` has a current successful run for its configured trigger. `release` is green for publication commits, or intentionally skipped when `GOMMAGE_RELEASE_HOLD=true` is active during repository maintenance. |
 | Docs | README, beta contract, existing-setups, diagnostics, agent compatibility, publishing, release-signing docs, examples, and the `skills/gommage` agent skill match the current CLI. |
 | Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
 
@@ -72,8 +76,16 @@ issue:
 
 Treat these as beta blockers:
 
-- A verified installer release is missing any archive, checksum, Sigstore
+- The release selected by the installer is missing any archive, checksum, Sigstore
   bundle, SBOM, or required provenance evidence for a supported platform.
+- Any advertised release archive lacks a native smoke result tied to its exact
+  digest.
+- The installer recovery test cannot detect and recover from a partial
+  three-binary replacement.
+- Any required or launch-mandated workflow is missing a successful run for the
+  release PR's exact current head, including after automated version-pin repair.
+- Current branch-protection settings and required-check contexts have not been
+  captured and reviewed for the release head.
 - `GOMMAGE_RELEASE_HOLD=true` is still active when the goal is to publish a new
   release instead of maintaining repository state.
 - `gommage verify --json` cannot distinguish warning from failure.
@@ -103,6 +115,30 @@ These can remain open for beta if they are clearly documented:
 - Native ntfy sending can stay on the v1.x roadmap while the generic webhook
   payload, Slack/Discord payload shapes, local approval commands, and TUI
   approval confirmation remain verified.
+- Audit signatures authenticate present records but do not cryptographically
+  detect deletion, truncation, reordering, or duplication.
+- Picto schema v1 signs authority fields but not mutable `uses` and `status`;
+  normal daemon transactions enforce that lifecycle within the trusted UID.
+- The daemon, policy, key, socket, and status checks remain user-local and trust
+  the same UID. There is no separately protected managed authority in this beta.
+- Release signatures and GitHub attestations authenticate selected bytes and a
+  workflow identity, not a hermetic/reproducible build or native execution.
+- The installer bootstrap and default remote skill ref are mutable, and binary
+  replacement is sequential rather than atomic, as documented in the install
+  and update guides.
+
+## Claims beyond beta remain blocked
+
+Do not describe the current release as a protected managed authority, a
+cryptographically complete audit ledger, or an end-to-end software-supply-chain
+proof. Those claims require new shipped mechanisms and their own acceptance
+evidence: independently controlled service identity and keys, authenticated
+IPC and administration, a versioned Picto authority format that authenticates
+the intended lifecycle semantics, chained or externally witnessed audit
+completeness, reproducible/hermetic build evidence, and native execution of the
+exact release assets. Documentation and `gommage managed status` cannot close
+those gaps by themselves; the shipped report explicitly returns
+`reference_ready: false`, `isolation: "none"`, and `tamper_resistance: "none"`.
 
 ## Operator Smoke
 

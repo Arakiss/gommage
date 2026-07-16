@@ -103,7 +103,9 @@ blocked by policy.
 
 `gommage state` manages `~/.gommage/state.sqlite`, a rebuildable SQLite
 read-model for fast local operator queries. It is not a permission authority:
-`audit.log` remains the signed source of truth. Use:
+`audit.log` remains the independently signed evidence input. Present records can
+be authenticated, but the current format does not cryptographically prove log
+completeness or ordering. Use:
 
 ```sh
 gommage state rebuild --json
@@ -113,7 +115,9 @@ gommage state vacuum
 gommage state reset --dry-run
 ```
 
-`state rebuild` verifies the audit ledger before indexing critical records.
+State schema v2 records this relationship as `source_log: "audit.log"` in
+machine-readable reports and SQLite metadata. `state rebuild` verifies the
+available audit records before indexing critical records.
 Policy-version changes and timestamp-order warnings are preserved as forensic
 signals, but malformed entries, bad signatures, or hard-stop bypass anomalies
 block rebuild. `state verify` reports `warn` when the audit log changed after
@@ -261,13 +265,14 @@ Approving a normal request mints a scope-only picto. It is not tied to the
 request input hash: any call in the exact scope can consume it, and every
 matching call (including a probe) spends one use. A request created by a
 `bind_input: true` rule mints an exact-input picto that only matches the same
-canonical tool input; every matching retry still spends one use. Both paths write signed `picto_created` plus
-`approval_resolved` events. Human approval output is a plain, scannable summary;
+canonical tool input; every matching retry still spends one use. Both paths
+write signed `picto_created` plus `approval_resolved` events. Human approval
+output is a plain, scannable summary;
 `approval approve <id> --json` emits the version 2 action report with `status`,
 `request_id`, `scope`, `picto_id`, nested `picto` details including
 `kind`, `authorizes`, `consumption`, `probe_consumes_use`, and the compatibility
-field `input_bound`, plus `next_action` for agents. Denying a request writes a signed
-`approval_resolved` event with `status: denied`. Webhook delivery uses bounded
+field `input_bound`, plus `next_action` for agents. Denying a request writes a
+signed `approval_resolved` event with `status: denied`. Webhook delivery uses bounded
 retries; exhausted failures are written to
 `~/.gommage/approval-webhook-dlq.jsonl`, exposed through `approval dlq`, and
 signed in audit as `approval_webhook_failed` plus
@@ -553,15 +558,20 @@ Use `gommage policy layers --json` to inspect the effective policy order and
 hash. Runtime decisions load policy in this order:
 
 1. explicit org policy from `GOMMAGE_ORG_POLICY_DIR`, when set
-2. explicit project policy from `GOMMAGE_PROJECT_POLICY_DIR`, when set
-3. otherwise project-local policy at `<expedition-root>/.gommage/policy.d`,
+2. user policy at `$GOMMAGE_HOME/policy.d`
+3. explicit project policy from `GOMMAGE_PROJECT_POLICY_DIR`, when set
+4. otherwise project-local policy at `<expedition-root>/.gommage/policy.d`,
    when an expedition is active and that directory exists
-4. user policy at `$GOMMAGE_HOME/policy.d`
 
-Evaluation remains first-match-wins after compiled hard-stops. Earlier layers
-therefore have higher policy precedence than later layers. The effective policy
-hash includes layer names and relative file paths whenever more than one layer
-is active, so org/project/user order changes are visible in audit evidence.
+Compiled hard-stops run first. Evaluation then resolves each normalized
+capability across organization, user, and project layers. The first matching
+contribution inside one layer wins for that layer and capability; contributions
+then compose conservatively across layers and sibling capabilities. Deny beats
+an unresolved capability, unresolved beats ask, and ask beats allow. Project
+layers reject `allow` rules and can only tighten organization/user policy. The
+effective policy hash includes layer names and relative file paths whenever more
+than one layer is active, so layer-order changes are visible in signed decision
+records.
 
 ## Optional MCP Gateway
 

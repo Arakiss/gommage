@@ -121,7 +121,7 @@
     },
     {
       "id": "upgrade_dry_run",
-      "purpose": "Inspect the verified installer command that would upgrade Gommage binaries.",
+      "purpose": "Inspect the release-verifying installer command that would upgrade Gommage binaries.",
       "stdin_mode": "none",
       "argv": ["upgrade", "--dry-run", "--no-prompt"]
     },

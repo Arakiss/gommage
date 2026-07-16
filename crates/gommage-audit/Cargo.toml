@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Append-only signed audit log for Gommage decisions."
+description = "Independently signed audit records for Gommage decisions."
 
 [dependencies]
 gommage-core.workspace = true

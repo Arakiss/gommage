@@ -1,6 +1,6 @@
 {
   "name": "shell-cat-inside-expedition-root-is-allowed",
-  "note": "cat of a file under EXPEDITION_ROOT surfaces fs.read:<root>/... which allow-project-reads permits. Guards that fs.read extraction does not over-deny legitimate in-project reads. The whole-command proc.exec is also emitted but the first matching policy rule (allow-project-reads) wins.",
+  "note": "cat of a file under EXPEDITION_ROOT surfaces both fs.read:<root>/... and the whole-command proc.exec capability. allow-shell-project-reads matches that capability set; allow-project-reads independently permits the normalized fs.read capability. Guards that fs.read extraction does not over-deny legitimate in-project reads.",
   "call": { "tool": "Bash", "input": { "command": "cat /tmp/proj/src/lib.rs" } },
   "expected": { "kind": "allow" },
   "expedition_root": "/tmp/proj"

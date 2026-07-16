@@ -196,9 +196,12 @@ Features:
   - Current implementation writes dry-runnable starter project policy,
     executable fixtures, and a local README without overwriting unless forced.
 - Policy inheritance
-  - Explicit precedence: hard-stops, org, project, user imports, local pictos.
-  - Current implementation supports explicit org/project/user policy
-    directories plus expedition-root project policy.
+  - Current composition: compiled hard-stops first, then per-capability
+    contributions across organization, user, and project layers; deny beats
+    unresolved, unresolved beats ask, and ask beats allow.
+  - Current implementation supports explicit organization/user/project policy
+    directories plus expedition-root project policy. Project rules are
+    tightening-only and cannot add `allow` authority.
 - Sandbox bridge
   - Generate Codex, bwrap, AppArmor, or macOS Seatbelt suggestions from policy
     intent, documented as advisory confinement helpers.
@@ -240,8 +243,8 @@ Features:
   - Keep the published crate set aligned with the signed release workflow and
     rerun package gates before every registry mutation.
 - Homebrew tap and AUR package
-  - Keep the signed GitHub Release installer as the source of truth, but make
-    native package-manager installs available for common operator paths.
+  - Keep the signed GitHub Release archives as the binary source of truth, but
+    make native package-manager installs available for common operator paths.
 - SBOM and provenance
   - Current release workflow generates CycloneDX SBOM assets and GitHub
     artifact attestations for release artifacts; `gommage release verify` and
@@ -273,7 +276,7 @@ Exit criteria:
 4. Extend TUI watch with decision-stream and active-picto panes before remote
    approval providers.
 5. Prefer native hook coverage before broadening MCP gateway claims.
-6. Ship package-manager integrations only after the signed release installer,
+6. Ship package-manager integrations only after the signed release archives,
    SBOM asset, and provenance verification path have stayed green through
    multiple alpha releases.
 
@@ -302,8 +305,10 @@ Required trust qualities:
 
 - Hard-stops, bypass semantics, picto lifecycle, audit verification, and release
   signing all have regression tests and public docs.
-- `audit-verify --explain` is good enough for forensics: it reports bypasses,
-  anomalies, policy versions, expeditions, and signed lifecycle events.
+- `audit-verify --explain` supports available-record forensics: it reports
+  bypasses, anomalies, policy versions, expeditions, and signed lifecycle events,
+  while documentation states that per-record signatures do not prove log
+  completeness or order.
 - Host support claims are narrow and evidence-backed. Unsupported hook timing is
   named as unsupported instead of hidden behind roadmap language.
 - Release assets include archives, checksums, Sigstore bundles, SBOM evidence,
@@ -311,7 +316,7 @@ Required trust qualities:
 
 Required ecosystem qualities:
 
-- GitHub Releases remain the source of truth for signed binaries.
+- GitHub Releases remain the source of truth for signed binary archives.
 - crates.io publication is either complete for the public crates or explicitly
   deferred with current gate evidence.
 - Homebrew/AUR/native packages verify the same trust boundary or document their
