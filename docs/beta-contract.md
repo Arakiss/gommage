@@ -13,14 +13,15 @@ an understood, documented `warn`.
 
 The first beta can claim that a new operator or agent can:
 
-- install signed binaries from GitHub Releases;
+- install binaries from checksum- and signature-verified GitHub Release
+  archives;
 - install the Gommage agent skill for Codex and Claude Code;
 - inspect a mature host setup before mutating it;
 - run quickstart with backups and a self-test;
 - understand which agent surfaces are covered and which remain native-host or
   sandbox responsibility;
-- trigger `allow`, `deny`, `ask_picto`, picto consumption, signed audit, and
-  local state-index evidence in a reproducible demo;
+- trigger `allow`, `deny`, `ask_picto`, picto consumption, independently signed
+  audit records, and local state-index evidence in a reproducible demo;
 - verify release assets and local readiness with machine-readable commands;
 - roll back host integrations without deleting audit evidence by default.
 
@@ -30,16 +31,16 @@ These surfaces are part of the beta operator contract:
 
 | Surface | Contract |
 |---|---|
-| Installer | Downloads one platform archive, verifies Sigstore and SHA-256 before extraction, installs `gommage`, `gommage-daemon`, and `gommage-mcp`. |
+| Installer | Downloads one platform archive, verifies Sigstore and SHA-256 before extraction, then installs `gommage`, `gommage-daemon`, and `gommage-mcp` sequentially with per-file backups. The mutable bootstrap and non-atomic replacement limits remain documented. |
 | Hook adapter | New agent hooks call `gommage hook --agent claude` or `gommage hook --agent codex`; `gommage-mcp` remains a compatibility binary and optional stdio MCP gateway. |
 | Agent skill | Installed by `--with-skill` or `--skill-only`; teaches agents to diagnose, dry-run, verify, and avoid overclaiming coverage. |
-| Harness diagnostics | `gommage harness diagnose --json`, `harness explain`, and `harness write-context --dry-run` are the source of local truth for agents. |
+| Harness diagnostics | `gommage harness diagnose --json`, `harness explain`, and `harness write-context --dry-run` report the observed local hook and configuration state for agents; they do not prove a protected service identity. |
 | Quickstart | Additive by default; preserves unrelated Claude hooks, backs up changed files, imports supported native Claude permissions, and self-tests unless disabled. |
 | Beta gate | `gommage beta check --json` aggregates doctor, smoke, selected agent status, optional policy fixtures, state-index readiness, dashboard availability, and next commands. |
 | Readiness gate | `gommage verify --json` remains the lower-level install/CI readiness gate. |
 | Policy fixtures | `gommage policy test <file> --json` is the stable semantic regression contract. |
-| Signed audit | `audit.log` is the forensic source of truth and verifies with `gommage audit-verify --explain`. |
-| State index | `state.sqlite` is rebuildable from `audit.log` and checked by `gommage state verify --json`; it is never a permission authority. |
+| Signed audit | `gommage audit-verify --explain` authenticates each available decision-v2 or event-v1 record in `audit.log`; the beta does not claim cryptographic completeness, ordering, or uniqueness of the file. |
+| State index | State schema v2 records `source_log: "audit.log"`; `state.sqlite` is rebuildable from the available records and checked against the current log snapshot by `gommage state verify --json`. It is never a permission authority or completeness witness. |
 | Rollback | `repair`, `agent uninstall`, and `uninstall --dry-run` describe recovery before mutation. |
 | Demo | `sh scripts/launch-demo.sh` produces local evidence for the core workflow without touching real host config. |
 
@@ -56,7 +57,20 @@ Beta does not claim:
   and Codex MCP tool names when those hook events reach Gommage;
 - production security certification;
 - crates.io source builds as a replacement for the signed GitHub Release
-  binary path.
+  binary path;
+- protection from a hostile process running as the same UID as the daemon, or a
+  separately administered managed authority;
+- cryptographic detection of deleted, truncated, reordered, or duplicated audit
+  records;
+- signature coverage for Picto v1 mutable `uses` and `status` fields outside the
+  normal transactional store path;
+- a hermetic or reproducible build, compiler provenance, or native execution
+  solely because a release archive has a valid Sigstore signature or GitHub
+  artifact attestation;
+- atomic replacement of all three binaries or automatic rollback after a
+  partial install;
+- release-signature coverage for remote skill files, whose default ref is the
+  mutable `main` branch.
 
 ## Recommended Trial Path
 

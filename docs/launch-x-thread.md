@@ -1,7 +1,10 @@
 # X Thread Draft
 
-Draft only. Replace placeholders after the beta release exists and verification
-passes.
+Draft only. Do not publish until every required gate in `beta-readiness.md` has
+current evidence for the exact release head and asset digests. In particular,
+the four native-architecture smokes, partial-install recovery test, required
+check snapshot, and successful exact-head workflow runs must be attached to the
+launch record.
 
 ## Thread
 
@@ -10,7 +13,7 @@ passes.
 
    It sits between Claude Code / Codex-style hooks and the operation the agent
    wants to run, maps tool calls into capabilities, evaluates YAML policy, and
-   writes signed audit evidence.
+   writes independently signed audit records.
 
 2. The core idea: keep your sandbox, but make the permission layer you care
    about explicit.
@@ -25,11 +28,12 @@ passes.
    TTL-bound, one-use picto; the next matching call passes; the grant is
    consumed and recorded.
 
-4. The audit log is the source of truth.
+4. The audit log is authenticated evidence, with an explicit limit.
 
-   Every decision is signed line-by-line. `state.sqlite` is only a rebuildable
-   local read-model for fast dashboards and counters. Delete it and rebuild from
-   `audit.log`.
+   Each available decision or lifecycle event is signed independently.
+   `state.sqlite` is only a rebuildable local read-model for fast dashboards and
+   counters. The current signatures do not prove that records were not deleted,
+   truncated, reordered, or duplicated.
 
 5. Existing harnesses are supported as a coexistence path.
 
@@ -41,7 +45,9 @@ passes.
 
    It is not an OS sandbox, not universal MCP interception, and not a
    replacement for Codex sandbox modes or host-native controls. Boundaries are
-   documented because trust starts with knowing what is not covered.
+   documented because trust starts with knowing what is not covered. The current
+   daemon also trusts its operating-system user; it is not a separately protected
+   managed authority.
 
 7. Try the local demo from a checkout:
 
@@ -58,10 +64,18 @@ passes.
    ```sh
    curl --proto '=https' --tlsv1.2 -sSf \
      https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
-     | sh -s -- --with-skill --skill-agent codex --skill-agent claude
+     -o gommage-install.sh
+   # Inspect gommage-install.sh before executing it.
+   sh gommage-install.sh \
+     --with-skill --skill-agent codex --skill-agent claude
    ```
 
-   Release archives are Sigstore-signed and checksum-verified before install.
+   Release archives are Sigstore-signed and checksum-verified before binary
+   writes. The bootstrap above comes from mutable `main`, skill files use a
+   separate mutable channel by default, and the three binaries are replaced
+   sequentially rather than atomically. This is a compatibility bootstrap, not
+   the immutable reference path; review or commit-pin it when it is inside your
+   threat model.
 
 9. Useful links:
 
@@ -74,9 +88,9 @@ passes.
 10. Beta means the operator path is now testable end to end, not that the work
     is done.
 
-    Next focus: broader Codex hook coverage, crates.io publishing gate,
-    package-manager installs, optional MCP gateway evidence, and community
-    policy packs.
+    Next focus: a separately protected authority mode, cryptographic audit
+    completeness, a versioned Picto authority format, atomic install recovery,
+    reproducible build evidence, and exact-asset native runtime coverage.
 
 ## Short Post
 
@@ -84,7 +98,8 @@ Gommage beta: deterministic policy-as-code for AI coding agent tool calls.
 
 It maps Claude Code / Codex-style tool calls to capabilities, evaluates YAML
 policy, supports signed one-use pictos for break-glass actions, and writes
-offline-verifiable signed audit logs.
+offline-verifiable, independently signed audit records. It remains a user-mode
+policy layer, not an OS sandbox or a cryptographically complete ledger.
 
 Demo:
 

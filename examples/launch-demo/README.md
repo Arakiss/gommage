@@ -42,4 +42,6 @@ For a short screen recording, show the terminal running the script, then open
 
 `state.sqlite` is intentionally not a permission authority. The demo rebuilds
 it after signed audit evidence exists to show the intended relationship:
-`audit.log` is authoritative, `state.sqlite` is the fast local read-model.
+authenticated records currently available in `audit.log` are the rebuild
+input, while `state.sqlite` is the fast local read-model. Neither artifact
+proves that no signed records were removed, reordered, or duplicated.

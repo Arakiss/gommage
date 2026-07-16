@@ -1,7 +1,7 @@
 <p align="center">
   <img src="assets/banner.png" alt="gommage — policy-as-code for AI coding agents" width="100%" />
 </p>
-<p align="center"><sub><em>The gold dust unmaking the parchment is the gommage. The three pendants below are pictos — signed, single-use grants.</em></sub></p>
+<p align="center"><sub><em>The gold dust unmaking the parchment is the gommage. The three pendants below are pictos — signed, short-lived, usage-bounded grants.</em></sub></p>
 
 <p align="center">
   <a href="https://github.com/Arakiss/gommage/actions/workflows/ci.yml"><img src="https://github.com/Arakiss/gommage/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -19,9 +19,9 @@ Gommage is a deterministic policy and audit layer for matched AI coding-agent to
 
 ## What it does
 
-Gommage maps an observed tool call to capabilities such as `git.push:refs/heads/main`, `fs.write:**/.git/**`, or `net.out.post`. Capability mapping and ordered policy evaluation are deterministic: the same observed call and policy produce the same policy decision regardless of call order or host OS. Picto lookup and consumption are explicit authorization state, so an active, expired, or spent grant changes the final authorization result by design.
+Gommage maps an observed tool call to capabilities such as `git.push:refs/heads/main`, `fs.write:**/.git/**`, or `net.out.post`. Capability mapping and layered policy evaluation are deterministic: the same observed call, mapper, and policy layers produce the same policy result regardless of call order or host OS. Each mapped capability is evaluated across the active organization, user, and optional project layers; the final result is the most restrictive contribution (`deny` before unresolved, then `ask_picto`, then `allow`). Picto lookup and consumption are explicit authorization state, so an active, expired, or spent grant changes the final authorization result by design.
 
-An `ask_picto` rule creates a durable approval request when there is no matching grant. A [picto](docs/pictos.md) is signed, time-limited, usage-bounded, revocable, and consumed atomically. Every decision and approval event is recorded in the signed audit log.
+An `ask_picto` rule creates a durable approval request when there is no matching grant. A [picto](docs/pictos.md) is signed, time-limited, usage-bounded, revocable, and consumed atomically by the normal daemon path. Each decision or lifecycle event written to `audit.log` is signed independently; the separate approval inbox is unsigned operational state. The current log format authenticates individual records, but does not prove that the file is complete or ordered.
 
 Gommage is public beta software. Start with a non-critical repository, inspect generated policy before relying on it, and use the beta contract as the source for supported claims: [beta contract](docs/beta-contract.md).
 
@@ -29,9 +29,12 @@ Gommage is public beta software. Start with a non-critical repository, inspect g
 
 Gommage is a policy decision and audit layer. It does not provide OS-level confinement, mediate every process action, or replace your agent's native permissions.
 
+The current daemon is a user-mode control. The same operating-system user can edit policy and state, invoke reloads, replace the binaries, or access the signing key. `gommage managed status --json` reports `isolation: "none"`, `tamper_resistance: "none"`, and `reference_ready: false`; its deployment modes describe user-owned configuration, not a protected service identity or privilege boundary.
+
 Keep the controls that already protect your machine:
 
-- Claude Code's native permissions and any host controls you use.
+- Claude Code's native permissions, optional Bash sandbox, and any additional
+  host controls you use.
 - Codex sandboxing, especially for filesystem and network boundaries outside matched hook events.
 - Your existing approval and review process for changes with real consequences.
 
@@ -43,10 +46,15 @@ The release installer supports macOS and Linux. Windows is not currently support
 
 | Host | Default Gommage coverage | Keep enabled |
 | --- | --- | --- |
-| Claude Code | `Bash`, file tools, `WebFetch` / `WebSearch`, and emitted `mcp__…` tool names | Native permissions and any OS confinement in use |
+| Claude Code | `Bash`, file tools, `WebFetch` / `WebSearch`, and emitted `mcp__…` tool names | Native permissions, optional Bash sandbox, and any additional host confinement |
 | OpenAI Codex CLI | `Bash`, parsed `apply_patch` paths, and emitted `mcp__…` tool names | Codex sandboxing for boundaries outside matched hook events |
 
-Both integrations use the same YAML policies, signed audit trail, and picto store. Coverage is limited to tool calls that the host emits through a matched hook event. Claude Code can surface an approval request in its flow. Codex currently returns a denial for a picto-required call with no matching grant because its hook flow has no interactive approval step.
+Both integrations use the same YAML policies, independently signed audit
+records, and Picto store. Coverage is limited to tool calls that the host emits
+through a matched hook event. Claude Code can surface an approval request in
+its flow. Gommage's current Codex `PreToolUse` adapter returns a denial for a
+picto-required call with no matching grant; it does not yet connect Pictos to
+Codex's separate `PermissionRequest` event.
 
 Read the host-specific boundaries before rollout: [Claude Code](docs/comparison-with-claude-code.md), [Codex](docs/comparison-with-codex.md), and the [compatibility guide](docs/agent-compatibility.md).
 
@@ -64,12 +72,28 @@ The demo output and recording guide are in [examples/launch-demo](examples/launc
 
 ## Install and quickstart
 
-The recommended install path uses signed GitHub Release binaries. The installer verifies Sigstore provenance and SHA-256 before extraction.
+The current compatibility bootstrap installs signed GitHub Release archives,
+but it is not yet the immutable reference install path. Download the installer
+from mutable `main`, inspect it, and execute it separately; pin the URL to a
+reviewed commit when the bootstrap itself is part of your threat model. The
+installer verifies the selected archive's Sigstore identity and SHA-256 digest
+before writing binaries.
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
-  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  -o gommage-install.sh
+# Inspect gommage-install.sh before executing it.
+sh gommage-install.sh
 ```
+
+Binary replacement is sequential, not an all-or-nothing transaction. A host
+failure can therefore leave a mixed installation. Run `gommage verify --json`
+as a post-install health check and keep the installer backups for recovery, but
+note that `verify` only reports companion version strings; it does not assert
+that the three binaries are mutually compatible. Skill-only installs are a
+separate channel, default to the mutable `main` ref, and are not covered by the
+release archive signature.
 
 For a new host, choose the agent you use:
 
@@ -132,9 +156,10 @@ The [policy cookbook](docs/policy-cookbook.md) covers common patterns, precedenc
 ```text
 matched tool call
   -> capability mapping
-  -> ordered YAML policy
+  -> per-capability evaluation across active policy layers
+  -> restrictive aggregation across all capabilities
   -> allow | deny | ask_picto
-  -> signed audit evidence
+  -> independently signed audit record
 ```
 
 For `ask_picto`, Gommage creates or reuses the relevant pending approval request. Approval can mint either a scope-bound picto or, when the rule asks for it, an exact-input picto. A hard stop always remains denied; a picto never bypasses it.

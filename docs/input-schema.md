@@ -2,7 +2,10 @@
 
 This document is the **frozen contract** of what Gommage's policy evaluator reads. It is part of the public API of `gommage-core` and moves on strict semver: any change to the shape, field set, or interpretation rules described here is a breaking change to `gommage-core` and requires a major (or minor pre-1.0) version bump.
 
-The determinism guarantee — same input → same decision, every time, on every OS — depends on this contract being tight. Everything not explicitly listed below is, by deliberate omission, **not** part of the input.
+The determinism guarantee — the same canonical tool call, mapper, and policy
+produce the same policy result — depends on this contract being tight.
+Everything not explicitly listed below is, by deliberate omission, **not** part
+of the evaluator input. Picto lookup is separate authorization state.
 
 ---
 
@@ -130,7 +133,9 @@ pub fn map(&self, call: &ToolCall) -> Vec<Capability>;
 - Template substitution: `${tool}` → actual tool name, `${capture_name}` → regex capture group from `tool_pattern` or `match_input`, `${input.field.sub}` → JSON dot-path as string. Missing captures or missing input fields render to empty string.
 - `HashMap` iteration order is eliminated by sorting `match_input` by dot-path string at rule compile time.
 
-The capability `Vec` is not deduplicated. A rule that emits two capabilities will show both, in order. Multiple rules that each emit will concatenate in rule-declaration order.
+The mapper keeps a deterministic first-seen order and removes duplicate
+capability strings. Typed Bash effects are emitted first, followed by
+compatibility mapper-rule output in file and declaration order.
 
 ### 4.1 Tool boundary
 
@@ -153,8 +158,12 @@ Shell effects are derived from a bounded, quote-preserving AST. The analyzer
 walks compound commands, static shell payloads, substitutions, wrappers,
 redirections, and every statically known operand. If syntax or a
 security-relevant destination is dynamic, it emits
-`proc.exec.ambiguous:<reason>` and the reference policy denies it before any
-generic `proc.exec:*` rule can authorize the command.
+`proc.exec.ambiguous:<reason>` and the shipped strict stdlib policy denies it
+before generic `proc.exec:*` rules can authorize the command. Analysis is capped at 64
+KiB of input, 16 levels of nesting, and 512 commands. It does not execute shell
+expansions, resolve aliases or sourced functions, or reconstruct generated argv
+from commands such as `eval` and static `xargs`; the original raw
+`proc.exec:<command>` remains visible for those cases.
 
 **Recommendation for strict fs gating.** If you need the filesystem gates to hold tightly, restrict or deny raw `Bash` (gate `proc.exec:*` for the shells you do not trust) and route file access through the dedicated `Read` / `Write` / `Edit` tools, whose path arguments map exactly. See [`THREAT_MODEL.md`](../docs/THREAT_MODEL.md) for the residual shapes that fail closed but do not yet hit a precise gate scope.
 
@@ -166,14 +175,35 @@ generic `proc.exec:*` rule can authorize the command.
 pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult;
 ```
 
-- Input: capability list (already ordered by the mapper) and compiled policy (rules in declared order from lexicographic files).
-- Output: `EvalResult { decision, matched_rule, capabilities, policy_version }`.
+- Input: capability list and compiled policy (rules grouped into closed `org`,
+  `user`, and `project` layers).
+- Output: `EvalResult { decision, matched_rule, capabilities, policy_version,
+  capability_provenance }`.
 - Evaluation algorithm:
-  1. `hardstop::check(caps)` — if any hardcoded hard-stop pattern matches any capability, return `Gommage { hard_stop: true }`. This step is not configurable.
-  2. Iterate `policy.rules` in order. For each rule, check whether its `Match` clause accepts the capability list. First match wins.
-  3. If no rule matched, return `Gommage { reason: "no rule matched (fail-closed)", hard_stop: false }`.
+  1. Normalize path-shaped home aliases, then byte-sort and deduplicate
+     capabilities.
+  2. `hardstop::check(caps)` — if any compiled hard-stop matches any capability,
+     return `Gommage { hard_stop: true }`. This step is not configurable.
+  3. Resolve each capability independently. A rule contributes only when its
+     whole-set conditions pass and a positive `any_capability` or
+     `all_capability` pattern covers that capability. The first contribution in
+     each layer wins for that layer and capability.
+  4. Aggregate layer contributions and sibling capabilities conservatively.
+     Policy deny beats an unresolved capability, unresolved beats
+     `ask_picto`, and `ask_picto` beats allow. Multiple required Picto scopes in
+     one call fail closed and require the call to be split.
 - `Match::matches` semantics: a rule matches iff (a) the `any_capability` patterns are empty **or** at least one matches; (b) every `all_capability` pattern matches at least one cap; (c) no `none_capability` pattern matches any cap.
-- Glob patterns compile via `globset` — RE2-style linear-time matching, no catastrophic backtracking possible.
+- `none_capability` is valid only on `allow` rules and is a condition, never
+  positive coverage by itself. A rule with no positive pattern is invalid.
+- Project layers are tightening-only: loading a project `allow` rule is an
+  error. Layers must be unique and ordered `org`, `user`, `project`.
+- Glob patterns compile through `globset` without a backtracking regular-expression engine.
+
+Policy substitution happens before compilation. `${VAR}` fails to load when
+the value is missing or empty; `${VAR:-default}` is accepted only with a
+non-empty configured value or default. The runtime supplies a non-matching
+sentinel for `${EXPEDITION_ROOT}` when no expedition is active, so a scoped
+pattern cannot silently become `/**`.
 
 The evaluator is pure. The determinism test suite proves this in CI: the fixture sweep is executed in forward order, in shuffled order (seeded), and twice in forward order — results must be byte-identical between all three passes.
 
@@ -182,22 +212,41 @@ The evaluator is pure. The determinism test suite proves this in CI: the fixture
 ## 6. Encoding + serialisation rules
 
 - All strings are UTF-8.
-- JSON serialisation follows `serde_json` defaults with one exception: `ToolCall::input_hash()` computes a canonical JSON encoding (keys sorted lexicographically, same string-escape set as `serde_json`). This canonical form is stable across `serde_json` versions.
-- The audit log's per-entry signature covers the canonical JSON of the entry minus the `sig` field. Canonicalisation is implemented in `gommage-audit` and has the same stability properties.
+- JSON serialisation follows `serde_json` defaults with one exception:
+  `ToolCall::input_hash()` recursively sorts object keys before serializing with
+  the current `serde_json` implementation. This is the stable contract within
+  a tested build; it is not an RFC 8785 canonicalization or an unchecked claim
+  of byte stability across arbitrary future serializer versions.
+- The audit log's per-record signature covers the canonical JSON of the received
+  record minus `sig`. Decision records are v2 and include signed per-capability
+  provenance; event records remain v1. Verification rejects duplicate keys at
+  every depth and exact-schema top-level mismatches. Signatures authenticate
+  present records but do not prove that the JSONL file is complete.
 
 ---
 
 ## 7. Cross-platform determinism
 
-The decision output is identical across:
+Current CI exercises policy determinism across:
 
-- Linux and macOS (CI matrix runs tests on both).
-- x86_64 and aarch64 (release binaries are built for both on both platforms).
+- Linux and macOS runners, with repeated forward and shuffled suites.
 - Different `LANG`/`LC_ALL` values (evaluator does not read locale).
-- Different filesystems (APFS, ext4, btrfs, xfs — evaluator does not stat).
-- Different Rust versions ≥ MSRV (1.90) (exact pins on determinism-critical crates).
 
-Windows is **not** currently in the CI matrix. Cross-platform Windows behaviour should work — nothing in the evaluator is Unix-specific — but we do not certify it until Windows support is explicitly added (roadmap v1.x).
+CI uses the repository Rust toolchain rather than a multi-version MSRV matrix.
+Determinism-critical dependencies are exact-pinned to reduce dependency drift;
+that configuration is not evidence of execution under multiple Rust versions.
+
+Release automation compiles x86_64 and aarch64 archives for Linux and macOS,
+but compilation is not native execution evidence. In particular, Linux
+aarch64 is cross-compiled in the release workflow, and the release archives
+are not executed on every target architecture there. Do not turn archive
+availability into a native-runtime certification claim without a separate
+native smoke result for that exact asset digest.
+
+Windows is **not** currently in the CI matrix or supported release archive set.
+Do not infer Windows host, path, daemon, or integration behavior from the
+portable parts of the evaluator until explicit support and native evidence are
+added.
 
 ---
 

@@ -4,19 +4,38 @@ Gommage has two distribution channels with different maturity levels.
 
 ## Prerelease install path
 
-The supported public beta install path is the GitHub Release binary installer:
+The current compatibility bootstrap installs signed GitHub Release archives,
+but it is not yet the immutable reference install path:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
-  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  -o gommage-install.sh
+# Inspect gommage-install.sh before executing it.
+sh gommage-install.sh
 ```
 
-The installer downloads the `gommage-cli-v*` release archive for the current
-OS and architecture, verifies the Sigstore bundle, verifies the SHA-256
-checksum, and only then extracts `gommage`, `gommage-daemon`, and
-`gommage-mcp` into the install directory. Operator/package-manager verification
-can additionally check the CycloneDX SBOM and GitHub artifact attestation with
-`gommage release verify` or `scripts/verify-release.sh`.
+This bootstrap downloads `scripts/install.sh` from the mutable `main` branch.
+Keeping download and execution separate makes review possible, but does not
+make the source immutable or release-signed. Replace `main` with a reviewed
+commit SHA when the bootstrap script is inside your threat model. The installer
+downloads the `gommage-cli-v*` release archive for the current OS and
+architecture, verifies
+the Sigstore bundle and SHA-256 checksum, and only then writes `gommage`,
+`gommage-daemon`, and `gommage-mcp` into the install directory.
+Operator/package-manager verification can additionally require the CycloneDX
+SBOM and GitHub artifact attestation with `gommage release verify` or
+`scripts/verify-release.sh`.
+
+The three binaries are replaced sequentially with per-file backups; installation
+is not an all-or-nothing transaction. A host failure can leave a mixed version
+set, and post-install verification does not roll earlier writes back. Keep the
+backups and run `gommage verify --json` as a health check after installation.
+That command reports the companion version strings but does not compare their
+compatibility, so a passing result is not proof of a coherent three-binary set.
+Skill installation is a separate channel: remote skill files default to the
+mutable `main` ref and are not covered by the binary archive's Sigstore
+signature.
 
 This is binary installation only. It does not register a universal MCP gateway
 with Claude Code, Codex, or any other host. New `quickstart` integrations call
@@ -69,20 +88,23 @@ same script without reinstalling binaries. Installer-managed destinations are:
 - Claude Code: `${CLAUDE_HOME:-$HOME/.claude}/skills/gommage`
 
 Remote skill installs read from `GOMMAGE_SKILL_REF` / `--skill-ref`, defaulting
-to `main`. This keeps old binary tags installable while the current skill evolves.
+to `main`. This keeps old binary tags installable while the current skill
+evolves, but it also makes the default skill bootstrap mutable. Pin a reviewed
+commit with `--skill-ref` when reproducibility matters.
 
 ## crates.io status
 
-As of July 4, 2026, the public `gommage-*` crates are published on crates.io:
+As verified through `cargo search` on July 16, 2026, the public `gommage-*`
+crates are published on crates.io:
 
 | Package | crates.io version | Local package gate |
 |---|---:|---|
-| `gommage-stdlib` | `0.12.0-alpha.1` | Passes `cargo package -p gommage-stdlib --allow-dirty`. |
-| `gommage-core` | `0.16.0-alpha.1` | Prepared by `cargo package --no-verify` after published internal deps resolve. |
-| `gommage-audit` | `0.7.1-alpha.1` | Prepared by `cargo package --no-verify` after published internal deps resolve. |
-| `gommage-cli` | `0.48.0-beta.1` | Prepared by `cargo package --no-verify`; installs the `gommage` binary. |
-| `gommage-daemon` | `0.8.1-alpha.1` | Prepared by `cargo package --no-verify`; installs `gommage-daemon`. |
-| `gommage-mcp` | `0.10.1-alpha.1` | Prepared by `cargo package --no-verify`; installs `gommage-mcp`. |
+| `gommage-stdlib` | `0.13.0-alpha.1` | Passes `cargo package -p gommage-stdlib --allow-dirty`. |
+| `gommage-core` | `0.17.0-alpha.1` | Prepared by `cargo package --no-verify` after published internal deps resolve. |
+| `gommage-audit` | `0.7.3-alpha.1` | Prepared by `cargo package --no-verify` after published internal deps resolve. |
+| `gommage-cli` | `0.50.0-beta.1` | Prepared by `cargo package --no-verify`; installs the `gommage` binary. |
+| `gommage-daemon` | `0.9.0-alpha.1` | Prepared by `cargo package --no-verify`; installs `gommage-daemon`. |
+| `gommage-mcp` | `0.11.0-alpha.1` | Prepared by `cargo package --no-verify`; installs `gommage-mcp`. |
 
 The supported Rust-native source-build install path is:
 
@@ -176,19 +198,14 @@ sh scripts/tag-skipped-release-please-components.sh --check
 sh scripts/tag-skipped-release-please-components.sh
 ```
 
-After release-please creates or updates a release PR, the release workflow also
-dispatches `ci.yml` against the release PR branch. This avoids the previous
-manual "empty commit" workaround for required checks: the PR branch is tested
-after any automated workspace-pin repair, and maintainers can merge the release
-PR only after the same CI contract has run on the exact generated branch.
-
-GitHub may mark bot-authored `pull_request` workflow runs as
-`action_required`. To keep release PRs mergeable without manual approvals,
-`ci.yml` and `audit.yml` also define a restricted `pull_request_target` path
-for same-repository branches named `release-please--branches--*`. Those jobs
-check out the release PR head SHA explicitly and skip all other
-`pull_request_target` invocations, so elevated-token execution is not broadened
-to forks or arbitrary user branches.
+After release-please creates or updates a release PR, the release workflow
+resolves its current head SHA and dispatches `ci.yml`, `audit.yml`, `codeql.yml`,
+and `fuzz.yml` against that branch. It accepts an existing run only when the
+recorded `headSha` matches, and verifies that a newly dispatched run also binds
+to that SHA. The dispatcher confirms run creation; it does not wait for a
+successful conclusion and does not itself make those workflows required branch
+checks. Before merging a release PR, inspect the exact current head and the
+repository's current required-check configuration.
 
 Any internal `gommage-*` dependency that points at another workspace crate must
 carry an exact `version = "=<crate version>"` requirement next to its local
@@ -230,6 +247,21 @@ gommage release verify --all-assets --require-sbom --require-provenance
 gommage release verify --require-sbom --require-provenance
 sh scripts/verify-release.sh --require-sbom --require-provenance
 ```
+
+`--require-provenance` requires GitHub's artifact attestation for each selected
+digest and verifies the repository, workflow identity, issuer, and tag ref. It
+does not prove a hermetic or reproducible build, compiler provenance, or native
+execution on the advertised architecture. Release builds run in read-only jobs
+and transfer unsigned archives to a separate publish job that does not check out
+repository code; that job validates checksums, signs, attests, and uploads the
+transferred bytes. The signature and attestation authenticate those bytes and
+the publishing workflow identity, not every process that produced them.
+
+The workflow cross-compiles Linux aarch64 on an x86_64 Linux runner and does not
+execute every packaged archive on its native architecture. Four available
+archives are distribution inventory, not four native runtime certifications.
+Record an exact-asset native smoke result before making an architecture-specific
+runtime claim.
 
 ## First-publish bootstrap
 

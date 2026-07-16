@@ -29,11 +29,13 @@ You will hear back within **72 hours** with:
 
 Gommage's threat model is explicit about what is in and out of scope. The following classes of report will be treated as informative rather than exploitable:
 
-- Wrapper-evasion of hardstops via command constructions not currently in the stdlib hardstop list. These are documented in `THREAT_MODEL.md` §2.3 and reach Gommage as opaque strings.
+- Command behavior that depends on runtime state Gommage does not observe, such as shell aliases, sourced functions, `eval`-generated commands, static `xargs` input, environment-dependent expansion, or symlink resolution. These residual boundaries are documented in `THREAT_MODEL.md` and `docs/input-schema.md`.
 - Symlink-resolution bypasses. Gommage deliberately does not resolve symlinks (see `docs/input-schema.md` §2).
 - TOCTOU between Gommage's decision and the agent's execution (`THREAT_MODEL.md` §2.5).
 - Human approver rubber-stamping every `ask` (`THREAT_MODEL.md` §5.7).
 - Any attack that assumes a hostile local user under the same UID as the daemon. Gommage trusts the user (`THREAT_MODEL.md` §2.2).
+- Deletion, truncation, reordering, or duplication of otherwise valid audit records. Current signatures authenticate each record independently; the log has no cryptographic chain or external completeness witness.
+- Direct mutation of a picto's `uses` or `status` by the trusted local user. Picto schema v1 signs authority fields such as scope, limits, timestamps, reason, and optional input hash, while SQLite enforces mutable lifecycle state in the normal daemon path.
 
 Reports in these classes are still welcome — they may become a new hardstop pattern or a policy-pack default, or a documentation hardening. They just will not be tracked as CVEs.
 
@@ -41,9 +43,10 @@ In scope and will be treated as CVEs:
 
 - Signature verification bypass on audit log or pictos (`gommage-audit::verify_log`, `gommage-audit::explain_log`, `Picto::verify`).
 - Evaluator non-determinism (`gommage-core::evaluate` producing different results for the same `(capabilities, policy)`).
-- Hardcoded hard-stop bypass via a capability string that matches no hard-stop pattern but reaches a known destructive operation. (Note: shell-wrapper evasion NOT covered by stdlib hardstops is a *policy-pack gap*, not a vulnerability — see above.)
+- Bypass of a documented compiled hard stop or a fail-closed typed-shell case, including a supported transparent wrapper or an ambiguous command form that the bundled strict policy is documented to deny.
 - Policy YAML parser panic, hang, or memory-exhaustion on crafted input.
-- Privilege escalation in the daemon IPC protocol (if one ever surfaces).
+- An IPC request that crosses the documented same-UID boundary, or a daemon request that gains authority not exposed by the documented user-local protocol.
+- Release verification accepting an archive whose digest, Sigstore workflow identity, issuer, or requested attestation constraints do not match.
 
 ## Embargo and credit
 

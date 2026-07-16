@@ -105,8 +105,8 @@ The capture directory contains:
 | `repair-claude-dry-run.txt` | Claude legacy hook repair plan without mutation. |
 | `repair-codex-dry-run.txt` | Codex legacy hook repair plan without mutation. |
 | `smoke.json` | Built-in semantic policy smoke report. |
-| `state-rebuild.json` | Rebuild evidence for the local SQLite read-model from signed audit. |
-| `state-verify.json` | Proof that `state.sqlite` matches the current audit ledger. |
+| `state-rebuild.json` | Rebuild evidence for the local SQLite read-model from available authenticated audit records (`source_log: "audit.log"`). |
+| `state-verify.json` | Evidence that `state.sqlite` matches the current audit-log snapshot; this is not a completeness proof. |
 | `state-stats.json` | Fast local counters read from `state.sqlite`. |
 | `policy-fixtures.json` | Public policy fixture library result. |
 | `policy-layers.json` | Active policy layer order and effective hash. |

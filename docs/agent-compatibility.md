@@ -8,7 +8,10 @@ packaged capability mapper stdlib in
 need code changes. The repository-root `capabilities/` directory is a
 review-friendly mirror kept in sync by CI.
 
-If an item is listed as "Bypasses Gommage", that is not a vulnerability — it is the boundary of what a PreToolUse-level interception layer can observe. Stack OS-level confinement (AppArmor, SELinux, `seccomp-bpf`, macOS Seatbelt, Codex `--sandbox`) under Gommage for anything you need caught below the agent layer.
+If an item is listed as "Bypasses Gommage", that is not a vulnerability — it
+is the boundary of what a PreToolUse-level interception layer can observe. Keep
+the host's native sandbox enabled when available, and add OS or container
+confinement for anything you need caught below the agent layer.
 
 After installing an integration, run `gommage verify --json` to verify the operator path and built-in mapper + policy semantics. If the repository carries policy fixtures, run `gommage verify --json --policy-test <file>` before trusting the hook. A top-level verify `warn` is still an operable install when the only warnings are the missing first audit log or missing daemon socket. A top-level verify `fail` means the hook should not be trusted yet. See [`diagnostics.md`](diagnostics.md).
 
@@ -61,17 +64,27 @@ by hand.
 
 ### Bypasses Gommage under Claude Code
 
-- Tool calls that Claude Code chooses to route below the hook (extremely unusual).
+- Tool calls that Claude Code does not forward to the matched hook group.
 - Any shell command the user executes directly in a terminal outside the Claude Code session.
-- Subprocess fork-chains inside a Bash call: Gommage sees the top-level `command` string only. If the command spawns `sh -c '…'` that spawns another, only the outermost string is in `input.command`. Wrapper-evasion hardstops (see `hardstop.rs`) catch the classic shapes; novel wrappers are a hole until added to the stdlib.
+- Runtime-created subprocesses that are not represented in the submitted
+  command string. The typed shell analysis recursively walks static compound
+  commands, substitutions, transparent wrappers, and static `sh -c`/`bash -c`
+  payloads. Dynamic or unsupported forms emit
+  `proc.exec.ambiguous:<reason>` and the shipped strict policy denies them, but
+  Gommage cannot inspect a new command that a permitted process constructs only
+  after execution begins.
 
 ### Recommended stack
 
-Claude Code does not ship OS-level sandboxing. If you need it:
-
-- macOS: run Claude Code under `sandbox-exec` with a profile that limits writable paths.
-- Linux: run under `bwrap` or a container with a tight bind-mount set.
-- Everywhere: `git-hook`-style pre-commit + pre-push fallback if a `git push` gets past the in-session layer.
+- Enable Claude Code's native Bash sandbox when its filesystem and network
+  contract fits the host; it uses Seatbelt on macOS and bubblewrap on
+  Linux/WSL2.
+- Keep Claude permission deny/ask rules for every tool boundary they cover. A
+  Gommage hook allow does not override them.
+- Add a container or stronger host confinement when the native sandbox's
+  documented limits do not fit the threat model.
+- Use pre-commit or pre-push controls when repository-side enforcement is also
+  required outside the agent session.
 
 ### Wiring
 
@@ -125,6 +138,11 @@ There are two separate facts to keep straight:
 | Codex MCP tools | yes | yes when emitted as `mcp__server__tool` | same `mcp.read`, `mcp.write`, and `mcp.call` mapping used for Claude-style MCP names |
 | built-in read-only file inspection | not claimed by Gommage | no | none |
 
+Codex also exposes a separate `PermissionRequest` hook when it is about to ask
+for native approval. Gommage's beta quickstart does not wire Pictos into that
+event. Its `PreToolUse` adapter therefore converts an unmatched `ask_picto`
+result to a denial rather than claiming an interactive Codex approval path.
+
 ### Bypasses Gommage under Codex
 
 - Any Codex tool call that is not matched by the installed Gommage hook group.
@@ -134,18 +152,18 @@ There are two separate facts to keep straight:
   payload is emitted or no Gommage mapper exists.
 - WebSearch and other non-shell, non-MCP tool calls outside Codex hook
   coverage.
-- Any action the approval policy auto-approves or blocks before the Gommage hook
-  path receives a call.
+- Equivalent work performed through another tool path that the installed hook
+  group or Gommage mapper does not cover.
 
 ### Recommended stack
 
 Codex ships OS-level confinement as a first-class feature — **use it**:
 
-| Sandbox mode | Reads | Writes | Network | Shell |
-|---|---|---|---|---|
-| `--sandbox read-only` (default) | anywhere | none | none | allowed via hook |
-| `--sandbox workspace-write` | anywhere | cwd only | none | allowed via hook |
-| `--sandbox danger-full-access` | anywhere | anywhere | anywhere | allowed via hook |
+| Sandbox mode | Native Codex contract |
+|---|---|
+| `--sandbox read-only` | Inspect files; edits and command execution require approval. |
+| `--sandbox workspace-write` | Read files, edit within the workspace/configured writable roots, and run routine local commands inside that boundary. |
+| `--sandbox danger-full-access` | No Codex sandbox restriction on filesystem or network. Use only behind another suitable boundary or when full access is intentional. |
 
 Gommage + Codex is a layered posture: Codex's OS-level sandbox covers file and
 network boundaries that are below, outside, or not yet mapped by Gommage;

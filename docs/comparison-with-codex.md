@@ -1,16 +1,19 @@
 # Comparison with OpenAI Codex CLI's native permission layer
 
 Gommage works with Codex today, but the split of responsibilities is different
-from the Claude Code integration. Codex's built-in model is stronger at the OS
-boundary because it ships native sandbox modes. Gommage's current beta
-integration with Codex is intentionally scoped: the default Gommage quickstart
+from the Claude Code integration. Codex supplies native sandbox and approval
+controls, while Gommage operates on its matched hook surface. Gommage's current
+beta integration with Codex is intentionally scoped: the default quickstart
 wires Bash, `apply_patch`, and Codex MCP hook names, while Codex's sandbox
 remains authoritative for hook paths Gommage does not see. Read this page
 before deploying Gommage on a Codex workflow.
 
 ## What Codex ships
 
-- **Sandbox modes.** `--sandbox read-only` (default), `--sandbox workspace-write`, `--sandbox danger-full-access`. Enforced at the OS — macOS Seatbelt, Linux `bwrap + seccomp`. These are real confinement, not policy in userspace.
+- **Sandbox modes.** `--sandbox read-only`, `--sandbox workspace-write`, and
+  `--sandbox danger-full-access`. The first two apply Codex's native filesystem
+  and network policy; the last disables Codex's sandbox and should be treated as
+  unconfined unless another boundary exists.
 - **Approval policy.** Determines when Codex prompts before executing a sandbox-allowed action. Configured via CLI flags and `~/.codex/config.toml`.
 - **`PreToolUse` hook.** Lives in Codex hook configuration. Older Codex
   releases were effectively Bash-only for Gommage's use case. Codex
@@ -20,12 +23,22 @@ before deploying Gommage on a Codex workflow.
   shell interception and non-shell/non-MCP tools remain native Codex boundaries.
 - **MCP bidirectional.** Codex can consume external MCP servers and be wrapped as one.
 
+See the current official Codex
+[hooks](https://developers.openai.com/codex/hooks) and
+[sandboxing and approvals](https://developers.openai.com/codex/concepts/sandboxing)
+documentation before depending on host behavior.
+
 ## What Gommage adds on top of Codex
 
 - **Declarative policy that stacks with the sandbox.** You don't replace `--sandbox workspace-write`; you add a second layer that decides which commands within that sandbox are acceptable right now, in this expedition.
 - **Advisory sandbox bridge.** `gommage sandbox advise --json` prints reviewed starter commands for native sandbox layers, always marked advisory only.
-- **Break-glass pictos.** Codex's approval policy is either "ask every time" or "auto-approve"; it does not have a signed, TTL'd, usage-bounded primitive. Gommage does.
-- **Auditable decisions.** Codex logs sessions; Gommage records each decision with rule name, policy version hash, and signed line in the audit log.
+- **Break-glass pictos.** Codex retains its native approval policy. Gommage adds
+  a signed, expiring, usage-bounded grant for the capabilities its integration
+  evaluates.
+- **Auditable matched decisions.** When a mapped call reaches Gommage and a
+  decision is appended successfully, the signed record includes the rule name
+  and policy-version hash. The audit log does not prove that every host event
+  reached Gommage or that records were never removed.
 
 ## Current scope limitation
 
@@ -34,7 +47,8 @@ Gommage under Codex **does not see by default**:
 - shell paths that Codex does not emit as matched `Bash` hook events;
 - built-in file reads or other internal tools that do not have a Gommage mapper;
 - WebSearch and other non-shell, non-MCP tools outside Codex hook coverage;
-- any tool call blocked or approved before the Gommage hook path sees it.
+- equivalent work performed through another tool path that the installed hook
+  group or Gommage mapper does not cover.
 
 For those, Codex's `--sandbox` modes remain the authoritative layer unless you
 add and test local Gommage hook/mapping coverage. A typical combo:
@@ -63,35 +77,34 @@ not replace Codex's OS sandbox.
 │                              │
 │  1. Model plans a tool call  │
 │                              │
-│  2. Approval policy?         │   ←— ~/.codex/config.toml
-│     (ask / auto-approve)     │
-│                              │
-│  3. Matched PreToolUse hook  │   ←— Codex hook config → gommage hook --agent codex
+│  2. Matched PreToolUse hook  │   ←— Codex hook config → gommage hook --agent codex
 │     → Gommage evaluates      │       (Bash, apply_patch, MCP by default)
 │                              │
-│  4. OS sandbox                │   ←— Seatbelt / bwrap+seccomp
+│  3. Native approval policy  │   ←— ~/.codex/config.toml
+│                              │
+│  4. Native Codex sandbox     │   ←— selected sandbox mode
 │     (--sandbox mode)         │
 │                              │
 │  5. Execute (or not)         │
 └──────────────────────────────┘
 ```
 
-Gommage sits at step 3 for tool calls matched by the installed hook group and
-mapped by Gommage's capability rules. Steps 1-2 are Codex; step 4 is your
-kernel.
+Gommage sits at step 2 for tool calls matched by the installed hook group and
+mapped by Gommage's capability rules. Codex retains its native approval and
+sandbox behavior around that hook decision.
 
-## When to prefer Codex + Gommage over Claude Code + Gommage
+## When Codex + Gommage is a good fit
 
-- You want OS-level confinement as a second layer (Codex has, Claude Code does not).
+- Your existing Codex sandbox and approval policy are the native lower layer.
 - Your workload relies on Bash, `apply_patch`, or MCP tool calls and you want
   deterministic policy and signed audit for those matched hooks.
 - You already use Codex for other reasons (OpenAI account, platform policies).
 
-## When to prefer Claude Code + Gommage
+## When Claude Code + Gommage may fit better
 
 - You need Gommage to see Read / Write / Edit / Glob / Grep / WebFetch and
   Claude-style MCP tool names through the default integration today.
-- You don't need or want OS-level sandboxing (or you're layering your own: containers, nsjail, etc.).
+- You already use Claude Code's native permissions and optional Bash sandbox.
 
 ## Roadmap alignment
 

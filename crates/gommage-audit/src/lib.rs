@@ -1,4 +1,4 @@
-//! Append-only audit log for Gommage decisions.
+//! Independently signed audit records for Gommage decisions.
 //!
 //! Each decision produces one JSONL line of the form:
 //!
@@ -12,7 +12,8 @@
 //!
 //! The signature covers the canonical bytes of the object **minus the `sig`
 //! field itself**, so verification is line-local: kill the daemon mid-write
-//! and at most the last line is corrupt — everything before is still valid.
+//! and prior complete lines remain independently verifiable. The format does
+//! not prove that valid records were never deleted, reordered, or duplicated.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use gommage_core::{Capability, CapabilityProvenance, Decision, EvalResult, MatchedRule, ToolCall};
@@ -749,7 +750,7 @@ pub fn key_fingerprint(vk: &VerifyingKey) -> String {
 /// Best-effort: a failure to load the signing key or open the audit log is
 /// swallowed, because the bypass is a recovery path and must never be blocked by
 /// an audit problem. Shared by the `gommage-mcp` hook binary and the
-/// `gommage mcp` CLI adapter so both leave an identical, tamper-evident trail.
+/// `gommage mcp` CLI adapter so both emit the same independently signed event.
 pub fn append_bypass_event_best_effort(
     layout: &gommage_core::runtime::HomeLayout,
     call: &ToolCall,

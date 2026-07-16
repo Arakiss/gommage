@@ -30,14 +30,24 @@
                                   (same ~/.gommage/ root)
 ```
 
-Three binaries, one root. The CLI and daemon share state by convention: both
-read the same YAML files, both open the same SQLite picto store, and both
-append or replay the same approval inbox.
+Three binaries, one user-owned root. The CLI and daemon share state by
+convention: both read the same YAML files, both open the same SQLite picto
+store, and both append or replay the same unsigned approval inbox. Signed
+approval lifecycle events are written separately to `audit.log`.
 
-`audit.log` is the forensic source of truth for decisions and lifecycle events.
+`audit.log` is the authenticated forensic record for decisions and lifecycle events.
 `state.sqlite` is a rebuildable read-model owned by the CLI for fast operator
 queries. It indexes signed audit entries after `gommage state rebuild`; it is
 safe to delete, and no permission decision reads from it.
+
+State schema v2 names its input `source_log: "audit.log"`. `state verify`
+compares the index with the current audit-log snapshot; this field does not
+upgrade that snapshot into a complete ledger.
+
+Audit signatures authenticate each record independently. They do not form a
+hash chain and cannot prove that the file was not truncated, reordered, or
+selectively edited by deleting valid lines. Evidence that needs completeness
+must be anchored outside the user-owned Gommage home.
 
 ## Local control plane
 
@@ -49,13 +59,23 @@ The primary Gommage operation path is CLI + daemon + host hooks:
   inferred Claude/Codex homes are wired to Gommage.
 - `gommage run codex` builds an explicit Codex launch plan with a selected
   sandbox after validating the Codex home.
-- `gommage managed status` inspects optional managed-mode readiness without
-  requiring root for normal local development.
+- `gommage managed status` inspects a small set of user-mode deployment signals:
+  path modes, user-service file presence, socket presence, hook status, and the
+  current process's bypass environment.
 - `gommage project init` creates reviewed project-local policy and fixtures.
 
 These commands do not change the evaluator contract. They make coverage,
 configuration, launch posture, and operator evidence more visible around the
 deterministic decision kernel.
+
+`managed status` is diagnostic only. Its `mode` is `user_level`,
+`user_service_file_present`, or `unconfigured`, and the report states
+`status_requires_root: false`, `isolation: "none"`, `tamper_resistance: "none"`,
+and `reference_ready: false`. It does not verify file ownership, a distinct
+service principal, a live process identity, or socket peer credentials. The
+current service files are a macOS LaunchAgent or systemd user service, not a
+protected system authority. Managed reference mode is not shipped by this
+architecture.
 
 ## Request lifecycle
 
@@ -88,7 +108,7 @@ deterministic decision kernel.
                ▼
 ┌──────────────────────────────┐
 │ 6. evaluate(caps, policy)    │
-│   first-match ordered rule   │
+│   compositional resolution   │
 └──────────────┬───────────────┘
                ▼
 ┌──────────────────────────────┐
@@ -107,10 +127,10 @@ deterministic decision kernel.
 └──────────────────────────────┘
 ```
 
-Each step is pure except 4 (reads mapper rules), 7 (reads/writes picto and
-approval stores), and 8 (writes audit log). The evaluator itself (step 5 + 6)
-is side-effect free and deterministic — the property the determinism suite
-proves.
+Steps 4 through 6 operate on already-loaded mapper and policy data and are
+side-effect free. Step 7 reads or writes picto and approval state, and step 8
+writes audit. The policy evaluator itself is deterministic; the final
+authorization result can change when picto state changes by design.
 
 ## Invariants
 
@@ -118,16 +138,28 @@ proves.
 
 2. **Capability set is a pure function of `(tool, input, mapper rules)`.** No env access, no file I/O. This is why the mapper takes a `ToolCall` + pre-loaded rules, never a filesystem path.
 
-3. **Policy evaluation is a pure function of `(capabilities, rules)`.** The evaluator does not read the picto store; that call happens in the daemon _after_ the evaluator returns `AskPicto`. This separation is deliberate — it keeps the evaluator testable in isolation.
+3. **Policy evaluation is compositional and pure.** Capabilities are normalized,
+   byte-sorted, and deduplicated. Compiled hard-stops run first. Each capability
+   is then resolved independently: first match is retained only within one
+   layer and capability, contributions from `org`, `user`, and `project` are
+   aggregated conservatively, and any unresolved capability fails closed.
+   Deny beats unresolved, unresolved beats ask, and ask beats allow. The
+   evaluator does not read the picto store; that happens after `AskPicto`.
 
-4. **Audit log is append-only and line-signed.** Killing the daemon mid-write corrupts at most one line; all prior lines remain independently verifiable.
+4. **Audit records are independently line-signed.** The writer appends JSONL,
+   and prior complete lines remain independently verifiable after an interrupted
+   write. This is not cryptographic completeness: deletion, duplication, or
+   truncation of valid lines is not detected without an external anchor.
 
 5. **State index is rebuildable.** `state.sqlite` can accelerate TUI metrics,
    recent stream fallback, and local counters, but it is never an evaluator
    input. If stale or missing, operator views fall back to the signed audit
    log.
 
-6. **Socket is user-local.** `~/.gommage/gommage.sock`, owner-only permissions. No TCP in v0.1.
+6. **Socket is user-local.** `~/.gommage/gommage.sock` lives below the mode-0700
+   Gommage home. The current line-JSON protocol multiplexes decisions, reload,
+   ping, and recent-audit reads on one socket and does not authenticate peer
+   credentials. The operator UID is trusted. There is no TCP listener.
 
 ## Determinism
 
@@ -141,19 +173,26 @@ CI re-runs the determinism suite **10 times** per build as an additional defense
 
 ## Policy version hash
 
-Every `Policy` carries a `version_hash` field — a SHA-256 over the concatenation of `(relative_file_path, substituted_file_contents)` in lexicographic order. Relative paths make the same policy tree hash identically under different `GOMMAGE_HOME` roots; substituted contents make different effective canvases produce different hashes. The hash goes into every audit entry so `gommage explain <id>` can report not just which rule fired, but which version of the rule set it was.
+Every `Policy` carries a `version_hash` field. Its versioned hash input includes
+the effective home-alias normalizer plus the ordered layer name, relative file
+path, and substituted contents for every policy file. Relative paths avoid
+binding the hash to one checkout root; substituted contents and normalizer
+context distinguish different effective policies. The hash goes into every
+decision audit entry.
 
 When multiple policy layers are active, the hash also includes the layer name
 before each relative file path. Runtime layer order is:
 
 1. explicit org policy from `GOMMAGE_ORG_POLICY_DIR`
-2. explicit project policy from `GOMMAGE_PROJECT_POLICY_DIR`, or
+2. user policy at `$GOMMAGE_HOME/policy.d`
+3. explicit project policy from `GOMMAGE_PROJECT_POLICY_DIR`, or
    `<expedition-root>/.gommage/policy.d` when an expedition is active
-3. user policy at `$GOMMAGE_HOME/policy.d`
 
-Policy evaluation is still first-match-wins after compiled hard-stops, so
-earlier layers have higher precedence. Use `gommage policy layers --json` to
-inspect the layer order and effective hash on a host.
+Project policy is tightening-only and cannot contain `allow`. Policy loading
+rejects missing or empty `${VAR}` expressions unless they supply a non-empty
+`${VAR:-default}`. With no active expedition, `${EXPEDITION_ROOT}` is a
+non-matching sentinel rather than an empty string. Use
+`gommage policy layers --json` to inspect the active layers and effective hash.
 
 ## Optional MCP gateway path
 
@@ -183,18 +222,32 @@ Input binding is opt-in to preserve existing scope-bound policies and direct
 `gommage grant` behavior. A request approved under an input-bound rule mints the
 bound form; a regular approval or direct grant mints the scope-only form.
 
+The current Picto signature authenticates id, scope, maximum uses, expiry,
+creation time, reason, and optional input hash. It does not authenticate the
+mutable `uses` or `status` columns; those are enforced transactionally by the
+user-owned SQLite store. Approval JSONL, picto mutation, and audit append are
+also separate operations rather than one authority transaction. These limits
+are why user mode does not claim tamper resistance against the operator UID.
+
 Future scoped wildcards (for example `git.push:release/*`) would be opt-in, not
 a default.
 
 ## Why Rust
 
-- Single static binary. No runtime. No dependency drift at install.
+- Three native Rust binaries (`gommage`, `gommage-daemon`, and `gommage-mcp`) with no
+  language runtime to install. Platform system libraries may still be linked
+  dynamically.
 - Syscall-level performance for the hot path (`<5ms` p99 is the bar).
-- `serde` + `globset` + `regex` + `rusqlite` + `ed25519-dalek` + `tokio` — every dep mature, audited, actively maintained.
-- No GC pauses to bias "mismo input → mismo tiempo".
+- Determinism-critical dependencies are exactly pinned in the workspace;
+  plumbing dependencies use compatible-version requirements and remain subject
+  to the lockfile and dependency review.
+- Memory safety without a garbage-collected runtime in the evaluator hot path.
 
-## Why YAML for v0.1
+## Why YAML for the current policy format
 
 - Read/writable by hand, cat-able, grep-able.
-- Covers the 95% case. Teams that need more expressiveness can wait for v1.0's Rego support.
-- Avoids introducing a third language (Rust for the daemon, Rego for policy, something else for capabilities). YAML is already in every DevOps toolchain.
+- Keeps policy review separate from the Rust implementation while remaining
+  familiar in development and operations toolchains.
+- A richer policy engine would require a separate compatibility, determinism,
+  and migration design; no alternative engine is promised by the current
+  release contract.

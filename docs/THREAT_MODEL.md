@@ -10,24 +10,24 @@ shell-aware mapper's coverage ends. Read the root file for everything else.
 
 ## 1. What gommage IS
 
-A **deterministic policy and audit gate on agent tool calls.** When an AI coding
-agent decides to run a tool — `Bash`, `Read`, `Write`, `Edit`, a `WebFetch`, an
-`mcp__*` call — gommage intercepts that call at the host's `PreToolUse` hook,
-maps it to capabilities, evaluates declarative YAML policy, and emits
-`allow` / `deny` / `ask`, recording every decision in a signed audit log.
+A **deterministic policy and audit gate on matched agent tool calls.** When a
+supported host forwards a `Bash`, file, web, or `mcp__*` call through a matched
+hook event, Gommage maps it to capabilities, evaluates declarative YAML policy,
+and emits `allow` / `deny` / `ask`, recording the decision in a signed audit
+record. Calls that the host does not forward remain outside this boundary.
 
-Capability mapping and policy evaluation are pure functions of `(tool_call,
-policy)`: the same input produces the same policy decision on every OS. Picto
-lookup is separate authorization state, so an active, expired, or spent grant
-can intentionally change the final outcome of an `ask_picto` rule. The mapping
-and evaluation contract is frozen in [`input-schema.md`](input-schema.md).
+Capability mapping and policy evaluation are pure functions of the canonical
+tool call, loaded mapper, and loaded policy. Picto lookup is separate
+authorization state, so an active, expired, or spent grant can intentionally
+change the final outcome of an `ask_picto` rule. The mapping and evaluation
+contract is frozen in [`input-schema.md`](input-schema.md).
 
 Within that scope, gommage gives you:
 
-- **A tool-agnostic filesystem gate.** The shell-aware mapper maps `fs.read`,
-  `fs.write`, and `proc.*` per shell segment, so `Bash` file-verbs (`cat`,
-  `cp`, `tee`, redirects) and compound or wrapped commands are gated the same
-  way the dedicated `Read` / `Write` tools are. A policy that denies
+- **A tool-agnostic filesystem gate for statically resolved effects.** The
+  shell-aware mapper emits typed `fs.read` and `fs.write` capabilities for
+  supported `Bash` file verbs (`cat`, `cp`, `tee`, redirects) across compound
+  commands, substitutions, and transparent wrappers. A policy that denies
   `fs.write:**/.git/**` catches both `Write` to `.git/config` and
   `cat x > .git/config`.
 - **The picto model for `ask` gates.** When a rule decides `ask_picto`, the call
@@ -59,18 +59,30 @@ the root [`THREAT_MODEL.md` §5](../THREAT_MODEL.md#5-out-of-scope-things-gommag
 
 ## 3. The shell-aware mapper
 
-The mapper decomposes a `Bash` `command` string into shell **segments** (split
-on the unquoted operators `&&`, `||`, `;`, `|`, and newlines, honouring quotes
-and escapes), strips leading wrappers from each segment (`VAR=value`, `env`,
-`sudo`, `timeout`, absolute-path heads, `bash -c "<payload>"`), recurses into
-`$(...)` / backtick command substitutions, and surfaces genuine output-redirect
-targets. Each resulting candidate is run through the stdlib capability rules.
+The mapper parses a `Bash` `command` with an exact-pinned, quote-preserving
+shell AST. It walks compounds, pipelines, static `sh`/`bash -c` payloads,
+command substitutions, redirections, and a documented set of transparent
+wrappers (`command`, `exec`, `env`, `sudo`, `doas`, `timeout`, `time`, `nice`,
+`nohup`, `stdbuf`, and `setsid`). Quoted text remains data. Typed extractors
+derive filesystem effects and Git push destination, deletion, force, and
+network effects from statically known operands.
 
+The analysis is bounded to 64 KiB of shell input, 16 levels of nesting, and 512
+commands. Parse errors, exceeded bounds, dynamic security-relevant operands,
+unknown options, and wrappers that change working directory emit a bounded
+`proc.exec.ambiguous:<reason>` capability. The shipped strict stdlib policy denies
+that namespace before generic `proc.exec:*` rules can authorize it. Operators
+can edit that policy or activate the recovery bypass, so this is a policy
+property, not an OS confinement guarantee.
+
+For supported hook payloads, the adapter first adds reserved path or `cwd`
+fields so dedicated file tools and statically known Bash operands can resolve
+relative paths lexically. The Bash analyzer rejects `..` operands as ambiguous.
 Before policy matching, path-shaped filesystem capabilities (`fs.read`,
-`fs.search`, `fs.write`) normalize leading `~`, `~/`, `$HOME/`, and `${HOME}/`
-to the `HOME` value used when loading policy. That is a lexical alias rewrite,
-not `realpath`: relative paths, `..`, symlinks, `~user`, and other variables are
-left untouched.
+`fs.search`, `fs.write`) also normalize leading `~`, `~/`, `$HOME/`, and
+`${HOME}/` to the `HOME` value used when loading policy. None of these steps is
+`realpath`: symlinks, `~user`, other variables, and raw calls without adapter
+metadata remain outside that resolution.
 
 The effect: a policy gate cannot be evaded by command **shape**. These all
 surface `fs.read:/etc/shadow` and are gated like a `Read`:
@@ -87,44 +99,65 @@ Quoted text is never treated as a verb: `echo 'git push'` is data, not a push.
 
 ---
 
-## 4. Residuals (all fail-closed → deny, never an allow-leak)
+## 4. Residual shell limits
 
-The mapper is best-effort, not a full POSIX shell. The shapes below are **not
-yet mapped to their precise gate scope**, so the specific rule (e.g.
-`gate-main-push`, a path-scoped `fs.write`) may not fire. Critically, none of
-them is an allow-leak: the whole-command `proc.exec:<command>` capability is
-always emitted, the compiled hard-stops still run, and the **fail-closed default
-denies anything no rule allowed**. A residual costs you a *generic* deny or a
-coarser gate, never a silent pass.
+The AST preserves shell syntax; it does not execute expansions or reproduce a
+shell runtime. `git -C`, static `HEAD:main` and `feature/x:release/x` refspecs,
+force refspecs such as `+main`, static deletions, transparent wrappers, and
+static nested shell payloads are mapped to destination-aware effects. The
+remaining limits are runtime-dependent forms such as:
 
-- **`git -C <dir> <subcommand>`** — the `-C` working-directory flag sits between
-  `git` and the verb, so the precise `git.*` extractor (which anchors on
-  `git <verb>`) may not produce the exact scope. The command still emits
-  `proc.exec:git -C …`; deny it generically or extend the rule.
-- **`eval` / `xargs` wrappers** — `eval "<string>"` and `… | xargs <cmd>`
-  build or dispatch a command whose final argv the mapper does not reconstruct.
-  The wrapper itself is visible as `proc.exec:eval …` / `proc.exec:xargs …`;
-  the wrapped operation is not separately scoped.
-- **Refspec `HEAD:main`** — `git push origin HEAD:main` pushes to `main` via a
-  source\:destination refspec, but the branch extractor reads the literal ref
-  token and does not resolve `HEAD:main` to `refs/heads/main`. It denies
-  generically rather than hitting the precise `gate-main-push` scope.
+- shell aliases, sourced files, functions defined for later invocation, and
+  interpreter-specific behavior outside the parsed shell grammar;
+- `eval`, static `xargs` command construction, generated scripts, and other
+  commands whose final executed argv is not represented as a nested shell AST;
+- parameter, arithmetic, glob, or command-substitution results when the
+  security-relevant destination cannot be determined statically;
+- symlink targets, executable replacement, environment-dependent command
+  lookup, and filesystem changes after the decision.
 
-The lesson for these is the same: rely on the fail-closed backstop, and for
-strict filesystem or branch gating, restrict raw `Bash` and route operations
-through the dedicated tools (see
+Every `Bash` call still carries one raw `proc.exec:<original command>`
+capability, and many dynamic forms also carry `proc.exec.ambiguous:*`. The
+shipped strict policy denies the ambiguous namespace. Runtime-dependent forms
+that leave only the raw capability can still be authorized by a broad user or
+organization `proc.exec:*` allow; editing or removing the ambiguous deny can
+reopen the rest. For strict filesystem or branch control, keep raw execution
+allows narrow, retain the host sandbox, or route access through dedicated tools
+whose path arguments are explicit (see
 [`input-schema.md` §4.1](input-schema.md#41-tool-boundary)).
 
-## 5. Operator and org policy can re-open shape-based bypass
+## 5. Policy can re-open shape-based bypass
 
 The fail-closed posture only holds if your allows stay narrow. A policy that
-grants a broad **`proc.exec:*` allow** (or any wildcard that swallows the
-per-segment `proc.exec` candidates) re-opens shape-based bypass: a wrapped or
-compound command that the mapper could not scope precisely now matches the broad
-allow instead of falling through to the fail-closed deny.
+grants a broad **`proc.exec:*` allow** can reopen runtime-dependent behavior
+that leaves only the original whole-command capability. It does not override an
+earlier shipped deny for `proc.exec.ambiguous:*` unless that rule is changed or
+removed. Derived shell candidates feed compatibility mapper rules, but they are
+not emitted as additional per-segment `proc.exec` capabilities.
 
-Keep allows narrow. Prefer denying or `ask`-gating the specific operations you
-care about over granting a wide `proc.exec` allow. Use
+Keep allows narrow. Project policy cannot contain `allow` rules; it is loaded
+after user policy and can only add `ask_picto` or `gommage` contributions.
+Organization and user policy can allow, ask, or deny. Evaluation resolves each
+normalized capability separately in `org`, `user`, `project` order, keeps
+first-match ordering only inside one layer and capability, and then aggregates
+conservatively: deny beats unresolved, unresolved beats ask, and ask beats
+allow. Use
 `gommage policy lint --strict` to surface over-broad rules, and
-`gommage policy layers --json` to confirm an org or project layer has not
-introduced a wide allow ahead of your gates.
+`gommage policy layers --json` to inspect the active layers and effective hash.
+
+Policy variables are also fail-closed at load time. An unset or empty `${VAR}`
+is an error unless the expression has a non-empty `${VAR:-default}`. When no
+expedition is active, `${EXPEDITION_ROOT}` resolves to a non-matching sentinel
+instead of `/`, preventing project-scoped patterns from broadening to `/**`.
+
+## 6. User-mode authority limit
+
+The shipped daemon, CLI, key, policy, approval inbox, picto database, and Unix
+socket are user-local. A process under the same UID can edit policy and state,
+read or replace the signing key, invoke daemon reload, or replace the binaries.
+`gommage managed status` only reports path modes, user-service file presence,
+socket presence, hook status, and the current process's bypass environment. Its
+`mode` is `user_level`, `user_service_file_present`, or `unconfigured`; the
+report explicitly sets `status_requires_root: false`, `isolation: "none"`,
+`tamper_resistance: "none"`, and `reference_ready: false`. A separate managed
+reference-mode authority is not shipped in this version.

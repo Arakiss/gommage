@@ -1,6 +1,10 @@
 # Pictos
 
-A **picto** is a signed grant that converts an `ask_picto` decision into an `allow`. It is the only mechanism in Gommage that authorizes an otherwise-denied action without editing policy on disk.
+A **picto** is a signed grant that converts an `ask_picto` decision into an
+`allow`. It is the normal scoped authorization mechanism for an ask without
+editing policy on disk. `GOMMAGE_BYPASS=1` is a separate recovery path that
+skips normal policy evaluation for non-compiled-hard-stop calls; it is not a
+picto and must not be treated as one.
 
 ## Properties
 
@@ -10,10 +14,19 @@ A **picto** is a signed grant that converts an `ask_picto` decision into an `all
   picto cannot satisfy such a rule.
 - **TTL.** Mandatory. Max 24 h. No ambient, long-lived grants.
 - **`max_uses`.** Mandatory. Consumed atomically; once spent, the picto transitions to `spent` and cannot be revived.
-- **Signature.** ed25519 over `{id, scope, max_uses, ttl, created_at, reason}`
+- **Signature.** ed25519 over the current unversioned, newline-delimited payload
+  containing `id`, `scope`, `max_uses`, expiry, creation time, and `reason`,
   using the daemon's keypair. For an input-bound picto, the canonical input hash
-  is also signed. Gommage verifies the signature before lookup/consume can turn
-  an `ask_picto` into `allow`, so a tampered SQLite row is rejected and audited.
+  is also signed. Gommage verifies this payload before lookup and consumption.
+- **Canonical v1 domain.** `id` and `scope` must be non-empty; `id`, `scope`,
+  and `reason` reject control characters and Unicode line separators. Timestamps
+  must be UTC at whole-second precision. UTF-8 byte lengths are capped at 128
+  for `id`, 512 for `scope`, and 4,096 for `reason`; lifetime must be
+  1–86,400 seconds; `max_uses` must be positive; an optional input hash must be
+  canonical `sha256:<lowercase-hex>`; and the signature must use canonical
+  base64. Signing and verification apply the same checks, so delimiter
+  injection, representation malleability, and input-bound-to-scope-only row
+  mutation fail closed.
 - **Revocable.** `gommage revoke <id>` marks the picto revoked in O(1). Audit log records the revocation.
 - **`--require-confirmation`.** Optional. Picto is created in `pending_confirmation`; must be activated via `gommage confirm <id>` (e.g., by a second human) before first use.
 
@@ -221,6 +234,35 @@ Existing picto rows and direct `gommage grant --scope …` grants remain
 scope-only. To mint an exact-input picto, approve the pending request created by
 an input-bound rule. A database opened by a newer Gommage version retains old
 scope-only pictos; they cannot unlock an input-bound rule.
+
+## Current v1 authority limits
+
+Picto v1 is designed for a trusted operator account, not for resistance to a
+hostile process under that same UID:
+
+- The signature does not cover the mutable `uses` or `status` columns. The
+  SQLite transaction checks and updates them atomically during normal
+  consumption, but a same-UID process that can edit `pictos.sqlite` is inside
+  the trusted computing base.
+- The signing payload is newline-delimited text rather than a versioned
+  canonical structured encoding. Fields are signed, but the payload has no
+  encoded schema version or typed field tags. The canonical v1 domain above
+  excludes delimiters and malformed encodings so the current field boundaries
+  remain unambiguous; a future authority format still needs explicit
+  versioning.
+- `approvals.jsonl` is unsigned operational state. Request and resolution
+  lifecycle events are also written to the signed audit log, but approval JSONL,
+  Picto SQLite mutation, and audit append are separate operations rather than
+  one atomic authority transaction.
+- The same user-owned `key.ed25519` signs both Pictos and audit records. A
+  same-UID compromise can read or replace it and forge both kinds of evidence.
+- Scope-only Pictos intentionally authorize any call that reaches the same
+  `required_scope` until their TTL/use budget is exhausted. Use
+  `bind_input: true` when approval is meant for one canonical tool call.
+
+These are documented beta limits, not properties of a shipped managed reference
+mode. Keep host sandboxing and native permissions enabled, and do not describe
+user-mode Pictos as tamper-resistant against the operator UID.
 
 ## Lifecycle
 

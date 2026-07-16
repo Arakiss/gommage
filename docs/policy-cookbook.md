@@ -1,6 +1,8 @@
 # Policy cookbook
 
-Recipes for common policy patterns. Drop any of these into `~/.gommage/policy.d/`.
+Recipes for common policy patterns. Unless a recipe says otherwise, place it in
+the user layer at `~/.gommage/policy.d/`. Project policy is tightening-only and
+cannot contain `decision: allow`.
 
 ## Filesystem
 
@@ -21,6 +23,9 @@ Recipes for common policy patterns. Drop any of these into `~/.gommage/policy.d/
 
 ### Sandbox the agent to the current project
 
+This is a user-policy allow. Do not place it in
+`<project>/.gommage/policy.d/`, because project layers cannot grant authority.
+
 ```yaml
 - name: allow-project-writes
   decision: allow
@@ -30,6 +35,8 @@ Recipes for common policy patterns. Drop any of these into `~/.gommage/policy.d/
 ```
 
 Everything outside `${EXPEDITION_ROOT}` will fall through and fail closed.
+When no expedition is active, the runtime supplies a non-matching sentinel;
+the pattern never expands to `/**`.
 
 ### Gate writes to a specific checkout
 
@@ -110,6 +117,12 @@ consumed.
 Direct `gommage grant --scope …` remains scope-bound; approve the pending
 request from an input-bound rule to mint the exact-input form.
 
+Current Picto signatures bind id, scope, maximum uses, expiry, creation time,
+reason, and optional input hash. Mutable `uses` and `status` remain trusted
+SQLite state under the operator UID. Exact-input binding prevents a grant from
+authorizing a different canonical tool call; it does not make user-owned state
+tamper-resistant.
+
 ### Allow pushes on feature branches
 
 ```yaml
@@ -169,7 +182,9 @@ To make force-push an un-bypassable hard deny instead, use
   reason: "outbound network limited to approved registries"
 ```
 
-Order matters — the `allow` rule must come before the `deny`.
+Within one layer and one capability, order matters: the first positively
+covering rule contributes for that layer. The deny still wins if it contributes
+from another active layer or covers a sibling capability in the same call.
 
 ## Deployments
 
@@ -187,11 +202,58 @@ Order matters — the `allow` rule must come before the `deny`.
 
 ## Composing rules
 
-The evaluator runs rules in **declared order** (lexicographic filename, then declared index). First match wins. If you're having trouble getting the decision you want, check:
+The evaluator does not choose one rule for the whole tool call. It normalizes,
+sorts, and deduplicates capabilities, resolves each capability independently,
+and records at most one first-match contribution per layer and capability.
+Active layers are unique and ordered `org`, `user`, `project`. Project policy
+may contribute only `ask_picto` or `gommage`.
 
-1. Is an earlier rule accidentally matching? Run `gommage policy check` and inspect.
-2. Is your glob too permissive? Globs use `/` as a segment separator — `*` does NOT cross `/`. Use `**` for recursive matches.
-3. Is `${EXPEDITION_ROOT}` set? Run `gommage expedition status`.
+The final aggregation is conservative:
+
+1. A policy deny wins.
+2. Otherwise, any capability unresolved by every layer fails closed.
+3. Otherwise, `ask_picto` wins over allow.
+4. Two distinct required Picto scopes in one call fail closed; split the call.
+5. Only when every capability resolves and no deny or ask remains is the call
+   allowed.
+
+Declared order still matters inside one layer and capability: filenames are
+lexicographic, then rules use declaration order. If the result is unexpected,
+check:
+
+1. Does every emitted capability have positive coverage? Run `gommage map
+   --json`, then inspect signed capability provenance in the decision audit
+   record.
+2. Is an earlier rule in the same layer covering that capability? Run
+   `gommage policy check` and inspect.
+3. Is your glob too permissive? Globs use `/` as a segment separator — `*` does
+   not cross `/`; use `**` for recursive matches.
+4. Are the active layers really `org`, `user`, `project`? Run `gommage policy
+   layers --json`.
+5. Is `${EXPEDITION_ROOT}` active? Run `gommage expedition status`.
+
+### Policy variable substitution
+
+Policy loading accepts `${VAR}` and `${VAR:-default}`. A missing or empty value
+is an error unless the expression supplies a non-empty default. This is a
+security boundary: an unset path variable cannot silently turn
+`fs.write:${ROOT}/**` into `fs.write:/**`.
+
+Project policy is reviewed tightening input, not a source of grants. For
+example, this is valid in a project layer:
+
+```yaml
+- name: gate-this-project-deploy
+  decision: ask_picto
+  required_scope: "deploy.example:production"
+  bind_input: true
+  match:
+    any_capability:
+      - "deploy.example:production"
+  reason: "this repository requires review of the exact production deploy"
+```
+
+The same file with `decision: allow` fails policy loading.
 
 ## Regression fixtures
 

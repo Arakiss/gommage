@@ -4,8 +4,18 @@
 
 ```sh
 curl --proto '=https' --tlsv1.2 -sSf \
-  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
+  https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+  -o gommage-install.sh
+# Inspect gommage-install.sh before executing it.
+sh gommage-install.sh
 ```
+
+This compatibility path fetches the bootstrap script from the mutable `main`
+branch and is not the immutable reference install path. Replace `main` with a
+reviewed commit SHA when the bootstrap is inside your threat model. The script
+verifies the selected release archive's Sigstore identity and SHA-256 digest
+before writing binaries; binary replacement is sequential rather than
+transactional.
 
 ## 2. Quickstart
 
@@ -85,7 +95,9 @@ gommage expedition start "feature-auth"
 
 ## 5. Use Claude Code normally
 
-The hook runs on every tool call. Decisions go to the audit log:
+The installed hook evaluates each tool call that matches its configured
+`PreToolUse` group and that Claude Code forwards to the hook. Matched decisions
+go to the audit log:
 
 ```sh
 gommage tail -f

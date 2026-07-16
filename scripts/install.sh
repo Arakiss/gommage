@@ -3,7 +3,10 @@
 #
 # Usage:
 #   curl --proto '=https' --tlsv1.2 -sSf \
-#       https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh | sh
+#       https://raw.githubusercontent.com/Arakiss/gommage/main/scripts/install.sh \
+#       -o gommage-install.sh
+#   # Inspect gommage-install.sh before executing it.
+#   sh gommage-install.sh
 #
 #   sh scripts/install.sh --version gommage-cli-vX.Y.Z-beta.N --bin-dir "$HOME/.local/bin"
 #
@@ -18,7 +21,9 @@
 #
 # Downloads release artifacts from GitHub Releases and verifies their Sigstore
 # signature bundle plus SHA-256 checksum. Refuses to install if either check
-# fails. Requires `cosign` on PATH.
+# fails. Requires `cosign` on PATH. The common curl command fetches this
+# bootstrap from mutable `main`; callers can commit-pin that URL. Binary files
+# are replaced sequentially with per-file backups, not as one transaction.
 #
 # Environment variables:
 #   GOMMAGE_VERSION   — release tag to install (default: latest)
@@ -30,7 +35,7 @@
 #   GOMMAGE_SKILL_AGENTS
 #                    — space/comma-separated codex, claude, or all
 #   GOMMAGE_SKILL_REF
-#                    — git ref for remote skill files (default: main)
+#                    — git ref for remote skill files (default: mutable main)
 #   GOMMAGE_NO_PROMPT
 #                    — set to 1 for headless/non-interactive installs
 #   GOMMAGE_VERIFY_AFTER_INSTALL
@@ -84,7 +89,7 @@ Options:
   --skill-only          Install/update only the Gommage agent skill.
   --skill-agent <agent> Agent skill target: codex, claude, claude-code, or all.
                         May be repeated. Default with --with-skill: codex.
-  --skill-ref <ref>     Git ref for remote skill files. Default: main.
+  --skill-ref <ref>     Git ref for remote skill files. Default: mutable main.
   --no-prompt           Never prompt. Auto mode skips skill installation.
   --verify              Run `gommage verify` after installing binaries.
   -h, --help            Show this help.
@@ -102,6 +107,8 @@ The installer verifies the Sigstore bundle and SHA-256 checksum before it
 extracts or writes binaries. Skill installation copies the repository skill to:
   Codex:      ${CODEX_HOME:-$HOME/.codex}/skills/gommage
   Claude Code: ${CLAUDE_HOME:-$HOME/.claude}/skills/gommage
+Remote skill files are not covered by the release archive signature. Pin
+--skill-ref to a reviewed commit when reproducibility matters.
 EOF
 }
 cosign_install_hint() {
@@ -645,7 +652,8 @@ if ! echo ":$PATH:" | grep -Fq ":${BIN_DIR}:"; then
 fi
 
 say "installed ${VERSION} to ${BIN_DIR}"
-say "skills: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh -s -- --skill-only --skill-agent codex --skill-agent claude"
+say "skills installer: curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh -o gommage-install.sh"
+say "after review: sh gommage-install.sh --skill-only --skill-agent codex --skill-agent claude"
 say "claude: ${BIN_DIR}/gommage quickstart --agent claude --daemon --self-test"
 say "codex:  ${BIN_DIR}/gommage quickstart --agent codex --daemon --self-test"
 say "health: ${BIN_DIR}/gommage verify"
