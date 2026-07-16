@@ -105,18 +105,20 @@ than only the first failure.
 
 ## 4. Explaining a single decision — `gommage explain <id>`
 
-`gommage explain <audit-id>` looks the entry up by `id` and shows it. With
-`--trace` it re-evaluates the recorded capabilities against the **current**
-policy and reports which rule fired, the active vs audited decision, and the
-policy version in effect:
+`gommage explain <audit-id>` looks the entry up by `id`, verifies that selected
+record under the home verifying key, and only then shows it. A malformed or
+signature-invalid selected record fails without printing its provenance. With
+`--trace` it re-evaluates the signed capability list against the **current**
+policy and compares the active result with the audited result:
 
 ```sh
 # Show one audit entry (decision or event) by id.
 gommage explain <audit-id>
 gommage explain <audit-id> --json
 
-# Re-run the recorded capabilities through current policy: which rule fired,
-# shadowed matches, the audit vs active policy version, fixture-authoring hints.
+# Re-run the recorded capabilities through current policy: audited and active
+# per-capability/layer provenance, normalized active capabilities, policy
+# version comparison, and fixture-authoring hints.
 gommage explain <audit-id> --trace --json
 ```
 
@@ -124,7 +126,18 @@ The audit entry stores `input_hash` and the emitted `capabilities`, not the raw
 tool input, so a trace re-evaluates from the capability list, not from the
 original command string. Each decision entry carries its `policy_version` hash,
 which is how `explain --trace` reports whether the rule set has changed since the
-decision was recorded.
+decision was recorded. Decision schema v2 also signs
+`capability_provenance`, so the trace reports the historical contribution from
+each policy layer directly. Schema v1 records remain verifiable, but their
+historical per-capability provenance is explicitly `null`/unavailable instead
+of being reconstructed from today's policy.
+
+The `audited_primary_matched_rule` and `active_primary_matched_rule` fields are
+compatibility summaries of the aggregate decision. They are not complete
+explanations for mixed-capability calls; the corresponding
+`*_capability_provenance` arrays are authoritative. The trace JSON no longer
+emits synthetic global `rules` or `shadowed_rules` arrays because compositional
+evaluation has first-match ordering only within one layer and one capability.
 
 ---
 
