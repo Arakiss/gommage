@@ -207,6 +207,15 @@ enforced by `cargo-semver-checks` in CI.
 
 ### Changed
 
+- Bash mapping derives Gommage authorization, reconfiguration, disable, and
+  service-lifecycle effects from quote-preserving argv. Unknown or dynamic
+  Gommage administration forms now emit a fail-closed ambiguity capability.
+- Explicit homes selected by mutating administration commands emit exact
+  `gommage.home.mutate:<path>` capabilities independently of ordinary file
+  reads and writes.
+- Known Gommage file operands emit normalized `fs.read:*` or `fs.write:*`
+  capabilities, including attached option values and local Cargo invocations;
+  dynamic and parent-relative paths fail closed.
 - Picto lookup/consume paths can now verify ed25519 signatures before granting
   an otherwise gated action.
 - Policy hashes now use relative file paths plus substituted effective contents
