@@ -1,5 +1,5 @@
 {
-  "name": "shell-leading-true-git-push-main-asks-for-picto",
+  "name": "shell-leading-true-git-push-main-requires-every-execution",
   "call": { "tool": "Bash", "input": { "command": "true; git push origin main" } },
-  "expected": { "kind": "ask_picto", "required_scope": "git.push:main" }
+  "expected": { "kind": "gommage", "hard_stop": false }
 }

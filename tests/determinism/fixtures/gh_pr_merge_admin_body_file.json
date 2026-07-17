@@ -1,0 +1,16 @@
+{
+  "name": "gh-pr-merge-admin-body-file-needs-composite-input-bound-scope",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "gh pr merge 79 -R github.com/Arakiss/galdr --admin --match-head-commit 0123456789abcdef0123456789abcdef01234567 --body-file /repo/body.md"
+    }
+  },
+  "expected": {
+    "kind": "ask_picto",
+    "hard_stop": false,
+    "required_scope": "gh.pr.merge.admin-body-file",
+    "bind_input": true,
+    "matched_rule": "gate-gh-pr-merge-admin-body-file"
+  }
+}

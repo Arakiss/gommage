@@ -34,73 +34,9 @@
     - "git.stage:bulk"
 
 # --- Package managers -------------------------------------------------------
-- name: bash-bun-install
-  tool: Bash
-  match_input:
-    command: "^\\s*bun\\s+(?:install|add|remove)\\b"
-  emit:
-    - "pkg.bun:install"
-    - "net.out:registry.npmjs.org"
-
-- name: bash-npm-install
-  tool: Bash
-  match_input:
-    command: "^\\s*npm\\s+(?:install|i|add|remove|uninstall)\\b"
-  emit:
-    - "pkg.npm:install"
-    - "net.out:registry.npmjs.org"
-
-- name: bash-cargo-install
-  tool: Bash
-  match_input:
-    command: "^\\s*cargo\\s+install\\b"
-  emit:
-    - "pkg.cargo:install"
-    - "net.out:crates.io"
-
-# --- Supply-chain PUBLISH (irreversible registry mutation) -------------------
-#
-# These gate only the *publish* verb, not install/build/test. They surface a
-# `pkg.<registry>:publish` capability that the package-manager policy gates with
-# a picto. Run per shell-segment, so `cd /pkg && npm publish` is caught too.
-
-# npm publish -> pkg.npm:publish (NOT `npm install`/`npm run`/`npm test`).
-- name: bash-npm-publish
-  tool: Bash
-  match_input:
-    command: "^\\s*npm\\s+publish\\b"
-  emit:
-    - "pkg.npm:publish"
-    - "net.out:registry.npmjs.org"
-
-# cargo publish -> pkg.cargo:publish (NOT `cargo build`/`cargo test`).
-- name: bash-cargo-publish
-  tool: Bash
-  match_input:
-    command: "^\\s*cargo\\s+publish\\b"
-  emit:
-    - "pkg.cargo:publish"
-    - "net.out:crates.io"
-
-# The local helper wraps real `cargo publish` calls. Treat its execute mode as
-# the same irreversible registry mutation so operators cannot bypass the cargo
-# publish gate by moving the verb into a shell script.
-- name: bash-gommage-publish-crates-script
-  tool: Bash
-  match_input:
-    command: "^\\s*(?:(?:sh|bash)\\s+)?(?:\\./)?scripts/publish-crates\\.sh\\b[^#;|&]*\\s--execute\\b"
-  emit:
-    - "pkg.cargo:publish"
-    - "net.out:crates.io"
-
-# Python publish: `twine upload`, `python -m twine upload`, `pip ... upload`.
-- name: bash-python-publish
-  tool: Bash
-  match_input:
-    command: "^\\s*(?:twine\\s+upload|python[0-9.]*\\s+-m\\s+twine\\s+upload|pip[0-9.]*\\s+.*\\bupload\\b)"
-  emit:
-    - "pkg.python:publish"
-    - "net.out:pypi.org"
+# Install and registry-publication capabilities are emitted by gommage-core's
+# quote-preserving argv analyzer. In particular, informational forms such as
+# `cargo publish --help` must not be confused with registry mutation.
 
 # --- Persistence verbs (scheduler / service registration) --------------------
 #

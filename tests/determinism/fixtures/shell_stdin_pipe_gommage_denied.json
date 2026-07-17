@@ -1,0 +1,14 @@
+{
+  "name": "shell-stdin-pipe-cannot-hide-gommage-reconfiguration",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "printf '%s\\n' 'gommage daemon reload' | bash"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

@@ -28,6 +28,11 @@ pub struct RawRule {
     pub hard_stop: bool,
     #[serde(default)]
     pub required_scope: Option<String>,
+    /// Derive the Picto scope from the single normalized capability matching
+    /// this selector. The selector must also appear verbatim in
+    /// `match.all_capability`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_scope_from_capability: Option<String>,
     /// Require a Picto signed for the exact canonical tool-call input hash.
     /// Scope-only direct grants remain valid only when this is false.
     #[serde(default)]
@@ -59,6 +64,9 @@ pub struct Rule {
     pub decision: RuleDecision,
     pub hard_stop: bool,
     pub required_scope: Option<String>,
+    /// Canonical selector used to derive the Picto scope from one capability.
+    pub required_scope_from_capability: Option<String>,
+    pub(crate) required_scope_from_capability_matcher: Option<GlobMatcher>,
     pub bind_input: bool,
     pub r#match: Match,
     pub reason: String,
@@ -142,6 +150,15 @@ pub struct Policy {
     pub rules: Vec<Rule>,
     pub version_hash: String,
     pub(crate) path_normalizer: PathNormalizer,
+}
+
+/// Binding modes used by `ask_picto` rules that can require one concrete scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PictoScopeRequirements {
+    /// At least one matching rule can consume a scope-only Picto.
+    pub has_scope_only_rule: bool,
+    /// At least one matching rule requires an exact canonical input hash.
+    pub has_input_bound_rule: bool,
 }
 
 /// Closed policy-layer roles in their only valid load order.
@@ -319,6 +336,50 @@ impl Policy {
     /// relative.
     pub fn normalize_capabilities(&self, caps: &[Capability]) -> Vec<Capability> {
         self.path_normalizer.normalize_capabilities(caps)
+    }
+
+    /// Return the binding modes of all `ask_picto` rules that can require
+    /// `scope`.
+    ///
+    /// Static scopes use exact equality. Capability-derived scopes use their
+    /// compiled selector. Invalid Picto scopes can never be required and return
+    /// `None` even when a permissive selector would otherwise match them.
+    pub fn picto_scope_requirements(&self, scope: &str) -> Option<PictoScopeRequirements> {
+        if validate_picto_scope(scope).is_err() {
+            return None;
+        }
+
+        let mut requirements: Option<PictoScopeRequirements> = None;
+        for rule in self
+            .rules
+            .iter()
+            .filter(|rule| rule.decision == RuleDecision::AskPicto)
+        {
+            let static_match = rule.required_scope.as_deref() == Some(scope);
+            let derived_match = rule
+                .required_scope_from_capability_matcher
+                .as_ref()
+                .is_some_and(|selector| selector.is_match(scope));
+            if !static_match && !derived_match {
+                continue;
+            }
+
+            let requirements = requirements.get_or_insert(PictoScopeRequirements {
+                has_scope_only_rule: false,
+                has_input_bound_rule: false,
+            });
+            if rule.bind_input {
+                requirements.has_input_bound_rule = true;
+            } else {
+                requirements.has_scope_only_rule = true;
+            }
+        }
+        requirements
+    }
+
+    /// Return whether any `ask_picto` rule can require `scope`.
+    pub fn can_require_picto_scope(&self, scope: &str) -> bool {
+        self.picto_scope_requirements(scope).is_some()
     }
 }
 
@@ -567,19 +628,54 @@ fn compile_rule(
 ) -> Result<Rule, GommageError> {
     // Validate decision/field combinations early — a policy with inconsistent
     // fields should fail at load, not at evaluation.
+    if raw.required_scope.is_some() && raw.required_scope_from_capability.is_some() {
+        return Err(GommageError::Policy(format!(
+            "rule {:?}: required_scope and required_scope_from_capability are mutually exclusive",
+            raw.name
+        )));
+    }
     if raw.decision == RuleDecision::AskPicto {
-        let scope = raw.required_scope.as_deref().ok_or_else(|| {
-            GommageError::Policy(format!(
-                "rule {:?}: decision=ask_picto requires required_scope",
-                raw.name
-            ))
-        })?;
-        validate_picto_scope(scope).map_err(|reason| {
-            GommageError::Policy(format!(
-                "rule {:?}: invalid required_scope: {reason}",
-                raw.name
-            ))
-        })?;
+        match (
+            raw.required_scope.as_deref(),
+            raw.required_scope_from_capability.as_deref(),
+        ) {
+            (Some(scope), None) => validate_picto_scope(scope).map_err(|reason| {
+                GommageError::Policy(format!(
+                    "rule {:?}: invalid required_scope: {reason}",
+                    raw.name
+                ))
+            })?,
+            (None, Some(selector)) => {
+                if !raw
+                    .r#match
+                    .all_capability
+                    .iter()
+                    .any(|pattern| pattern == selector)
+                {
+                    return Err(GommageError::Policy(format!(
+                        "rule {:?}: required_scope_from_capability must exactly match a pattern in match.all_capability",
+                        raw.name
+                    )));
+                }
+            }
+            (None, None) => {
+                return Err(GommageError::Policy(format!(
+                    "rule {:?}: decision=ask_picto requires exactly one of required_scope or required_scope_from_capability",
+                    raw.name
+                )));
+            }
+            (Some(_), Some(_)) => {
+                return Err(GommageError::Policy(format!(
+                    "rule {:?}: required_scope and required_scope_from_capability are mutually exclusive",
+                    raw.name
+                )));
+            }
+        }
+    } else if raw.required_scope_from_capability.is_some() {
+        return Err(GommageError::Policy(format!(
+            "rule {:?}: required_scope_from_capability is only valid with decision=ask_picto",
+            raw.name
+        )));
     }
     if raw.decision != RuleDecision::Gommage && raw.hard_stop {
         return Err(GommageError::Policy(format!(
@@ -606,6 +702,15 @@ fn compile_rule(
         )));
     }
 
+    let required_scope_from_capability_matcher = raw
+        .required_scope_from_capability
+        .as_deref()
+        .map(|selector| compile_glob(selector, path_normalizer))
+        .transpose()?;
+    let required_scope_from_capability = raw
+        .required_scope_from_capability
+        .as_deref()
+        .map(|selector| path_normalizer.normalize_capability_str(selector));
     let r#match = Match {
         any_capability: compile_globs(&raw.r#match.any_capability, path_normalizer)?,
         all_capability: compile_globs(&raw.r#match.all_capability, path_normalizer)?,
@@ -617,6 +722,8 @@ fn compile_rule(
         decision: raw.decision,
         hard_stop: raw.hard_stop,
         required_scope: raw.required_scope,
+        required_scope_from_capability,
+        required_scope_from_capability_matcher,
         bind_input: raw.bind_input,
         r#match,
         reason: raw.reason,
@@ -629,16 +736,21 @@ fn compile_globs(
     path_normalizer: &PathNormalizer,
 ) -> Result<Vec<GlobMatcher>, GommageError> {
     pats.iter()
-        .map(|p| {
-            let normalized = path_normalizer.normalize_capability_str(p);
-            Glob::new(&normalized)
-                .map(|g| g.compile_matcher())
-                .map_err(|e| GommageError::Glob {
-                    pattern: normalized,
-                    source: e,
-                })
-        })
+        .map(|pattern| compile_glob(pattern, path_normalizer))
         .collect()
+}
+
+fn compile_glob(
+    pattern: &str,
+    path_normalizer: &PathNormalizer,
+) -> Result<GlobMatcher, GommageError> {
+    let normalized = path_normalizer.normalize_capability_str(pattern);
+    Glob::new(&normalized)
+        .map(|glob| glob.compile_matcher())
+        .map_err(|source| GommageError::Glob {
+            pattern: normalized,
+            source,
+        })
 }
 
 /// Substitute `${NAME}` and `${NAME:-default}` references in `input` using `env`.
@@ -983,6 +1095,7 @@ mod tests {
                 decision: RuleDecision::AskPicto,
                 hard_stop: false,
                 required_scope: Some(scope),
+                required_scope_from_capability: None,
                 bind_input: false,
                 r#match: RawMatch {
                     any_capability: vec!["mcp.write:*".to_string()],
@@ -1012,6 +1125,147 @@ mod tests {
 "#;
         let policy = Policy::from_yaml_string(yaml, &HashMap::new(), "t").unwrap();
         assert!(policy.rules[0].bind_input);
+    }
+
+    #[test]
+    fn ask_picto_can_compile_scope_from_an_exact_all_capability_pattern() {
+        let yaml = r#"
+- name: scoped-mcp-write
+  decision: ask_picto
+  required_scope_from_capability: "mcp.write:*"
+  match:
+    all_capability: ["mcp.call:*", "mcp.write:*"]
+  reason: "write requires approval"
+"#;
+        let policy = Policy::from_yaml_string(yaml, &HashMap::new(), "dynamic.yaml").unwrap();
+
+        assert!(policy.rules[0].required_scope.is_none());
+        assert_eq!(
+            policy.rules[0].required_scope_from_capability.as_deref(),
+            Some("mcp.write:*")
+        );
+        assert!(
+            policy.rules[0]
+                .required_scope_from_capability_matcher
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn policy_reports_static_and_derived_picto_scope_binding_modes() {
+        let yaml = r#"
+- name: dynamic-input-bound
+  decision: ask_picto
+  required_scope_from_capability: "mcp.write:*"
+  bind_input: true
+  match:
+    all_capability: ["mcp.write:*"]
+- name: shared-scope-only
+  decision: ask_picto
+  required_scope: "shared.scope"
+  match:
+    all_capability: ["task.scope-only:*"]
+- name: shared-input-bound
+  decision: ask_picto
+  required_scope: "shared.scope"
+  bind_input: true
+  match:
+    all_capability: ["task.input-bound:*"]
+"#;
+        let policy = Policy::from_yaml_string(yaml, &HashMap::new(), "requirements.yaml").unwrap();
+
+        assert_eq!(
+            policy.picto_scope_requirements("mcp.write:server/tool"),
+            Some(PictoScopeRequirements {
+                has_scope_only_rule: false,
+                has_input_bound_rule: true,
+            })
+        );
+        assert_eq!(
+            policy.picto_scope_requirements("shared.scope"),
+            Some(PictoScopeRequirements {
+                has_scope_only_rule: true,
+                has_input_bound_rule: true,
+            })
+        );
+        assert!(policy.can_require_picto_scope("mcp.write:server/tool"));
+        assert!(!policy.can_require_picto_scope("unknown.scope"));
+        assert!(
+            policy
+                .picto_scope_requirements(&format!("mcp.write:safe{}evil", '\u{202e}'))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn ask_picto_scope_sources_are_mutually_exclusive() {
+        let yaml = r#"
+- name: ambiguous-scope
+  decision: ask_picto
+  required_scope: "mcp.write:server"
+  required_scope_from_capability: "mcp.write:*"
+  match:
+    all_capability: ["mcp.write:*"]
+"#;
+        let error = Policy::from_yaml_string(yaml, &HashMap::new(), "invalid.yaml").unwrap_err();
+
+        assert!(
+            error.to_string().contains(
+                "required_scope and required_scope_from_capability are mutually exclusive"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn capability_derived_scope_is_only_valid_for_ask_picto() {
+        for decision in ["allow", "gommage"] {
+            let yaml = format!(
+                r#"
+- name: invalid-decision
+  decision: {decision}
+  required_scope_from_capability: "mcp.write:*"
+  match:
+    all_capability: ["mcp.write:*"]
+"#
+            );
+            let error =
+                Policy::from_yaml_string(&yaml, &HashMap::new(), "invalid.yaml").unwrap_err();
+
+            assert!(
+                error.to_string().contains(
+                    "required_scope_from_capability is only valid with decision=ask_picto"
+                ),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn capability_derived_scope_must_exactly_match_an_all_capability_pattern() {
+        for (selector, match_clause) in [
+            ("mcp.write:*", "any_capability: [\"mcp.write:*\"]"),
+            ("mcp.write:**", "all_capability: [\"mcp.write:*\"]"),
+        ] {
+            let yaml = format!(
+                r#"
+- name: invalid-selector
+  decision: ask_picto
+  required_scope_from_capability: "{selector}"
+  match:
+    {match_clause}
+"#
+            );
+            let error =
+                Policy::from_yaml_string(&yaml, &HashMap::new(), "invalid.yaml").unwrap_err();
+
+            assert!(
+                error.to_string().contains(
+                    "required_scope_from_capability must exactly match a pattern in match.all_capability"
+                ),
+                "{error}"
+            );
+        }
     }
 
     #[test]

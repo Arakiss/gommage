@@ -65,10 +65,11 @@ pub(crate) fn cmd_uninstall(layout: HomeLayout, options: UninstallOptions) -> Re
     }
 
     if let Some(agent) = agent {
-        uninstall_agent_target(agent, options.restore_backup, options.dry_run)?;
+        uninstall_agent_target(agent, &layout, options.restore_backup, options.dry_run)?;
     }
     if daemon {
         daemon_uninstall(
+            &layout,
             resolve_service_manager(options.daemon_manager)?,
             options.dry_run,
         )?;
@@ -320,11 +321,16 @@ fn remove_path(path: &Path, label: &str, dry_run: bool) -> Result<()> {
         println!("plan remove {label}: {}", path.display());
         return Ok(());
     }
-    if !path.exists() {
-        println!("ok {label}: not found at {}", path.display());
-        return Ok(());
-    }
-    let metadata = std::fs::symlink_metadata(path)?;
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            println!("ok {label}: not found at {}", path.display());
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("inspecting {}", path.display()));
+        }
+    };
     if metadata.is_dir() {
         std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))?;
     } else {
@@ -355,6 +361,20 @@ mod tests {
         assert!(!layout.audit_log.exists());
         assert!(!layout.policy_dir.exists());
         assert!(!layout.capabilities_dir.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn remove_path_removes_broken_symlinks_without_following_them() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let link = temp.path().join("broken-link");
+        symlink(temp.path().join("missing-target"), &link).unwrap();
+
+        remove_path(&link, "test link", false).unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).is_err());
     }
 
     #[test]

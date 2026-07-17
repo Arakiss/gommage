@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-target-above-gh-integer-range-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 9223372036854775808 --repo github.com/Arakiss/galdr --squash" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

@@ -22,7 +22,7 @@ use ed25519_dalek::VerifyingKey;
 use gommage_audit::{AuditEvent, AuditWriter, recent_stream_items};
 use gommage_core::{
     ApprovalRequest, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
-    ApprovalWebhookSource, Decision, PictoConsume, PictoLookup, ToolCall,
+    ApprovalWebhookSource, AuthorizationEvidence, Decision, PictoConsume, PictoLookup, ToolCall,
     approval_webhook_generic_payload, deliver_prepared_approval_webhook, evaluate,
     prepare_approval_webhook,
     runtime::{HomeLayout, Runtime},
@@ -349,13 +349,31 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
                 };
                 match consume {
                     PictoConsume::Consumed { picto } => {
+                        let authorization = AuthorizationEvidence::from_picto(&picto);
+                        let satisfied = s.rt.approvals.satisfy_matching_call(
+                            &call.tool,
+                            &input_hash,
+                            &required_scope,
+                            &picto.binding,
+                            &eval.policy_version,
+                            &picto.id,
+                        )?;
                         s.writer.append_event(AuditEvent::PictoConsumed {
-                            id: picto.id,
-                            scope: picto.scope,
+                            id: picto.id.clone(),
+                            scope: picto.scope.clone(),
                             uses: picto.uses,
                             max_uses: picto.max_uses,
                             status: picto.status.as_str().to_string(),
                         })?;
+                        if let Some(resolution) = satisfied {
+                            s.writer.append_event(AuditEvent::ApprovalResolved {
+                                id: resolution.request_id,
+                                status: resolution.status.as_str().to_string(),
+                                reason: resolution.reason,
+                                picto_id: resolution.picto_id,
+                            })?;
+                        }
+                        eval.authorization = Some(authorization);
                         eval.decision = Decision::Allow;
                     }
                     PictoConsume::NotUsable => {}

@@ -1,0 +1,14 @@
+{
+  "name": "node-stdin-program-fails-closed",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "printf '%s\\n' 'console.log(1)' | node"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

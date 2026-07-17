@@ -2,8 +2,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
-    runtime::{Expedition, HomeLayout, Runtime},
+    AuthorizationEvidence, Decision, PictoConsume, PictoLookup, PictoReadStore, RuleDecision,
+    ToolCall, evaluate,
+    runtime::{Expedition, HomeLayout, PolicyReadModel, Runtime},
 };
 use std::{path::PathBuf, process::ExitCode};
 use time::OffsetDateTime;
@@ -55,7 +56,7 @@ mod update_cache;
 mod util;
 mod verify;
 
-use agent::{AgentCmd, AgentKind, cmd_agent};
+use agent::{AgentCmd, AgentKind, AgentPolicyMode, cmd_agent};
 use agent_uninstall::AgentUninstallTarget;
 use approval_cmd::{ApprovalCmd, cmd_approval};
 use audit_cmd::{AuditExplainFormat, cmd_audit_verify, cmd_explain, print_log};
@@ -119,6 +120,9 @@ enum Cmd {
         /// Skip importing native agent permission rules into Gommage policy.
         #[arg(long)]
         no_import_native_permissions: bool,
+        /// Install legacy broad allow rules. This weakens shell and file mediation.
+        #[arg(long)]
+        relaxed: bool,
         /// Install and start the user-level daemon service as part of quickstart.
         #[arg(long)]
         daemon: bool,
@@ -131,10 +135,10 @@ enum Cmd {
         /// Write the daemon service file without starting it. Implies --daemon.
         #[arg(long)]
         daemon_no_start: bool,
-        /// Run the readiness gate after setup completes. Default; kept for scripts.
+        /// Run the policy/agent readiness gate before optional service activation. Default.
         #[arg(long)]
         self_test: bool,
-        /// Skip the post-install readiness gate. Use only when recovering manually.
+        /// Skip the policy/agent readiness gate. Use only when recovering manually.
         #[arg(long, conflicts_with = "self_test")]
         no_self_test: bool,
         /// Show planned file edits without writing them.
@@ -482,6 +486,7 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             agents,
             replace_hooks,
             no_import_native_permissions,
+            relaxed,
             daemon,
             daemon_manager,
             daemon_force,
@@ -498,6 +503,11 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
                     agents,
                     replace_hooks,
                     import_native_permissions: !no_import_native_permissions,
+                    policy_mode: if relaxed {
+                        AgentPolicyMode::Relaxed
+                    } else {
+                        AgentPolicyMode::Strict
+                    },
                     install_daemon: daemon || daemon_no_start,
                     daemon_manager,
                     daemon_force,
@@ -555,11 +565,9 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             layout.ensure()?;
             let sk = layout.load_key()?;
             let rt = Runtime::open(HomeLayout::at(&layout.root)).context("opening runtime")?;
-            // A picto only ever unlocks an `ask_picto` rule whose `required_scope`
-            // equals this scope (exact string match). Warn loudly when the scope
-            // matches no loaded rule, so an operator does not burn a picto on a
-            // typo or an invented scope that can never be consumed.
-            warn_if_scope_unknown(&rt, &scope);
+            // Manual grants are scope-only. Reject scopes used exclusively by
+            // exact-input rules, and warn for scopes no loaded rule can require.
+            validate_grant_scope(&rt, &scope)?;
             let id = format!("picto_{}", uuid::Uuid::now_v7());
             let picto = rt
                 .pictos
@@ -585,17 +593,33 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
             }
         }
         Cmd::List { json } => {
-            let rt = Runtime::open(layout)?;
-            let pictos = rt.pictos.list()?;
+            let pictos = if layout.pictos_db.exists() {
+                PictoReadStore::open(&layout.pictos_db)?.list()?
+            } else {
+                Vec::new()
+            };
             if json {
                 println!("{}", serde_json::to_string_pretty(&pictos)?);
             } else if pictos.is_empty() {
                 println!("no pictos");
             } else {
                 for p in pictos {
+                    let binding = match &p.binding {
+                        gommage_core::PictoBinding::ScopeOnly => "scope_only".to_string(),
+                        gommage_core::PictoBinding::ExactInput { input_hash } => {
+                            format!("exact_input:{input_hash}")
+                        }
+                    };
                     println!(
-                        "{} [{:?}] scope={} uses={}/{} ttl={} reason={:?}",
-                        p.id, p.status, p.scope, p.uses, p.max_uses, p.ttl_expires_at, p.reason
+                        "{} [{:?}] scope={} binding={} uses={}/{} ttl={} reason={:?}",
+                        p.id,
+                        p.status,
+                        p.scope,
+                        binding,
+                        p.uses,
+                        p.max_uses,
+                        p.ttl_expires_at,
+                        p.reason
                     );
                 }
             }
@@ -668,8 +692,8 @@ fn run(cmd: Cmd, layout: HomeLayout) -> Result<ExitCode> {
         Cmd::Replay(options) => return cmd_replay(options),
         Cmd::Decide { pretty, hook } => {
             let call = read_tool_call_from_stdin(hook)?;
-            let rt = Runtime::open(layout)?;
-            let eval = evaluate_only(&rt, &call);
+            let read_model = PolicyReadModel::load(&layout)?;
+            let eval = evaluate_only(&read_model.mapper, &read_model.policy, &call);
             let out = if pretty {
                 serde_json::to_string_pretty(&eval)?
             } else {
@@ -757,33 +781,51 @@ fn parse_ttl_seconds(raw: &str) -> std::result::Result<i64, String> {
     Ok(seconds)
 }
 
-/// Warn (to stderr) when a grant scope matches no `ask_picto` rule in the loaded
-/// policy. A scope-only picto is consumed only by exact-scope match against a
-/// rule's `required_scope`; input-bound rules also require the exact canonical
-/// tool-call hash. An unknown scope produces a picto that can never unlock
-/// anything — the failure mode a field report hit (scope `git.force-push`,
-/// which matches no rule, instead of the real `git.push.force`).
-fn warn_if_scope_unknown(rt: &Runtime, scope: &str) {
-    let mut known: Vec<&str> = rt
+/// Validate that a manual scope-only grant can be consumed, warning when the
+/// scope is unknown and rejecting rules that require the approval flow's exact
+/// canonical input binding.
+fn validate_grant_scope(rt: &Runtime, scope: &str) -> Result<()> {
+    if let Some(requirements) = rt.policy.picto_scope_requirements(scope) {
+        if !requirements.has_scope_only_rule {
+            anyhow::bail!(
+                "scope {scope:?} is only used by input-bound ask_picto rules; `gommage grant` creates a scope-only Picto that cannot satisfy them. Trigger the protected action, then approve its pending request with `gommage approval approve <request-id>`"
+            );
+        }
+        return Ok(());
+    }
+
+    let mut known: Vec<String> = rt
         .policy
         .rules
         .iter()
-        .filter_map(|r| r.required_scope.as_deref())
+        .filter(|rule| rule.decision == RuleDecision::AskPicto)
+        .filter_map(|rule| {
+            let binding = if rule.bind_input {
+                "input-bound approval"
+            } else {
+                "scope-only grant"
+            };
+            if let Some(scope) = &rule.required_scope {
+                Some(format!("{scope} [exact; {binding}]"))
+            } else {
+                rule.required_scope_from_capability
+                    .as_ref()
+                    .map(|selector| format!("{selector} [derived selector; {binding}]"))
+            }
+        })
         .collect();
-    if known.contains(&scope) {
-        return;
-    }
     known.sort_unstable();
     known.dedup();
     eprintln!(
         "warning: scope {scope:?} matches no ask_picto rule in the loaded policy; \
-         this picto can never be consumed. Known scopes: {}",
+         this picto can never be consumed. Known scopes/selectors: {}",
         if known.is_empty() {
             "<none>".to_string()
         } else {
             known.join(", ")
         }
     );
+    Ok(())
 }
 
 pub(crate) fn decide_with_pictos(
@@ -856,13 +898,31 @@ pub(crate) fn decide_with_pictos(
                 };
                 match consume {
                     PictoConsume::Consumed { picto } => {
+                        let authorization = AuthorizationEvidence::from_picto(&picto);
+                        let satisfied = rt.approvals.satisfy_matching_call(
+                            &call.tool,
+                            &input_hash,
+                            &required_scope,
+                            &picto.binding,
+                            &eval.policy_version,
+                            &picto.id,
+                        )?;
                         events.push(AuditEvent::PictoConsumed {
-                            id: picto.id,
-                            scope: picto.scope,
+                            id: picto.id.clone(),
+                            scope: picto.scope.clone(),
                             uses: picto.uses,
                             max_uses: picto.max_uses,
                             status: picto.status.as_str().to_string(),
                         });
+                        if let Some(resolution) = satisfied {
+                            events.push(AuditEvent::ApprovalResolved {
+                                id: resolution.request_id,
+                                status: resolution.status.as_str().to_string(),
+                                reason: resolution.reason,
+                                picto_id: resolution.picto_id,
+                            });
+                        }
+                        eval.authorization = Some(authorization);
                         eval.decision = Decision::Allow;
                     }
                     PictoConsume::NotUsable => {}
@@ -887,9 +947,9 @@ fn approval_reason(reason: &str, request_id: &str) -> String {
 }
 
 fn cmd_expedition(sub: ExpeditionCmd, layout: HomeLayout) -> Result<ExitCode> {
-    layout.ensure()?;
     match sub {
         ExpeditionCmd::Start { name, root } => {
+            layout.ensure()?;
             let root = root
                 .map(Ok::<_, anyhow::Error>)
                 .unwrap_or_else(|| Ok(std::env::current_dir()?))?;

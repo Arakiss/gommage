@@ -1,0 +1,14 @@
+{
+  "name": "gommage-reconfigure-cannot-cover-sibling-process",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "python3 -c 'print(1)' && gommage daemon reload"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

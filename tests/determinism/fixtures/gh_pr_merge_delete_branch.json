@@ -1,0 +1,10 @@
+{
+  "name": "gh-pr-merge-delete-branch-requires-input-bound-picto",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 79 --repo github.com/Arakiss/galdr --squash --delete-branch" } },
+  "expected": {
+    "kind": "ask_picto",
+    "required_scope": "gh.pr.merge.delete-branch",
+    "bind_input": true,
+    "matched_rule": "gate-gh-pr-merge-delete-branch"
+  }
+}

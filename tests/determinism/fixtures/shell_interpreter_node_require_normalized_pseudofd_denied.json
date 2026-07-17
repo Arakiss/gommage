@@ -1,0 +1,15 @@
+{
+  "name": "node-lexically-normalized-pseudo-fd-require-preload-fails-closed",
+  "note": "Pure lexical normalization cannot turn a pseudo-fd preload into an apparently ordinary static path.",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "node --require /dev/fd/../fd/3 /dev/null 3<<< \"console.error('NODE_PRELOAD_EXECUTED')\""
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

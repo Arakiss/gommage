@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-cannot-hide-standalone-secret-write-redirection",
+  "call": { "tool": "Bash", "input": { "command": "> ~/.ssh/config; gh pr merge 79 --repo github.com/Arakiss/galdr --squash" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

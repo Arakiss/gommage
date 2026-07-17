@@ -1,0 +1,5 @@
+{
+  "name": "cargo-publish-help-cannot-mask-later-publish",
+  "call": { "tool": "Bash", "input": { "command": "cargo publish --help && cargo publish -p gommage-core" } },
+  "expected": { "kind": "ask_picto", "required_scope": "pkg.cargo:publish" }
+}

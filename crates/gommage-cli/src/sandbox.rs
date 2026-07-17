@@ -50,7 +50,6 @@ struct SandboxSuggestion {
 }
 
 pub(crate) fn cmd_sandbox(sub: SandboxCmd, layout: HomeLayout) -> Result<ExitCode> {
-    layout.ensure()?;
     match sub {
         SandboxCmd::Advise { json } => {
             let report = build_sandbox_advice(&layout)?;

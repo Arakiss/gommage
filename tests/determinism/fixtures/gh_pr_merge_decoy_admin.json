@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-compound-decoy-cannot-hide-admin",
+  "call": { "tool": "Bash", "input": { "command": "false && gh pr merge 79 --repo github.com/Arakiss/galdr --squash; eval 'gh pr merge 80 --repo github.com/Arakiss/gommage --admin --squash'" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

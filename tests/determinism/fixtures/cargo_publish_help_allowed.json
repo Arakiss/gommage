@@ -1,0 +1,6 @@
+{
+  "name": "cargo-publish-help-is-informational",
+  "note": "Help exits before Cargo packages or uploads anything and must not consume publication authority.",
+  "call": { "tool": "Bash", "input": { "command": "cargo publish --help" } },
+  "expected": { "kind": "allow" }
+}

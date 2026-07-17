@@ -1,0 +1,10 @@
+{
+  "name": "recovery-command-does-not-authorize-command-substitution",
+  "note": "A statically parsed command substitution is independent authority, and opaque Python inline code fails closed as terminal ambiguity.",
+  "call": { "tool": "Bash", "input": { "command": "ls $(python3 -c 'print(1)')" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

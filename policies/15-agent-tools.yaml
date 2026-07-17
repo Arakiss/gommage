@@ -20,7 +20,8 @@
 
 - name: ask-mcp-write
   decision: ask_picto
-  required_scope: "mcp.write"
+  required_scope_from_capability: "mcp.write:*"
+  bind_input: true
   match:
     all_capability:
       - "mcp.write:*"
@@ -29,7 +30,8 @@
 
 - name: ask-mcp-read
   decision: ask_picto
-  required_scope: "mcp.call"
+  required_scope_from_capability: "mcp.read:*"
+  bind_input: true
   match:
     all_capability:
       - "mcp.read:*"
@@ -38,7 +40,8 @@
 
 - name: ask-mcp-generic
   decision: ask_picto
-  required_scope: "mcp.call"
+  required_scope_from_capability: "mcp.call:*"
+  bind_input: true
   match:
     all_capability:
       - "mcp.call:*"

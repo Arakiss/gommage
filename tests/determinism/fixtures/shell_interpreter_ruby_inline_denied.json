@@ -1,0 +1,14 @@
+{
+  "name": "ruby-inline-program-fails-closed",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "ruby -we 'puts 1'"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

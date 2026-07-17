@@ -1,0 +1,15 @@
+{
+  "name": "node-file-url-pseudo-fd-import-preload-fails-closed",
+  "note": "Node accepts a file URL as --import executable input and runs the pseudo-fd module before the static main program.",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "node --import=file:///dev/fd/3 /dev/null 3<<< \"console.error('NODE_IMPORT_FILE_URL_EXECUTED')\""
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

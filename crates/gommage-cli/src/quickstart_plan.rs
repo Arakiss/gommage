@@ -6,10 +6,11 @@ use std::path::Path;
 
 use crate::{
     agent::{
-        AgentKind, CLAUDE_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_MATCHER,
-        claude_gommage_matcher, codex_pre_tool_use_pointer, native_permission_rules,
-        translate_claude_native_rules, translate_claude_permission_allow,
-        translate_claude_permission_deny,
+        AgentKind, AgentPolicyMode, CODEX_GOMMAGE_MATCHER, ClaudeImportKind,
+        claude_gommage_matcher, codex_pre_tool_use_pointer, is_generated_claude_permission_import,
+        is_generated_relaxation_layer, native_permission_rules, render_agent_hook_command,
+        render_claude_permission_import, translate_claude_native_rules,
+        translate_claude_permission_allow, translate_claude_permission_deny,
     },
     daemon::{DaemonDryRunPlan, ServiceManager, daemon_dry_run_plan, resolve_service_manager},
     util::{env_path_or_home, path_display, read_json_object},
@@ -18,11 +19,13 @@ use crate::{
 #[derive(Debug, Serialize)]
 pub(crate) struct QuickstartDryRunReport {
     status: &'static str,
+    execution_ready: bool,
     dry_run: bool,
     home: String,
     agents: Vec<AgentKind>,
     replace_hooks: bool,
     import_native_permissions: bool,
+    policy_posture: AgentPolicyMode,
     operations: Vec<PlannedOperation>,
     stdlib: StdlibPlan,
     agent_integrations: Vec<AgentPlan>,
@@ -30,6 +33,12 @@ pub(crate) struct QuickstartDryRunReport {
     daemon: Option<DaemonDryRunPlan>,
     self_test: SelfTestPlan,
     explanation: QuickstartExplanation,
+}
+
+impl QuickstartDryRunReport {
+    pub(crate) fn execution_ready(&self) -> bool {
+        self.execution_ready
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -64,7 +73,7 @@ struct AgentPlan {
 #[derive(Debug, Serialize)]
 struct HookPlan {
     matcher: String,
-    command: &'static str,
+    command: String,
     action: &'static str,
     strategy: &'static str,
     preserve_existing_hooks: bool,
@@ -138,6 +147,7 @@ pub(crate) fn build_quickstart_dry_run_report(
     agents: Vec<AgentKind>,
     replace_hooks: bool,
     import_native_permissions: bool,
+    policy_mode: AgentPolicyMode,
     install_daemon: bool,
     daemon_manager: Option<ServiceManager>,
     daemon_force: bool,
@@ -185,6 +195,42 @@ pub(crate) fn build_quickstart_dry_run_report(
             .collect(),
     };
 
+    let posture_names: &[&str] = if policy_mode == AgentPolicyMode::Strict {
+        &[
+            "06-agent-config-writable.yaml",
+            "90-claude-allow-import.yaml",
+            "95-agent-catch-all.yaml",
+        ]
+    } else {
+        &["06-agent-config-writable.yaml", "95-agent-catch-all.yaml"]
+    };
+    for name in posture_names {
+        let path = layout.policy_dir.join(name);
+        let action = match policy_mode {
+            AgentPolicyMode::Strict
+                if path.exists() && is_generated_relaxation_layer(&path, name)? =>
+            {
+                "would_backup_and_remove"
+            }
+            AgentPolicyMode::Strict if path.exists() => "custom_requires_review",
+            AgentPolicyMode::Strict => "already_absent",
+            AgentPolicyMode::Relaxed
+                if path.exists() && is_generated_relaxation_layer(&path, name)? =>
+            {
+                "already_current"
+            }
+            AgentPolicyMode::Relaxed if path.exists() => "custom_requires_review",
+            AgentPolicyMode::Relaxed => "would_write",
+        };
+        operations.push(PlannedOperation {
+            kind: "agent_policy_posture",
+            action,
+            path: path_display(&path),
+            backup_before_replace: matches!(action, "would_backup_and_remove" | "would_replace"),
+            reason: format!("apply {} agent policy posture", policy_mode.as_str()),
+        });
+    }
+
     for file in &stdlib.policies {
         operations.push(PlannedOperation {
             kind: "stdlib_policy",
@@ -206,7 +252,15 @@ pub(crate) fn build_quickstart_dry_run_report(
 
     let agent_integrations = agents
         .iter()
-        .map(|agent| build_agent_plan(*agent, layout, replace_hooks, import_native_permissions))
+        .map(|agent| {
+            build_agent_plan(
+                *agent,
+                layout,
+                replace_hooks,
+                import_native_permissions,
+                policy_mode,
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     for plan in &agent_integrations {
         for path in &plan.config_paths {
@@ -253,20 +307,30 @@ pub(crate) fn build_quickstart_dry_run_report(
         None
     };
 
-    let explanation = build_quickstart_explanation(&layout.root, &agents, replace_hooks);
+    let explanation =
+        build_quickstart_explanation(&layout.root, &agents, replace_hooks, policy_mode);
+
+    let execution_ready = !operations
+        .iter()
+        .any(|operation| operation.action == "custom_requires_review")
+        && daemon
+            .as_ref()
+            .is_none_or(|plan| plan.daemon_binary_error.is_none());
 
     Ok(QuickstartDryRunReport {
-        status: "plan",
+        status: if execution_ready { "plan" } else { "blocked" },
+        execution_ready,
         dry_run: true,
         home: path_display(&layout.root),
         agents,
         replace_hooks,
         import_native_permissions,
+        policy_posture: policy_mode,
         operations,
         stdlib,
         agent_integrations,
         daemon,
-        self_test: build_self_test_plan(self_test),
+        self_test: build_self_test_plan(self_test, policy_mode),
         explanation,
     })
 }
@@ -335,10 +399,16 @@ fn build_agent_plan(
     layout: &HomeLayout,
     replace_hooks: bool,
     import_native_permissions: bool,
+    policy_mode: AgentPolicyMode,
 ) -> Result<AgentPlan> {
     match agent {
-        AgentKind::Claude => build_claude_plan(layout, replace_hooks, import_native_permissions),
-        AgentKind::Codex => build_codex_plan(replace_hooks),
+        AgentKind::Claude => build_claude_plan(
+            layout,
+            replace_hooks,
+            import_native_permissions,
+            policy_mode,
+        ),
+        AgentKind::Codex => build_codex_plan(layout, replace_hooks),
     }
 }
 
@@ -346,13 +416,14 @@ fn build_claude_plan(
     layout: &HomeLayout,
     replace_hooks: bool,
     import_native_permissions: bool,
+    policy_mode: AgentPolicyMode,
 ) -> Result<AgentPlan> {
     let settings_path = env_path_or_home("GOMMAGE_CLAUDE_SETTINGS", &[".claude", "settings.json"]);
     let settings = read_json_object(&settings_path)?;
     let matcher = claude_gommage_matcher(&settings);
     let hook = hook_plan(
         matcher,
-        CLAUDE_GOMMAGE_HOOK_COMMAND,
+        render_agent_hook_command(AgentKind::Claude, layout)?,
         &settings,
         "/hooks/PreToolUse",
         replace_hooks,
@@ -365,18 +436,18 @@ fn build_claude_plan(
         "05-claude-import.yaml",
         &deny_rules,
         import_native_permissions,
-        replace_hooks,
+        ClaudeImportKind::Deny,
         translate_claude_permission_deny,
-    );
+    )?;
     let allow = permission_import_plan(
         layout,
         "/permissions/allow",
         "90-claude-allow-import.yaml",
         &allow_rules,
-        import_native_permissions,
-        replace_hooks,
+        import_native_permissions && policy_mode == AgentPolicyMode::Relaxed,
+        ClaudeImportKind::Allow,
         translate_claude_permission_allow,
-    );
+    )?;
     Ok(AgentPlan {
         agent: AgentKind::Claude,
         config_paths: vec![path_display(&settings_path)],
@@ -389,7 +460,7 @@ fn build_claude_plan(
     })
 }
 
-fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
+fn build_codex_plan(layout: &HomeLayout, replace_hooks: bool) -> Result<AgentPlan> {
     let hooks_path = env_path_or_home("GOMMAGE_CODEX_HOOKS", &[".codex", "hooks.json"]);
     let config_path = env_path_or_home("GOMMAGE_CODEX_CONFIG", &[".codex", "config.toml"]);
     let hooks = read_json_object(&hooks_path)?;
@@ -399,7 +470,7 @@ fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
         config_paths: vec![path_display(&hooks_path), path_display(&config_path)],
         hook: hook_plan(
             CODEX_GOMMAGE_MATCHER.to_string(),
-            CODEX_GOMMAGE_HOOK_COMMAND,
+            render_agent_hook_command(AgentKind::Codex, layout)?,
             &hooks,
             hook_pointer,
             replace_hooks,
@@ -414,7 +485,7 @@ fn build_codex_plan(replace_hooks: bool) -> Result<AgentPlan> {
 
 fn hook_plan(
     matcher: String,
-    command: &'static str,
+    command: String,
     hooks_root: &serde_json::Value,
     pointer: &str,
     replace_hooks: bool,
@@ -508,11 +579,11 @@ fn permission_import_plan(
     file_name: &str,
     rules: &[String],
     enabled: bool,
-    force: bool,
+    kind: ClaudeImportKind,
     translate: fn(&str) -> Option<String>,
-) -> PermissionImportPlan {
+) -> Result<PermissionImportPlan> {
     if !enabled {
-        return PermissionImportPlan {
+        return Ok(PermissionImportPlan {
             source_pointer,
             native_rules: rules.len(),
             importable_rules: 0,
@@ -521,32 +592,36 @@ fn permission_import_plan(
             output_path: None,
             action: "skipped_disabled",
             backup_before_replace: false,
-        };
+        });
     }
     let (translated, skipped) = translate_claude_native_rules(rules, translate);
     let path = layout.policy_dir.join(file_name);
-    PermissionImportPlan {
+    let desired = render_claude_permission_import(kind, &translated)?;
+    let (action, output_path, backup_before_replace) = match (desired.as_deref(), path.exists()) {
+        (None, false) => ("skipped_no_importable_rules", None, false),
+        (None, true) if is_generated_claude_permission_import(&path, kind)? => {
+            ("would_backup_and_remove", Some(path_display(&path)), true)
+        }
+        (None, true) => ("custom_requires_review", Some(path_display(&path)), false),
+        (Some(_), false) => ("would_write", Some(path_display(&path)), false),
+        (Some(expected), true) if std::fs::read_to_string(&path)? == expected => {
+            ("already_current", Some(path_display(&path)), false)
+        }
+        (Some(_), true) if is_generated_claude_permission_import(&path, kind)? => {
+            ("would_replace", Some(path_display(&path)), true)
+        }
+        (Some(_), true) => ("custom_requires_review", Some(path_display(&path)), false),
+    };
+    Ok(PermissionImportPlan {
         source_pointer,
         native_rules: rules.len(),
         importable_rules: translated.len(),
         skipped_rules: skipped.len(),
         skipped,
-        output_path: if translated.is_empty() {
-            None
-        } else {
-            Some(path_display(&path))
-        },
-        action: if translated.is_empty() {
-            "skipped_no_importable_rules"
-        } else if path.exists() && force {
-            "would_replace"
-        } else if path.exists() {
-            "would_preserve_without_replace_hooks"
-        } else {
-            "would_write"
-        },
-        backup_before_replace: path.exists(),
-    }
+        output_path,
+        action,
+        backup_before_replace,
+    })
 }
 
 fn empty_permission_import_plan(source_pointer: &'static str) -> PermissionImportPlan {
@@ -562,7 +637,7 @@ fn empty_permission_import_plan(source_pointer: &'static str) -> PermissionImpor
     }
 }
 
-fn build_self_test_plan(enabled: bool) -> SelfTestPlan {
+fn build_self_test_plan(enabled: bool, policy_mode: AgentPolicyMode) -> SelfTestPlan {
     if !enabled {
         return SelfTestPlan {
             enabled,
@@ -570,13 +645,18 @@ fn build_self_test_plan(enabled: bool) -> SelfTestPlan {
             checks: Vec::new(),
         };
     }
+    let routine_check = if policy_mode == AgentPolicyMode::Strict {
+        "routine unmatched shell and file operations remain fail-closed"
+    } else {
+        "routine shell and file operations are allowed by explicit relaxed posture"
+    };
     SelfTestPlan {
         enabled,
         commands: vec!["gommage verify"],
         checks: vec![
             "gommage verify --json is allowed",
             "gommage doctor --json is allowed",
-            "ls -la is allowed for recovery",
+            routine_check,
             "systemctl --user status gommage-daemon.service is allowed",
             "rm -rf / remains a hard-stop",
             "git push --force origin main remains denied",
@@ -589,6 +669,7 @@ fn build_quickstart_explanation(
     home: &Path,
     agents: &[AgentKind],
     replace_hooks: bool,
+    policy_mode: AgentPolicyMode,
 ) -> QuickstartExplanation {
     QuickstartExplanation {
         installation_mode: if replace_hooks {
@@ -598,13 +679,14 @@ fn build_quickstart_explanation(
         },
         summary: vec![
             "quickstart is additive by default: it preserves unrelated host hooks and appends Gommage wiring.".to_string(),
+            format!("policy posture is {}; broad shell and file allows require explicit --relaxed", policy_mode.as_str()),
             "changed host files are backed up before replacement.".to_string(),
             "native sandboxing and approval policy remain authoritative below the hook layer.".to_string(),
             "Gommage audits only tool calls it receives through installed hooks or an explicit MCP gateway.".to_string(),
         ],
         agent_guidance: agents
             .iter()
-            .map(|agent| agent_quickstart_guidance(*agent, !replace_hooks))
+            .map(|agent| agent_quickstart_guidance(*agent, !replace_hooks, policy_mode))
             .collect(),
         next_commands: {
             let mut commands = vec![
@@ -628,38 +710,45 @@ fn build_quickstart_explanation(
 fn agent_quickstart_guidance(
     agent: AgentKind,
     preserves_existing_hooks: bool,
+    policy_mode: AgentPolicyMode,
 ) -> AgentQuickstartGuidance {
     match agent {
         AgentKind::Claude => AgentQuickstartGuidance {
             agent,
-            posture: "preserve existing hooks, import supported native permissions, then verify",
+            posture: if policy_mode == AgentPolicyMode::Strict {
+                "strict: preserve hooks and import native denies only"
+            } else {
+                "relaxed: preserve hooks and import supported native allows and denies"
+            },
             preserves_existing_hooks,
             imports_native_permissions: true,
-            default_coverage: vec![
-                "Bash",
-                "filesystem tools",
-                "search tools",
-                "web tools",
-                "Claude-style MCP tool names",
-            ],
+            default_coverage: vec!["all PreToolUse tool calls"],
             boundaries: vec![
-                "if another hook blocks first, Gommage cannot audit that decision",
+                "matching hooks run concurrently, so Gommage cannot guarantee ordering against other hooks",
                 "Claude Code does not provide OS sandboxing; add one separately when needed",
             ],
             operator_notes: vec![
                 "permissions.deny imports load early into 05-claude-import.yaml".to_string(),
-                "permissions.allow imports, including broad Bash, load late into 90-claude-allow-import.yaml".to_string(),
+                if policy_mode == AgentPolicyMode::Strict {
+                    "permissions.allow remains outside Gommage policy in strict mode".to_string()
+                } else {
+                    "permissions.allow imports, including broad Bash, load late into 90-claude-allow-import.yaml".to_string()
+                },
                 "use --replace-hooks only after reviewing the migration plan".to_string(),
             ],
         },
         AgentKind::Codex => AgentQuickstartGuidance {
             agent,
-            posture: "enable Codex hooks, install Gommage Codex matcher, keep Codex sandboxing",
+            posture: if policy_mode == AgentPolicyMode::Strict {
+                "strict: enable Codex hooks without broad Gommage allows"
+            } else {
+                "relaxed: enable Codex hooks with explicit broad Gommage allows"
+            },
             preserves_existing_hooks,
             imports_native_permissions: false,
-            default_coverage: vec!["Bash", "apply_patch", "MCP tool names"],
+            default_coverage: vec!["all PreToolUse tool calls"],
             boundaries: vec![
-                "Codex hooks do not intercept every shell or non-shell tool path",
+                "matching hooks run concurrently, so Gommage cannot guarantee ordering against other hooks",
                 "apply_patch payloads fail closed when the patch file list cannot be parsed safely",
                 "Codex sandbox remains the file boundary outside mapped hooks",
             ],

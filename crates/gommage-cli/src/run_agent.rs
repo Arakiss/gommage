@@ -124,6 +124,7 @@ fn build_codex_run_plan(
 ) -> RunPlan {
     let agent_home = codex_home();
     let hook_report = build_codex_status_report_at(
+        layout,
         &agent_home.join("hooks.json"),
         &agent_home.join("config.toml"),
     );

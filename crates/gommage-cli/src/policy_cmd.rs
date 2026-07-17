@@ -16,17 +16,20 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
-use time::OffsetDateTime;
 
 use crate::{
+    agent::{preflight_generated_relaxation_removal, remove_generated_relaxation_layers},
     audit_replay::{
         AuditDecisionLine, decision_summary as audit_decision_summary, read_audit_decisions,
     },
-    daemon::{DaemonReloadOutcome, request_daemon_reload},
+    daemon::{recover_recorded_daemon_runtime, reload_policy_runtime},
     input::read_tool_call_from_stdin,
     policy_diff::{PolicyDiffOptions, cmd_policy_diff},
     smoke::{SmokeStatus, SmokeSummary},
-    util::{path_display, write_text},
+    util::{
+        InstallTransaction, TransactionFile, backup_and_remove_file, ensure_home, path_display,
+        write_text,
+    },
 };
 
 const POLICY_FIXTURE_SCHEMA: &str = include_str!("../schemas/policy-fixture.schema.json");
@@ -667,6 +670,7 @@ fn advisory_rule_from_audit(entry: &gommage_audit::AuditEntry, line: usize) -> R
         decision,
         hard_stop,
         required_scope,
+        required_scope_from_capability: None,
         bind_input: false,
         r#match: RawMatch {
             all_capability: capability_patterns,
@@ -1258,13 +1262,7 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
         sub => sub,
     };
 
-    layout.ensure()?;
-    let expedition = Expedition::load(&layout.expedition_file)?;
-    let env = expedition
-        .as_ref()
-        .map(Expedition::policy_env)
-        .unwrap_or_else(default_policy_env);
-    match sub {
+    let sub = match sub {
         PolicyCmd::Init {
             stdlib,
             force,
@@ -1273,17 +1271,27 @@ pub(crate) fn cmd_policy(sub: PolicyCmd, layout: HomeLayout) -> Result<ExitCode>
             if !stdlib {
                 anyhow::bail!("policy init currently requires --stdlib");
             }
-            let installed = install_stdlib(&layout, force)?;
+            let (installed, removed) =
+                init_stdlib_transactional(&layout, force, remove_local_relaxations)?;
             println!(
                 "ok stdlib installed: {} policy files, {} capability files",
                 installed.0, installed.1
             );
             if remove_local_relaxations {
-                let removed = remove_known_local_relaxations(&layout)?;
                 println!("ok local relaxation cleanup: {removed} file(s) removed");
             }
-            print_daemon_reload_result(request_daemon_reload(&layout)?);
+            return Ok(ExitCode::SUCCESS);
         }
+        sub => sub,
+    };
+
+    let expedition = Expedition::load(&layout.expedition_file)?;
+    let env = expedition
+        .as_ref()
+        .map(Expedition::policy_env)
+        .unwrap_or_else(default_policy_env);
+    match sub {
+        PolicyCmd::Init { .. } => unreachable!("policy init returns before policy loading"),
         PolicyCmd::Check => {
             let pol = load_active_policy(&layout, expedition.as_ref(), &env)?;
             println!("ok {} rules loaded", pol.rules.len());
@@ -1371,61 +1379,141 @@ pub(crate) fn install_stdlib(layout: &HomeLayout, force: bool) -> Result<(usize,
     Ok((policies, capabilities))
 }
 
+fn init_stdlib_transactional(
+    layout: &HomeLayout,
+    force: bool,
+    remove_local_relaxations: bool,
+) -> Result<((usize, usize), usize)> {
+    let mut transaction = InstallTransaction::begin(
+        layout,
+        policy_init_transaction_files(layout, remove_local_relaxations),
+        vec![
+            layout.root.clone(),
+            layout.policy_dir.clone(),
+            layout.capabilities_dir.clone(),
+        ],
+    )?;
+    if transaction.recovered_previous() {
+        recover_recorded_daemon_runtime(&transaction, layout)?;
+        reload_policy_runtime(layout)
+            .context("restoring the runtime after an interrupted policy installation")?;
+        transaction.acknowledge_recovery()?;
+    }
+
+    if remove_local_relaxations && let Err(error) = preflight_generated_relaxation_removal(layout) {
+        transaction.commit()?;
+        return Err(error);
+    }
+
+    let result = (|| {
+        ensure_home(layout)?;
+        let installed = install_stdlib(layout, force)?;
+        let removed = if remove_local_relaxations {
+            remove_known_local_relaxations(layout)?
+        } else {
+            0
+        };
+        reload_policy_runtime(layout)?;
+        Ok((installed, removed))
+    })();
+
+    match result {
+        Ok(outcome) => match transaction.commit() {
+            Ok(()) => Ok(outcome),
+            Err(primary) => Err(rollback_policy_init(transaction, layout, primary)),
+        },
+        Err(primary) if !transaction.has_mutations() => {
+            transaction.commit()?;
+            Err(primary)
+        }
+        Err(primary) => Err(rollback_policy_init(transaction, layout, primary)),
+    }
+}
+
+fn policy_init_transaction_files(
+    layout: &HomeLayout,
+    remove_local_relaxations: bool,
+) -> Vec<TransactionFile> {
+    let mut paths = vec![layout.key_file.clone()];
+    paths.extend(
+        STDLIB_POLICIES
+            .iter()
+            .map(|file| layout.policy_dir.join(file.name)),
+    );
+    paths.extend(
+        STDLIB_CAPABILITIES
+            .iter()
+            .map(|file| layout.capabilities_dir.join(file.name)),
+    );
+    if remove_local_relaxations {
+        paths.extend(
+            [
+                "06-agent-config-writable.yaml",
+                "90-claude-allow-import.yaml",
+                "95-agent-catch-all.yaml",
+            ]
+            .into_iter()
+            .chain(LOCAL_RELAXATION_POLICY_FILES.iter().copied())
+            .map(|name| layout.policy_dir.join(name)),
+        );
+    }
+    paths.sort();
+    paths.dedup();
+    paths.into_iter().map(TransactionFile::new).collect()
+}
+
+fn rollback_policy_init(
+    mut transaction: InstallTransaction,
+    layout: &HomeLayout,
+    primary: anyhow::Error,
+) -> anyhow::Error {
+    let rollback = transaction.rollback();
+    let reload = reload_policy_runtime(layout);
+    let mut secondary = Vec::new();
+    if let Err(error) = &rollback {
+        secondary.push(format!("filesystem rollback failed: {error:#}"));
+    }
+    if let Err(error) = &reload {
+        secondary.push(format!(
+            "restoring the prior daemon policy failed: {error:#}"
+        ));
+    }
+    if rollback.is_ok()
+        && reload.is_ok()
+        && let Err(error) = transaction.commit()
+    {
+        secondary.push(format!("discarding rollback journal failed: {error:#}"));
+    }
+    if secondary.is_empty() {
+        primary.context("policy installation was rolled back")
+    } else {
+        primary.context(format!(
+            "policy installation rollback was incomplete: {}",
+            secondary.join("; ")
+        ))
+    }
+}
+
 fn remove_known_local_relaxations(layout: &HomeLayout) -> Result<usize> {
-    let mut removed = 0usize;
+    // Preflight and remove Gommage-owned generated layers first. The helper
+    // refuses custom content at reserved paths before mutating anything.
+    let mut removed = remove_generated_relaxation_layers(layout, false)?;
     for name in LOCAL_RELAXATION_POLICY_FILES {
         let path = layout.policy_dir.join(name);
         if !path.exists() {
             continue;
         }
 
-        let backup = policy_backup_path(&path);
-        std::fs::copy(&path, &backup).with_context(|| {
+        backup_and_remove_file(&path, false).with_context(|| {
             format!(
-                "backing up local relaxation {} to {}",
-                path.display(),
-                backup.display()
+                "backing up and removing local relaxation {}",
+                path.display()
             )
         })?;
-        std::fs::remove_file(&path)
-            .with_context(|| format!("removing local relaxation {}", path.display()))?;
-        println!(
-            "ok removed local relaxation: {} -> {}",
-            path.display(),
-            backup.display()
-        );
+        println!("ok removed local relaxation: {}", path.display());
         removed += 1;
     }
     Ok(removed)
-}
-
-fn policy_backup_path(path: &Path) -> PathBuf {
-    let mut ts = OffsetDateTime::now_utc().unix_timestamp_nanos();
-    let file_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("policy.yaml");
-    loop {
-        let candidate = path.with_file_name(format!("{file_name}.gommage-bak-{ts}"));
-        if !candidate.exists() {
-            return candidate;
-        }
-        ts += 1;
-    }
-}
-
-fn print_daemon_reload_result(outcome: DaemonReloadOutcome) {
-    match outcome {
-        DaemonReloadOutcome::Reloaded(detail) => println!("ok daemon: {detail}"),
-        DaemonReloadOutcome::Unavailable(message) => {
-            println!("warn daemon reload skipped: {message}");
-        }
-        DaemonReloadOutcome::Failed(error) => {
-            println!(
-                "warn daemon reload failed: {error}; run `gommage daemon reload` after fixing it"
-            );
-        }
-    }
 }
 
 fn install_embedded_files(dir: &Path, files: &[StdlibFile], force: bool) -> Result<usize> {

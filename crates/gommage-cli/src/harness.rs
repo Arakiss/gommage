@@ -96,7 +96,9 @@ struct HarnessAgentReport {
 #[derive(Debug, Serialize)]
 struct NativePermissionSummary {
     supported: bool,
-    import_enabled_by_quickstart: bool,
+    deny_import_enabled_by_default: bool,
+    allow_import_enabled_by_default: bool,
+    allow_import_active: bool,
     deny: Option<PermissionImportSummary>,
     allow: Option<PermissionImportSummary>,
 }
@@ -224,7 +226,7 @@ fn build_agent_harness_report(agent: AgentKind, layout: &HomeLayout) -> Result<H
                 guidance: vec![
                     "quickstart preserves unrelated Claude PreToolUse hook groups unless --replace-hooks is passed.".to_string(),
                     "If another hook blocks before Gommage, Gommage cannot audit that decision.".to_string(),
-                    "Supported permissions.deny and permissions.allow entries are imported into ordered Gommage policy layers.".to_string(),
+                    "Supported permissions.deny entries are synchronized by default; permissions.allow stays outside strict policy unless --relaxed is explicit.".to_string(),
                 ],
                 status_report: status_report_json,
             })
@@ -249,7 +251,9 @@ fn build_agent_harness_report(agent: AgentKind, layout: &HomeLayout) -> Result<H
                 replace_hooks_available: true,
                 native_permissions: NativePermissionSummary {
                     supported: false,
-                    import_enabled_by_quickstart: false,
+                    deny_import_enabled_by_default: false,
+                    allow_import_enabled_by_default: false,
+                    allow_import_active: false,
                     deny: None,
                     allow: None,
                 },
@@ -277,7 +281,12 @@ fn claude_native_permission_summary(
         translate_claude_native_rules(&allow_rules, translate_claude_permission_allow);
     NativePermissionSummary {
         supported: true,
-        import_enabled_by_quickstart: true,
+        deny_import_enabled_by_default: true,
+        allow_import_enabled_by_default: false,
+        allow_import_active: layout
+            .policy_dir
+            .join("90-claude-allow-import.yaml")
+            .exists(),
         deny: Some(PermissionImportSummary {
             source_pointer: "/permissions/deny",
             native_rules: deny_rules.len(),
@@ -452,8 +461,8 @@ fn render_agent_context_markdown(report: &HarnessReport) -> String {
     out.push_str("- Gommage audits only tool calls received through installed hooks or an explicitly wrapped MCP gateway.\n\n");
 
     out.push_str("## How to work with the gate\n\n");
-    out.push_str("- `gommage agent install` generates an agent-friendly posture: routine shell, file edits and reads are allowed out of the box. Only dangerous, irreversible, or trust-boundary-crossing actions are gated.\n");
-    out.push_str("- Generated policy layers: `06-agent-config-writable.yaml` (edit your own `~/.claude` / `~/.codex` / `~/.gommage`), `95-agent-catch-all.yaml` (fail-open except gates, for shell/file/outbound). Delete a file to tighten that surface back to strict mode.\n");
+    out.push_str("- `gommage agent install` is strict by default: unmatched shell, file, and outbound capabilities remain fail-closed. Run `gommage posture --json` to inspect the active result.\n");
+    out.push_str("- `gommage agent install --relaxed` is an explicit legacy convenience mode. It generates `06-agent-config-writable.yaml` and `95-agent-catch-all.yaml`, permits broad routine work, and gives up complete mediation for opaque scripts and interpreters. Rerun without `--relaxed` to back up and remove those generated relaxations.\n");
     out.push_str("- Web fetch/search and MCP write stay gated by `15-agent-tools` (they cross the local trust boundary); approve per call with a picto, or add a local allow layer if your operator wants them frictionless.\n");
     out.push_str("- An `ask` decision needs a signed picto: request one with `gommage grant --scope <scope> --reason <why>` then `gommage confirm <id>`, and retry. Typical gates: push to `main`/`release`, force-push, `git reset --hard`, cloud prod deploy/destroy, repo delete.\n");
     out.push_str("- A `deny` decision is final for that call (secret reads, dotfile/credential writes, `rm -rf` of any absolute path — not just `/`, but `/tmp/scratch`, `/home/me/build`, … — `curl|sh`). Hard-stops cannot be bypassed by a picto — change the action (a relative path like `./build` is out of hard-stop scope), not the gate.\n");
@@ -482,12 +491,14 @@ fn render_agent_context_markdown(report: &HarnessReport) -> String {
         }
         if let Some(allow) = &agent.native_permissions.allow {
             out.push_str(&format!(
-                "- Native allow import: `{}` importable rule(s), layer `{}`\n",
-                allow.importable_rules, allow.output_path
+                "- Native allow import (relaxed only; active=`{}`): `{}` importable rule(s), layer `{}`\n",
+                agent.native_permissions.allow_import_active,
+                allow.importable_rules,
+                allow.output_path
             ));
             if !allow.broad_allow_entries.is_empty() {
                 out.push_str(&format!(
-                    "- Broad native allow entries imported late: `{}`\n",
+                    "- Broad native allow entries eligible for late relaxed import: `{}`\n",
                     allow.broad_allow_entries.join("`, `")
                 ));
             }

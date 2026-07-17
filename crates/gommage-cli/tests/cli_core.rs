@@ -14,6 +14,7 @@ fn run_hook_command(home: &Path, args: &[&str], payload: &[u8]) -> std::process:
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     child.stdin.take().unwrap().write_all(payload).unwrap();
@@ -29,6 +30,17 @@ fn init_home_with_stdlib(home: &Path) {
             .unwrap()
             .success()
     );
+}
+
+fn map_hook_report(home: &Path, payload: &serde_json::Value) -> serde_json::Value {
+    let payload = serde_json::to_vec(payload).unwrap();
+    let output = run_hook_command(home, &["map", "--json", "--hook"], &payload);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
 }
 
 #[test]
@@ -129,6 +141,63 @@ fn grant_accepts_human_ttl_suffix() {
 }
 
 #[test]
+fn grant_rejects_scope_only_picto_for_input_bound_dynamic_scope() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let output = gommage(&home)
+        .args([
+            "grant",
+            "--scope",
+            "mcp.write:mcp__db__write_row",
+            "--ttl",
+            "10m",
+            "--reason",
+            "would be unusable",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("only used by input-bound ask_picto rules"));
+    assert!(stderr.contains("gommage approval approve <request-id>"));
+
+    let listed = gommage(&home).args(["list", "--json"]).output().unwrap();
+    assert!(listed.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&listed.stdout).unwrap(),
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn grant_unknown_scope_warning_lists_dynamic_selectors() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let output = gommage(&home)
+        .args([
+            "grant",
+            "--scope",
+            "unknown.scope",
+            "--ttl",
+            "10m",
+            "--reason",
+            "warning coverage",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Known scopes/selectors"));
+    assert!(stderr.contains("mcp.write:* [derived selector; input-bound approval]"));
+}
+
+#[test]
 fn policy_init_stdlib_installs_loadable_defaults() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
@@ -145,6 +214,145 @@ fn policy_init_stdlib_installs_loadable_defaults() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("rules loaded"));
+}
+
+#[test]
+fn read_only_inspection_commands_never_initialize_home() {
+    let temp = tempdir().unwrap();
+    let cases: &[(&str, &[&str])] = &[
+        ("policy-schema", &["policy", "schema"]),
+        ("policy-check", &["policy", "check"]),
+        ("policy-layers", &["policy", "layers", "--json"]),
+        ("policy-lint", &["policy", "lint", "--json"]),
+        ("policy-hash", &["policy", "hash"]),
+        ("posture", &["posture", "--json"]),
+        ("sandbox-advise", &["sandbox", "advise", "--json"]),
+        ("expedition-status", &["expedition", "status"]),
+    ];
+
+    for (name, args) in cases {
+        let home = temp.path().join(name);
+        let output = gommage(&home).args(*args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "read-only command {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !home.exists(),
+            "read-only command {args:?} initialized {} (status={}, stderr={})",
+            home.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let home = temp.path().join("policy-snapshot");
+    let output = run_hook_command(
+        &home,
+        &["policy", "snapshot", "--name", "read-only"],
+        br#"{"tool":"Read","input":{"file_path":"/tmp/example"}}"#,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home.exists(), "policy snapshot initialized the home");
+
+    let home = temp.path().join("policy-capture");
+    let output = run_hook_command(
+        &home,
+        &["policy", "capture", "--name", "read-only"],
+        br#"{"tool":"Read","input":{"file_path":"/tmp/example"}}"#,
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home.exists(), "policy capture initialized the home");
+
+    let fixture = temp.path().join("policy-fixture.yaml");
+    fs::write(
+        &fixture,
+        r#"version: 1
+cases:
+  - name: empty-home-fails-closed
+    tool: Read
+    input:
+      file_path: /tmp/example
+    expect:
+      decision: gommage
+"#,
+    )
+    .unwrap();
+    let home = temp.path().join("policy-test");
+    let output = gommage(&home)
+        .args(["policy", "test", fixture.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home.exists(), "policy test initialized the home");
+
+    let home = temp.path().join("policy-suggest");
+    let output = gommage(&home)
+        .args(["policy", "suggest", "--audit", "/dev/null", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home.exists(), "policy suggest initialized the home");
+}
+
+#[test]
+fn policy_check_preserves_an_existing_uninitialized_home_exactly() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("selected-home");
+    fs::create_dir(&home).unwrap();
+    let sentinel = home.join("operator-note.txt");
+    fs::write(&sentinel, "keep\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o750)).unwrap();
+    }
+
+    let output = gommage(&home).args(["policy", "check"]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fs::read_to_string(&sentinel).unwrap(), "keep\n");
+    assert!(!home.join("key.ed25519").exists());
+    assert!(!home.join("policy.d").exists());
+    assert!(!home.join("capabilities.d").exists());
+    for name in [
+        "pictos.sqlite",
+        "pictos.sqlite-wal",
+        "pictos.sqlite-shm",
+        "state.sqlite",
+        "state.sqlite-wal",
+        "state.sqlite-shm",
+    ] {
+        assert!(!home.join(name).exists(), "unexpected state file {name}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&home).unwrap().permissions().mode() & 0o777,
+            0o750
+        );
+    }
 }
 
 #[test]
@@ -369,6 +577,66 @@ fn decide_teaches_explicit_paths_for_bulk_git_stage() {
 }
 
 #[test]
+fn list_and_decide_do_not_initialize_selected_home_state() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("selected-home");
+    init_home_with_stdlib(&home);
+    for path in [
+        home.join("key.ed25519"),
+        home.join("pictos.sqlite"),
+        home.join("pictos.sqlite-wal"),
+        home.join("pictos.sqlite-shm"),
+    ] {
+        if path.exists() {
+            fs::remove_file(path).unwrap();
+        }
+    }
+
+    let listed = gommage(&home).args(["list", "--json"]).output().unwrap();
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&listed.stdout).unwrap(),
+        serde_json::json!([])
+    );
+
+    let mut child = gommage(&home)
+        .arg("decide")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"tool":"Bash","input":{"command":"git status"}}"#)
+        .unwrap();
+    let decided = child.wait_with_output().unwrap();
+    assert!(
+        decided.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decided.stderr)
+    );
+
+    for path in [
+        home.join("key.ed25519"),
+        home.join("pictos.sqlite"),
+        home.join("pictos.sqlite-wal"),
+        home.join("pictos.sqlite-shm"),
+    ] {
+        assert!(
+            !path.exists(),
+            "read-only command created {}",
+            path.display()
+        );
+    }
+}
+
+#[test]
 fn map_hook_json_reports_codex_apply_patch_and_mcp_capabilities() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
@@ -444,6 +712,89 @@ fn map_hook_json_reports_codex_apply_patch_and_mcp_capabilities() {
         .collect::<Vec<_>>();
     assert!(capabilities.contains(&"mcp.write:mcp__github__create_issue"));
     assert!(capabilities.contains(&"mcp.call:mcp__github__create_issue"));
+}
+
+#[test]
+fn map_hook_session_context_is_private_spoof_resistant_and_mapper_neutral() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let payload = |session_id: Option<&str>, spoof: bool| {
+        let mut tool_input = serde_json::json!({"code": "1 + 1"});
+        if spoof {
+            tool_input["__gommage_session_hash"] = serde_json::json!("sha256:spoofed");
+        }
+        let mut payload = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__node_repl__js",
+            "tool_input": tool_input
+        });
+        if let Some(session_id) = session_id {
+            payload["session_id"] = serde_json::json!(session_id);
+        }
+        map_hook_report(&home, &payload)
+    };
+
+    let session_a = payload(Some("session-a"), false);
+    let session_b = payload(Some("session-b"), false);
+    let no_session = payload(None, false);
+
+    assert_ne!(session_a["input_hash"], session_b["input_hash"]);
+    assert_eq!(session_a["capabilities"], session_b["capabilities"]);
+    assert_eq!(session_a["capabilities"], no_session["capabilities"]);
+    assert_eq!(no_session["input_hash"], payload(None, false)["input_hash"]);
+    assert_eq!(
+        session_a["input_hash"],
+        payload(Some("session-a"), true)["input_hash"]
+    );
+    assert_eq!(no_session["input_hash"], payload(None, true)["input_hash"]);
+}
+
+#[test]
+fn map_hook_rejects_non_object_input_when_session_context_is_present() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let output = run_hook_command(
+        &home,
+        &["map", "--json", "--hook"],
+        br#"{"session_id":"session-a","tool_name":"mcp__node_repl__js","tool_input":"1 + 1"}"#,
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("tool_input must be an object"));
+
+    let hook = run_hook_command(
+        &home,
+        &["hook", "--agent", "claude"],
+        br#"{"session_id":"session-a","tool_name":"mcp__node_repl__js","tool_input":"1 + 1"}"#,
+    );
+    assert!(hook.status.success());
+    let response: serde_json::Value = serde_json::from_slice(&hook.stdout).unwrap();
+    assert_eq!(
+        response.pointer("/hookSpecificOutput/permissionDecision"),
+        Some(&serde_json::Value::String("deny".to_string()))
+    );
+    assert!(
+        response
+            .pointer("/hookSpecificOutput/permissionDecisionReason")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|reason| reason.contains("tool_input must be an object"))
+    );
+}
+
+#[test]
+fn root_and_embedded_agent_tool_policies_are_byte_identical() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root_policy = manifest_dir.join("../../policies/15-agent-tools.yaml");
+    let embedded_policy = manifest_dir.join("../gommage-stdlib/policies/15-agent-tools.yaml");
+
+    assert_eq!(
+        fs::read(root_policy).unwrap(),
+        fs::read(embedded_policy).unwrap()
+    );
 }
 
 #[test]
@@ -728,15 +1079,15 @@ fn hook_claude_agent_preserves_ask_picto_decision() {
 }
 
 #[test]
-fn hook_gates_path_invoked_gommage_reconfiguration() {
+fn hook_only_gates_gommage_reconfiguration_from_trusted_executable_roots() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     init_home_with_stdlib(&home);
 
     for command in [
         "gommage policy init --stdlib --force",
-        "target/debug/gommage policy init --stdlib --force",
-        "/tmp/build/target/debug/gommage policy init --stdlib --force",
+        "/usr/local/bin/gommage policy init --stdlib --force",
+        "/opt/homebrew/bin/gommage policy init --stdlib --force",
     ] {
         let payload = serde_json::json!({
             "hook_event_name": "PreToolUse",
@@ -762,6 +1113,39 @@ fn hook_gates_path_invoked_gommage_reconfiguration() {
                 .pointer("/hookSpecificOutput/permissionDecisionReason")
                 .and_then(|value| value.as_str())
                 .is_some_and(|reason| reason.contains("gommage.reconfigure")),
+            "{command}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    for command in [
+        "target/debug/gommage policy init --stdlib --force",
+        "/tmp/build/target/debug/gommage policy init --stdlib --force",
+    ] {
+        let payload = serde_json::json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": { "command": command }
+        })
+        .to_string();
+        let output = run_hook_command(&home, &["hook", "--agent", "claude"], payload.as_bytes());
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            response.pointer("/hookSpecificOutput/permissionDecision"),
+            Some(&serde_json::Value::String("deny".to_string())),
+            "{command}"
+        );
+        assert!(
+            response
+                .pointer("/hookSpecificOutput/permissionDecisionReason")
+                .and_then(|value| value.as_str())
+                .is_some_and(|reason| reason.contains("fails closed")),
             "{command}: {}",
             String::from_utf8_lossy(&output.stdout)
         );

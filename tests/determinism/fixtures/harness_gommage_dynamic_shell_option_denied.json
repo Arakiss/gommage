@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-shell-option-cannot-reposition-gommage-payload",
+  "call": { "tool": "Bash", "input": { "command": "bash -O \"$OPT\" -c 'gommage daemon reload'" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

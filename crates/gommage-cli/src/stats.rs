@@ -61,6 +61,8 @@ struct ApprovalTotals {
     pending: usize,
     approved: usize,
     denied: usize,
+    satisfied: usize,
+    superseded: usize,
     stale_pending: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     approval_rate: Option<f64>,
@@ -84,6 +86,8 @@ struct RuleStats {
     approvals_pending: usize,
     approvals_approved: usize,
     approvals_denied: usize,
+    approvals_satisfied: usize,
+    approvals_superseded: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     approval_rate: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -139,6 +143,8 @@ struct RuleStatsBuilder {
     approvals_pending: usize,
     approvals_approved: usize,
     approvals_denied: usize,
+    approvals_satisfied: usize,
+    approvals_superseded: usize,
     resolution_seconds_total: i128,
     resolution_count: usize,
 }
@@ -361,6 +367,8 @@ fn add_approval_stats(
             }
             ApprovalStatus::Approved => totals.approved += 1,
             ApprovalStatus::Denied => totals.denied += 1,
+            ApprovalStatus::Satisfied => totals.satisfied += 1,
+            ApprovalStatus::Superseded => totals.superseded += 1,
         }
         let identity = rule_identity_from_approval(&state);
         let builder = rules
@@ -371,6 +379,8 @@ fn add_approval_stats(
             ApprovalStatus::Pending => builder.approvals_pending += 1,
             ApprovalStatus::Approved => builder.approvals_approved += 1,
             ApprovalStatus::Denied => builder.approvals_denied += 1,
+            ApprovalStatus::Satisfied => builder.approvals_satisfied += 1,
+            ApprovalStatus::Superseded => builder.approvals_superseded += 1,
         }
         if let Some(seconds) = resolution_seconds(&state) {
             resolution_seconds_total += i128::from(seconds);
@@ -593,12 +603,14 @@ fn print_human_report(report: &StatsReport) {
         report.totals.allows, report.totals.asks, report.totals.denies, report.totals.hard_stops
     );
     println!(
-        "approvals: {} total, {} pending ({} stale), {} approved, {} denied",
+        "approvals: {} total, {} pending ({} stale), {} approved, {} denied, {} satisfied, {} superseded",
         report.approvals.total,
         report.approvals.pending,
         report.approvals.stale_pending,
         report.approvals.approved,
-        report.approvals.denied
+        report.approvals.denied,
+        report.approvals.satisfied,
+        report.approvals.superseded
     );
     if report.asks_by_rule.is_empty() {
         println!("asks by rule: none");
@@ -673,6 +685,8 @@ impl RuleStatsBuilder {
             approvals_pending: self.approvals_pending,
             approvals_approved: self.approvals_approved,
             approvals_denied: self.approvals_denied,
+            approvals_satisfied: self.approvals_satisfied,
+            approvals_superseded: self.approvals_superseded,
             approval_rate: rate(self.approvals_approved, resolved),
             avg_time_to_resolution_seconds: average(
                 self.resolution_seconds_total,

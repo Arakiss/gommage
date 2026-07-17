@@ -1,0 +1,13 @@
+{
+  "name": "gh-pr-merge-body-file-opaque-stdin-fails-closed",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "gh pr merge 79 -R github.com/Arakiss/galdr --body-file -"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": false
+  }
+}

@@ -134,13 +134,25 @@ fn approvals_report(layout: &HomeLayout, selected_pending: Option<usize>) -> Vie
         .iter()
         .filter(|state| state.status == ApprovalStatus::Denied)
         .count();
+    let satisfied = inbox
+        .states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Satisfied)
+        .count();
+    let superseded = inbox
+        .states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Superseded)
+        .count();
     let mut lines = vec![
         format!("approval inbox: {}", path_display(&layout.approvals_log)),
         format!(
-            "requests: {} pending, {} approved, {} denied, {} total",
+            "requests: {} pending, {} approved, {} denied, {} satisfied, {} superseded, {} total",
             pending.len(),
             approved,
             denied,
+            satisfied,
+            superseded,
             inbox.states.len()
         ),
         format!("webhook dead letters: {}", inbox.dead_letters.len()),
@@ -362,8 +374,13 @@ fn metrics_report(layout: &HomeLayout) -> ViewReport {
     let telemetry = build_operator_telemetry(layout);
     let mut lines = telemetry.snapshot_lines();
     lines.push(format!(
-        "approval totals: {} total, {} pending",
-        telemetry.metrics.total_approvals, telemetry.metrics.pending_approvals
+        "approval totals: {} total, {} pending, {} approved, {} denied, {} satisfied, {} superseded",
+        telemetry.metrics.total_approvals,
+        telemetry.metrics.pending_approvals,
+        telemetry.metrics.approved_approvals,
+        telemetry.metrics.denied_approvals,
+        telemetry.metrics.satisfied_approvals,
+        telemetry.metrics.superseded_approvals
     ));
     lines.push(format!(
         "picto events: {} created, {} consumed, {} rejected",

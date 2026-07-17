@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-cargo-selector-value-cannot-reposition-gommage",
+  "call": { "tool": "Bash", "input": { "command": "cargo run --features \"$FEATURES\" --bin gommage -- approval approve apr_1" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

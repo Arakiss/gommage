@@ -11,9 +11,22 @@ fn run_codex_dry_run_json_reports_verified_launch_plan() {
     let home = temp.path().join(".gommage");
     let codex_home = temp.path().join("codex-home");
     fs::create_dir_all(&codex_home).unwrap();
+    let codex_hook = format!(
+        "gommage --home '{}' hook --agent codex",
+        fs::canonicalize(temp.path())
+            .unwrap()
+            .join(".gommage")
+            .display()
+    );
     fs::write(
         codex_home.join("hooks.json"),
-        r#"{"PreToolUse":[{"matcher":"^Bash$|^apply_patch$|^mcp__.*$","hooks":[{"type":"command","command":"gommage hook --agent codex"}]}]}"#,
+        serde_json::to_vec(&serde_json::json!({
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{"type": "command", "command": codex_hook}],
+            }],
+        }))
+        .unwrap(),
     )
     .unwrap();
     fs::write(

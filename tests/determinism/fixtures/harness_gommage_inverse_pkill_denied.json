@@ -1,0 +1,5 @@
+{
+  "name": "inverse-pkill-selection-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "pkill --inverse gommage-daemon" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

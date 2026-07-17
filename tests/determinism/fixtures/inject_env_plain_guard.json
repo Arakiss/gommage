@@ -1,6 +1,6 @@
 {
   "name": "ordinary-env-prefix-is-not-injection",
-  "note": "GUARD: `FOO=bar mycmd` is an ordinary env-assignment prefix; it is NOT LD_PRELOAD/DYLD_INSERT_LIBRARIES/DYLD_LIBRARY_PATH, so bash-env-inject-preload does not fire and proc.env.inject:preload is never surfaced. Fails closed to gommage; the point is it does NOT become the injection deny (it would be the same decision kind but the wrong reason).",
+  "note": "GUARD: `FOO=bar mycmd` is not preload injection, but an arbitrary environment mutation still changes execution context and therefore fails closed as ambiguity.",
   "call": { "tool": "Bash", "input": { "command": "FOO=bar mycmd" } },
-  "expected": { "kind": "gommage", "hard_stop": false }
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
 }

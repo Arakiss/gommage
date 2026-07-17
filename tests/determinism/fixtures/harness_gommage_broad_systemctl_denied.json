@@ -1,0 +1,12 @@
+{
+  "name": "broad-systemctl-target-cannot-inherit-gommage-disable",
+  "call": {
+    "tool": "Bash",
+    "input": { "command": "systemctl --user stop '*'" }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

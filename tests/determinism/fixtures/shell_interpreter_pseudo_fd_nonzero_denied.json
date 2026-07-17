@@ -1,0 +1,14 @@
+{
+  "name": "nonzero-pseudo-fd-shell-program-fails-closed",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "bash /dev/fd/19 19<<'EOF'\necho ok\nEOF"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

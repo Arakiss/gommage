@@ -1,0 +1,12 @@
+{
+  "name": "broad-pkill-pattern-cannot-inherit-gommage-disable",
+  "call": {
+    "tool": "Bash",
+    "input": { "command": "pkill -f '.*'" }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

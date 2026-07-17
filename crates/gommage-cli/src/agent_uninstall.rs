@@ -1,14 +1,18 @@
 use anyhow::{Context, Result};
 use clap::ValueEnum;
+use gommage_core::runtime::HomeLayout;
 use std::{
     path::{Path, PathBuf},
     process::ExitCode,
 };
 
 use crate::{
-    agent::{AgentKind, codex_pre_tool_use_pointer},
-    codex_config::disable_existing_codex_hooks_features,
-    util::{env_path_or_home, read_json_object, read_toml_document, write_json, write_text},
+    agent::{AgentKind, codex_pre_tool_use_pointer, hook_command_is_owned_by_gommage},
+    daemon::{recover_recorded_daemon_runtime, reload_policy_runtime},
+    util::{
+        InstallTransaction, TransactionFile, env_path_or_home, read_json_object,
+        write_bytes_with_mode, write_json,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -20,14 +24,45 @@ pub(crate) enum AgentUninstallTarget {
 
 pub(crate) fn cmd_agent_uninstall(
     target: AgentUninstallTarget,
+    layout: &HomeLayout,
     restore_backup: bool,
     dry_run: bool,
 ) -> Result<ExitCode> {
-    uninstall_agent_target(target, restore_backup, dry_run)?;
+    uninstall_agent_target(target, layout, restore_backup, dry_run)?;
     Ok(ExitCode::SUCCESS)
 }
 
 pub(crate) fn uninstall_agent_target(
+    target: AgentUninstallTarget,
+    layout: &HomeLayout,
+    restore_backup: bool,
+    dry_run: bool,
+) -> Result<()> {
+    if dry_run {
+        return uninstall_agent_target_inner(target, restore_backup, true);
+    }
+
+    let mut transaction =
+        InstallTransaction::begin(layout, uninstall_transaction_files(target), Vec::new())?;
+    if transaction.recovered_previous() {
+        recover_recorded_daemon_runtime(&transaction, layout)?;
+        reload_policy_runtime(layout)
+            .context("restoring the runtime after an interrupted agent uninstall")?;
+        transaction.acknowledge_recovery()?;
+    }
+
+    let result = uninstall_agent_target_inner(target, restore_backup, false)
+        .and_then(|()| reload_policy_runtime(layout));
+    match result {
+        Ok(()) => match transaction.commit() {
+            Ok(()) => Ok(()),
+            Err(error) => Err(rollback_agent_uninstall(transaction, layout, error)),
+        },
+        Err(error) => Err(rollback_agent_uninstall(transaction, layout, error)),
+    }
+}
+
+fn uninstall_agent_target_inner(
     target: AgentUninstallTarget,
     restore_backup: bool,
     dry_run: bool,
@@ -36,6 +71,65 @@ pub(crate) fn uninstall_agent_target(
         uninstall_agent(agent, restore_backup, dry_run)?;
     }
     Ok(())
+}
+
+fn uninstall_transaction_files(target: AgentUninstallTarget) -> Vec<TransactionFile> {
+    let mut files = Vec::new();
+    for agent in target_agents(target) {
+        match agent {
+            AgentKind::Claude => files.push(TransactionFile::new(env_path_or_home(
+                "GOMMAGE_CLAUDE_SETTINGS",
+                &[".claude", "settings.json"],
+            ))),
+            AgentKind::Codex => {
+                files.push(TransactionFile::new(env_path_or_home(
+                    "GOMMAGE_CODEX_HOOKS",
+                    &[".codex", "hooks.json"],
+                )));
+                files.push(TransactionFile::new(env_path_or_home(
+                    "GOMMAGE_CODEX_CONFIG",
+                    &[".codex", "config.toml"],
+                )));
+            }
+        }
+    }
+    files.sort_by(|left, right| left.path().cmp(right.path()));
+    files.dedup_by(|left, right| left.path() == right.path());
+    files
+}
+
+fn rollback_agent_uninstall(
+    mut transaction: InstallTransaction,
+    layout: &HomeLayout,
+    primary: anyhow::Error,
+) -> anyhow::Error {
+    let rollback = transaction.rollback();
+    let reload = reload_policy_runtime(layout);
+    let mut secondary = Vec::new();
+    if let Err(error) = &rollback {
+        secondary.push(format!("filesystem rollback failed: {error:#}"));
+    }
+    if let Err(error) = &reload {
+        secondary.push(format!(
+            "restoring the prior daemon policy failed: {error:#}"
+        ));
+    }
+    if rollback.is_ok()
+        && reload.is_ok()
+        && let Err(error) = transaction.commit()
+    {
+        secondary.push(format!(
+            "discarding the completed rollback journal failed: {error:#}"
+        ));
+    }
+    if secondary.is_empty() {
+        anyhow::anyhow!("{primary:#}; agent uninstall was rolled back")
+    } else {
+        anyhow::anyhow!(
+            "{primary:#}; agent uninstall rollback was incomplete: {}",
+            secondary.join("; ")
+        )
+    }
 }
 
 fn target_agents(target: AgentUninstallTarget) -> Vec<AgentKind> {
@@ -67,7 +161,7 @@ fn uninstall_claude(restore_backup: bool, dry_run: bool) -> Result<()> {
     }
 
     let mut settings = read_json_object(&settings_path)?;
-    let removed = remove_json_hook_groups(&mut settings, "/hooks/PreToolUse", "gommage");
+    let removed = remove_json_hook_groups(&mut settings, "/hooks/PreToolUse", AgentKind::Claude);
     if removed == 0 {
         println!(
             "ok claude: no Gommage hook found at {}",
@@ -99,8 +193,6 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
-    let mut removed_codex_hook = false;
-    let mut codex_hook_groups_remain_after_removal = false;
     if hooks_path.exists() {
         let mut hooks = read_json_object(&hooks_path)?;
         let primary_pointer = codex_pre_tool_use_pointer(&hooks);
@@ -109,11 +201,9 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
         } else {
             "/hooks/PreToolUse"
         };
-        let removed = remove_json_hook_groups(&mut hooks, primary_pointer, "gommage")
-            + remove_json_hook_groups(&mut hooks, secondary_pointer, "gommage");
+        let removed = remove_json_hook_groups(&mut hooks, primary_pointer, AgentKind::Codex)
+            + remove_json_hook_groups(&mut hooks, secondary_pointer, AgentKind::Codex);
         if removed > 0 {
-            removed_codex_hook = true;
-            codex_hook_groups_remain_after_removal = json_has_codex_hook_groups(&hooks);
             write_json(&hooks_path, &hooks, dry_run)?;
             if dry_run {
                 println!(
@@ -136,65 +226,44 @@ fn uninstall_codex(restore_backup: bool, dry_run: bool) -> Result<()> {
         println!("ok codex: hooks file not found at {}", hooks_path.display());
     }
 
-    if removed_codex_hook && config_path.exists() {
-        if codex_hook_groups_remain_after_removal {
-            println!(
-                "ok codex: leaving Codex hook feature flags unchanged at {}; other Codex hooks remain",
-                config_path.display()
-            );
-        } else {
-            let mut config = read_toml_document(&config_path)?;
-            let disabled = disable_existing_codex_hooks_features(&mut config);
-            if !disabled.is_empty() {
-                write_text(&config_path, &config.to_string(), dry_run)?;
-                let labels = disabled.join(", ");
-                if dry_run {
-                    println!("plan codex: disable {labels} at {}", config_path.display());
-                } else {
-                    println!("ok codex: disabled {labels} at {}", config_path.display());
-                }
-            }
-        }
-    } else if config_path.exists() {
+    if config_path.exists() {
         println!(
-            "ok codex: leaving Codex hook feature flags unchanged at {}; no Gommage Codex hook was found",
+            "{} codex: preserve shared Codex hook feature flags at {}; only --restore-backup restores config.toml",
+            if dry_run { "plan" } else { "ok" },
             config_path.display()
         );
     }
     Ok(())
 }
 
-fn remove_json_hook_groups(root: &mut serde_json::Value, pointer: &str, needle: &str) -> usize {
+fn remove_json_hook_groups(root: &mut serde_json::Value, pointer: &str, agent: AgentKind) -> usize {
     let Some(entries) = root
         .pointer_mut(pointer)
         .and_then(|value| value.as_array_mut())
     else {
         return 0;
     };
-    let before = entries.len();
-    entries.retain(|entry| !json_hook_entry_contains_command(entry, needle));
-    before - entries.len()
-}
-
-fn json_has_codex_hook_groups(root: &serde_json::Value) -> bool {
-    ["/hooks/PreToolUse", "/PreToolUse"].iter().any(|pointer| {
-        root.pointer(pointer)
-            .and_then(|value| value.as_array())
-            .is_some_and(|entries| !entries.is_empty())
-    })
-}
-
-fn json_hook_entry_contains_command(entry: &serde_json::Value, needle: &str) -> bool {
-    entry
-        .get("hooks")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .any(|hook| {
-            hook.get("command")
-                .and_then(|command| command.as_str())
-                .is_some_and(|command| command.to_ascii_lowercase().contains(needle))
-        })
+    let mut changed_groups = 0;
+    entries.retain_mut(|entry| {
+        let Some(hooks) = entry
+            .get_mut("hooks")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            return true;
+        };
+        let before = hooks.len();
+        hooks.retain(|hook| {
+            !hook
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|command| hook_command_is_owned_by_gommage(command, agent, None))
+        });
+        if hooks.len() != before {
+            changed_groups += 1;
+        }
+        !hooks.is_empty()
+    });
+    changed_groups
 }
 
 fn restore_latest_backup(path: &Path, dry_run: bool) -> Result<bool> {
@@ -206,10 +275,21 @@ fn restore_latest_backup(path: &Path, dry_run: bool) -> Result<bool> {
         println!("plan restore: {} -> {}", backup.display(), path.display());
         return Ok(true);
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    let metadata = std::fs::symlink_metadata(&backup)
+        .with_context(|| format!("inspecting backup {}", backup.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        anyhow::bail!("backup {} is not a regular file", backup.display());
     }
-    std::fs::copy(&backup, path)
+    let contents =
+        std::fs::read(&backup).with_context(|| format!("reading backup {}", backup.display()))?;
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o7777
+    };
+    #[cfg(not(unix))]
+    let mode = 0;
+    write_bytes_with_mode(path, &contents, mode)
         .with_context(|| format!("restoring {} from {}", path.display(), backup.display()))?;
     println!("ok restore: {} -> {}", backup.display(), path.display());
     Ok(true)

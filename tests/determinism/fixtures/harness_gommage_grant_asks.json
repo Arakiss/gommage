@@ -1,6 +1,6 @@
 {
   "name": "harness-gommage-grant-asks",
   "note": "Minting a signed grant changes authorization state and must require independent operator authorization.",
-  "call": { "tool": "Bash", "input": { "command": "env LANG=C /usr/local/bin/gommage --home /tmp/g g --scope git.push:main" } },
+  "call": { "tool": "Bash", "input": { "command": "/usr/local/bin/gommage --home /tmp/g g --scope git.push:main" } },
   "expected": { "kind": "ask_picto", "required_scope": "gommage.authorize", "bind_input": true, "matched_rule": "gate-gommage-authorize" }
 }

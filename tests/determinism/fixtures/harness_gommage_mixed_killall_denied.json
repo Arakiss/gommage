@@ -1,0 +1,12 @@
+{
+  "name": "mixed-killall-targets-cannot-inherit-gommage-disable",
+  "call": {
+    "tool": "Bash",
+    "input": { "command": "killall gommage-daemon postgres" }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

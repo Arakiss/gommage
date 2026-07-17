@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use gommage_core::{
-    Capability, CapabilityProvenance, Decision, MatchedRule, Policy, evaluate,
-    runtime::default_policy_env,
+    AuthorizationEvidence, Capability, CapabilityProvenance, Decision, MatchedRule, Policy,
+    evaluate, runtime::default_policy_env,
 };
 use serde::Serialize;
 use std::{
@@ -71,6 +71,7 @@ struct ReplayEntry {
     input_hash: String,
     capabilities: Vec<Capability>,
     original_decision: Decision,
+    original_authorization: Option<AuthorizationEvidence>,
     replayed_decision: Decision,
     changed: bool,
     change: ReplayStatus,
@@ -128,6 +129,7 @@ fn build_replay_report(audit_path: &Path, policy_path: &Path) -> Result<ReplayRe
             input_hash: entry.input_hash,
             capabilities: entry.capabilities,
             original_decision: entry.decision,
+            original_authorization: entry.authorization,
             replayed_decision: replay.decision,
             changed,
             change,

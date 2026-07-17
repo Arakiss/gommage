@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-wrapper-value-cannot-reposition-gh",
+  "call": { "tool": "Bash", "input": { "command": "timeout -s \"$SIG\" 30 gh pr merge 79 -R github.com/Arakiss/galdr --squash" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

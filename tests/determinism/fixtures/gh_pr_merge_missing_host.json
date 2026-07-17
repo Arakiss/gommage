@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-without-explicit-host-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 79 --repo Arakiss/galdr --squash" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

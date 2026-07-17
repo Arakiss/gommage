@@ -4,7 +4,8 @@ use gommage_audit::{
     Anomaly, AuditEntry, AuditEventEntry, VerifyReport as AuditVerifyReport, verify_log,
 };
 use gommage_core::{
-    Capability, CapabilityProvenance, CapabilityProvenanceStatus, Decision, MatchedRule, evaluate,
+    AuthorizationEvidence, Capability, CapabilityProvenance, CapabilityProvenanceStatus, Decision,
+    MatchedRule, evaluate,
     runtime::{Expedition, HomeLayout, default_policy_env, load_active_policy},
 };
 use serde::Serialize;
@@ -137,6 +138,7 @@ struct ExplainDecisionTraceReport {
     audited_capabilities: Vec<Capability>,
     active_capabilities: Vec<Capability>,
     audited_decision: Decision,
+    audited_authorization: Option<AuthorizationEvidence>,
     audited_primary_matched_rule: Option<MatchedRule>,
     audited_capability_provenance: Option<Vec<CapabilityProvenance>>,
     audited_provenance_note: &'static str,
@@ -186,6 +188,7 @@ fn build_decision_trace_report(
         audited_capabilities: entry.capabilities.clone(),
         active_capabilities: active_eval.capabilities.clone(),
         audited_decision: entry.decision.clone(),
+        audited_authorization: entry.authorization.clone(),
         audited_primary_matched_rule: entry.matched_rule.clone(),
         audited_capability_provenance,
         audited_provenance_note,
@@ -249,6 +252,10 @@ fn print_decision_trace_report(report: &ExplainDecisionTraceReport) {
     println!(
         "audited_decision: {}",
         decision_summary(&report.audited_decision)
+    );
+    println!(
+        "audited_authorization: {}",
+        serde_json::to_string(&report.audited_authorization).unwrap_or_else(|_| "null".to_string())
     );
     println!("audit_policy_version: {}", report.audit_policy_version);
     println!("active_policy_version: {}", report.active_policy_version);
@@ -370,6 +377,10 @@ fn print_decision_explain(entry: &AuditEntry) -> Result<()> {
     println!("tool: {}", entry.tool);
     println!("input_hash: {}", entry.input_hash);
     println!("decision: {}", serde_json::to_string(&entry.decision)?);
+    println!(
+        "authorization: {}",
+        serde_json::to_string(&entry.authorization)?
+    );
     if let Some(rule) = &entry.matched_rule {
         println!(
             "primary_matched_rule: {} ({}:{}) [compatibility summary]",

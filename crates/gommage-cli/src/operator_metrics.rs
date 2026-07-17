@@ -53,6 +53,10 @@ pub(crate) struct LocalMetrics {
     pub(crate) approval_requests: usize,
     pub(crate) approval_resolutions: usize,
     pub(crate) pending_approvals: usize,
+    pub(crate) approved_approvals: usize,
+    pub(crate) denied_approvals: usize,
+    pub(crate) satisfied_approvals: usize,
+    pub(crate) superseded_approvals: usize,
     pub(crate) total_approvals: usize,
     pub(crate) picto_creations: usize,
     pub(crate) picto_consumptions: usize,
@@ -196,6 +200,22 @@ fn local_metrics(layout: &HomeLayout) -> LocalMetrics {
             metrics.pending_approvals = states
                 .iter()
                 .filter(|state| state.status == ApprovalStatus::Pending)
+                .count();
+            metrics.approved_approvals = states
+                .iter()
+                .filter(|state| state.status == ApprovalStatus::Approved)
+                .count();
+            metrics.denied_approvals = states
+                .iter()
+                .filter(|state| state.status == ApprovalStatus::Denied)
+                .count();
+            metrics.satisfied_approvals = states
+                .iter()
+                .filter(|state| state.status == ApprovalStatus::Satisfied)
+                .count();
+            metrics.superseded_approvals = states
+                .iter()
+                .filter(|state| state.status == ApprovalStatus::Superseded)
                 .count();
         }
         Err(error) => metrics.error = Some(format!("approval metrics unavailable: {error}")),

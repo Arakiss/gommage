@@ -1,0 +1,14 @@
+{
+  "name": "php-inline-program-fails-closed",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "php -r 'echo 1;'"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

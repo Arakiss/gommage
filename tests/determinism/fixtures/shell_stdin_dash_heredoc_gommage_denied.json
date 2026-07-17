@@ -1,0 +1,14 @@
+{
+  "name": "shell-stdin-dash-cannot-hide-gommage-reconfiguration",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "bash - <<'EOF'\ngommage daemon reload\nEOF"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

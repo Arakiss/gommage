@@ -170,6 +170,10 @@ struct HomeBundle {
 struct ApprovalBundle {
     requests_total: usize,
     requests_pending: usize,
+    requests_approved: usize,
+    requests_denied: usize,
+    requests_satisfied: usize,
+    requests_superseded: usize,
     webhook_dead_letters: usize,
 }
 
@@ -240,12 +244,32 @@ fn approval_bundle(layout: &HomeLayout) -> ApprovalBundle {
         .iter()
         .filter(|state| state.status == ApprovalStatus::Pending)
         .count();
+    let requests_approved = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Approved)
+        .count();
+    let requests_denied = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Denied)
+        .count();
+    let requests_satisfied = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Satisfied)
+        .count();
+    let requests_superseded = states
+        .iter()
+        .filter(|state| state.status == ApprovalStatus::Superseded)
+        .count();
     let webhook_dead_letters = ApprovalWebhookDeadLetterStore::open(&layout.approval_webhook_dlq)
         .count()
         .unwrap_or(0);
     ApprovalBundle {
         requests_total: states.len(),
         requests_pending,
+        requests_approved,
+        requests_denied,
+        requests_satisfied,
+        requests_superseded,
         webhook_dead_letters,
     }
 }

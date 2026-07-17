@@ -1,0 +1,5 @@
+{
+  "name": "bun-publish-requires-picto",
+  "call": { "tool": "Bash", "input": { "command": "bun publish" } },
+  "expected": { "kind": "ask_picto", "required_scope": "pkg.bun:publish" }
+}

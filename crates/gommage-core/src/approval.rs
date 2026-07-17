@@ -7,7 +7,9 @@
 //! unsigned, append-oriented operational JSONL so it remains easy for agents
 //! and humans to inspect; it is not a cryptographic completeness boundary.
 
-use crate::{Capability, EvalResult, MatchedRule, ToolCall, error::GommageError};
+use crate::{
+    Capability, EvalResult, MatchedRule, ToolCall, error::GommageError, picto::PictoBinding,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -27,6 +29,10 @@ pub enum ApprovalStatus {
     Pending,
     Approved,
     Denied,
+    /// A matching call consumed a Picto while this request was pending.
+    Satisfied,
+    /// Current policy no longer matches the authority this request described.
+    Superseded,
 }
 
 impl ApprovalStatus {
@@ -35,6 +41,8 @@ impl ApprovalStatus {
             ApprovalStatus::Pending => "pending",
             ApprovalStatus::Approved => "approved",
             ApprovalStatus::Denied => "denied",
+            ApprovalStatus::Satisfied => "satisfied",
+            ApprovalStatus::Superseded => "superseded",
         }
     }
 }
@@ -121,19 +129,21 @@ impl ApprovalStore {
         &self,
         mut request: ApprovalRequest,
     ) -> Result<ApprovalRequest, GommageError> {
-        let states = self.replay()?;
-        if let Some(existing) = states.values().find(|state| {
-            state.status == ApprovalStatus::Pending && same_request(&state.request, &request)
-        }) {
-            return Ok(existing.request.clone());
-        }
-        if states.contains_key(&request.id) {
-            request.id = reopened_request_id(&request.id);
-        }
-        self.append(&ApprovalRecord::Requested {
-            request: request.clone(),
-        })?;
-        Ok(request)
+        self.with_exclusive_lock(|| {
+            let states = self.replay_unlocked()?;
+            if let Some(existing) = states.values().find(|state| {
+                state.status == ApprovalStatus::Pending && same_request(&state.request, &request)
+            }) {
+                return Ok(existing.request.clone());
+            }
+            if states.contains_key(&request.id) {
+                request.id = reopened_request_id(&request.id);
+            }
+            self.append_unlocked(&ApprovalRecord::Requested {
+                request: request.clone(),
+            })?;
+            Ok(request)
+        })
     }
 
     pub fn request_for_ask(
@@ -162,26 +172,71 @@ impl ApprovalStore {
         reason: &str,
         picto_id: Option<String>,
     ) -> Result<ApprovalResolution, GommageError> {
-        let state = self.get(request_id)?.ok_or_else(|| {
-            GommageError::Policy(format!("approval request {request_id:?} not found"))
-        })?;
-        if state.status != ApprovalStatus::Pending {
-            return Err(GommageError::Policy(format!(
-                "approval request {request_id:?} is already {}",
-                state.status.as_str()
-            )));
+        if status == ApprovalStatus::Pending {
+            return Err(GommageError::Policy(
+                "an approval resolution cannot remain pending".to_string(),
+            ));
         }
-        let resolution = ApprovalResolution {
-            request_id: request_id.to_string(),
-            resolved_at: OffsetDateTime::now_utc(),
-            status,
-            reason: reason.to_string(),
-            picto_id,
+        self.with_exclusive_lock(|| {
+            let states = self.replay_unlocked()?;
+            let state = states.get(request_id).ok_or_else(|| {
+                GommageError::Policy(format!("approval request {request_id:?} not found"))
+            })?;
+            if state.status != ApprovalStatus::Pending {
+                return Err(GommageError::Policy(format!(
+                    "approval request {request_id:?} is already {}",
+                    state.status.as_str()
+                )));
+            }
+            self.append_resolution_unlocked(request_id, status, reason, picto_id)
+        })
+    }
+
+    /// Resolve one exactly matching pending request when a Picto authorizes the
+    /// call. This records successful use without mislabeling it as a human
+    /// approval.
+    #[allow(clippy::too_many_arguments)]
+    pub fn satisfy_matching_call(
+        &self,
+        tool: &str,
+        input_hash: &str,
+        required_scope: &str,
+        binding: &PictoBinding,
+        policy_version: &str,
+        picto_id: &str,
+    ) -> Result<Option<ApprovalResolution>, GommageError> {
+        let binding_matches_call = match binding {
+            PictoBinding::ScopeOnly => true,
+            PictoBinding::ExactInput {
+                input_hash: bound_hash,
+            } => bound_hash == input_hash,
         };
-        self.append(&ApprovalRecord::Resolved {
-            resolution: resolution.clone(),
-        })?;
-        Ok(resolution)
+        if !binding_matches_call {
+            return Ok(None);
+        }
+        self.with_exclusive_lock(|| {
+            let states = self.replay_unlocked()?;
+            let matching_id = states.values().find_map(|state| {
+                let request = &state.request;
+                (state.status == ApprovalStatus::Pending
+                    && request.tool == tool
+                    && request.input_hash == input_hash
+                    && request.required_scope == required_scope
+                    && request.bind_input == binding.is_exact_input()
+                    && request.policy_version == policy_version)
+                    .then(|| request.id.clone())
+            });
+            let Some(request_id) = matching_id else {
+                return Ok(None);
+            };
+            self.append_resolution_unlocked(
+                &request_id,
+                ApprovalStatus::Satisfied,
+                "matching call authorized by consumed Picto",
+                Some(picto_id.to_string()),
+            )
+            .map(Some)
+        })
     }
 
     pub fn list(&self) -> Result<Vec<ApprovalState>, GommageError> {
@@ -202,6 +257,17 @@ impl ApprovalStore {
     }
 
     fn replay(&self) -> Result<BTreeMap<String, ApprovalState>, GommageError> {
+        if !self.path.exists() {
+            return Ok(BTreeMap::new());
+        }
+        let lock = OpenOptions::new().read(true).open(&self.path)?;
+        lock.lock_shared()?;
+        let result = self.replay_unlocked();
+        File::unlock(&lock)?;
+        result
+    }
+
+    fn replay_unlocked(&self) -> Result<BTreeMap<String, ApprovalState>, GommageError> {
         let mut states = BTreeMap::new();
         if !self.path.exists() {
             return Ok(states);
@@ -233,7 +299,27 @@ impl ApprovalStore {
         Ok(states)
     }
 
-    fn append(&self, record: &ApprovalRecord) -> Result<(), GommageError> {
+    fn append_resolution_unlocked(
+        &self,
+        request_id: &str,
+        status: ApprovalStatus,
+        reason: &str,
+        picto_id: Option<String>,
+    ) -> Result<ApprovalResolution, GommageError> {
+        let resolution = ApprovalResolution {
+            request_id: request_id.to_string(),
+            resolved_at: OffsetDateTime::now_utc(),
+            status,
+            reason: reason.to_string(),
+            picto_id,
+        };
+        self.append_unlocked(&ApprovalRecord::Resolved {
+            resolution: resolution.clone(),
+        })?;
+        Ok(resolution)
+    }
+
+    fn append_unlocked(&self, record: &ApprovalRecord) -> Result<(), GommageError> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -241,11 +327,29 @@ impl ApprovalStore {
             .create(true)
             .append(true)
             .open(&self.path)?;
-        let line = serde_json::to_string(record)?;
-        file.write_all(line.as_bytes())?;
-        file.write_all(b"\n")?;
-        file.flush()?;
+        let mut line = serde_json::to_vec(record)?;
+        line.push(b'\n');
+        file.write_all(&line)?;
+        file.sync_all()?;
         Ok(())
+    }
+
+    fn with_exclusive_lock<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, GommageError>,
+    ) -> Result<T, GommageError> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(&self.path)?;
+        lock.lock()?;
+        let result = operation();
+        File::unlock(&lock)?;
+        result
     }
 }
 
@@ -279,7 +383,8 @@ fn reopened_request_id(base: &str) -> String {
 }
 
 fn same_request(a: &ApprovalRequest, b: &ApprovalRequest) -> bool {
-    a.input_hash == b.input_hash
+    a.tool == b.tool
+        && a.input_hash == b.input_hash
         && a.required_scope == b.required_scope
         && a.bind_input == b.bind_input
         && a.policy_version == b.policy_version
@@ -373,6 +478,7 @@ mod tests {
             capabilities: vec![Capability::new("git.push:refs/heads/main")],
             policy_version: "sha256:test".to_string(),
             capability_provenance: Vec::new(),
+            authorization: None,
         }
     }
 
@@ -450,6 +556,122 @@ mod tests {
             state.resolution.unwrap().picto_id.as_deref(),
             Some("picto_1")
         );
+    }
+
+    #[test]
+    fn consumed_picto_satisfies_only_the_exact_pending_call() {
+        let dir = tempdir().unwrap();
+        let store = ApprovalStore::open(&dir.path().join("approvals.jsonl"));
+        let request = ApprovalStore::request_from_eval(
+            "Bash",
+            "sha256:input",
+            "git.push:main",
+            false,
+            "reason",
+            &eval(),
+        );
+        let id = request.id.clone();
+        store.record_request(request).unwrap();
+
+        for (tool, input_hash, scope, binding, policy) in [
+            (
+                "Write",
+                "sha256:input",
+                "git.push:main",
+                PictoBinding::ScopeOnly,
+                "sha256:test",
+            ),
+            (
+                "Bash",
+                "sha256:other",
+                "git.push:main",
+                PictoBinding::ScopeOnly,
+                "sha256:test",
+            ),
+            (
+                "Bash",
+                "sha256:input",
+                "git.push:other",
+                PictoBinding::ScopeOnly,
+                "sha256:test",
+            ),
+            (
+                "Bash",
+                "sha256:input",
+                "git.push:main",
+                PictoBinding::ExactInput {
+                    input_hash: "sha256:input".to_string(),
+                },
+                "sha256:test",
+            ),
+            (
+                "Bash",
+                "sha256:input",
+                "git.push:main",
+                PictoBinding::ScopeOnly,
+                "sha256:changed",
+            ),
+        ] {
+            assert!(
+                store
+                    .satisfy_matching_call(tool, input_hash, scope, &binding, policy, "picto_1",)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        assert_eq!(
+            store.get(&id).unwrap().unwrap().status,
+            ApprovalStatus::Pending
+        );
+
+        let resolution = store
+            .satisfy_matching_call(
+                "Bash",
+                "sha256:input",
+                "git.push:main",
+                &PictoBinding::ScopeOnly,
+                "sha256:test",
+                "picto_1",
+            )
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolution.status, ApprovalStatus::Satisfied);
+        assert_eq!(resolution.picto_id.as_deref(), Some("picto_1"));
+        assert_eq!(
+            store.get(&id).unwrap().unwrap().status,
+            ApprovalStatus::Satisfied
+        );
+    }
+
+    #[test]
+    fn concurrent_duplicate_requests_remain_one_pending_record() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("approvals.jsonl");
+        let request = ApprovalStore::request_from_eval(
+            "Bash",
+            "sha256:input",
+            "git.push:main",
+            false,
+            "reason",
+            &eval(),
+        );
+        let threads = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                let request = request.clone();
+                std::thread::spawn(move || {
+                    ApprovalStore::open(&path).record_request(request).unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        let states = ApprovalStore::open(&path).list().unwrap();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].status, ApprovalStatus::Pending);
     }
 
     #[test]

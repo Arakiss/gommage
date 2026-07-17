@@ -1,0 +1,10 @@
+{
+  "name": "harness-gommage-environment-wrapper-preserves-authority-and-fails-closed",
+  "note": "Changing the nested command environment is not a transparent wrapper; the semantic authorization effect remains visible beside terminal ambiguity.",
+  "call": { "tool": "Bash", "input": { "command": "env LANG=C /usr/local/bin/gommage --home /tmp/g g --scope git.push:main" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

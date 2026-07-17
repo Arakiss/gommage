@@ -1,0 +1,10 @@
+{
+  "name": "gh-pr-merge-admin-without-branch-deletion-requires-admin-picto",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 79 --repo github.com/Arakiss/galdr --squash --admin --match-head-commit 0123456789abcdef0123456789abcdef01234567" } },
+  "expected": {
+    "kind": "ask_picto",
+    "required_scope": "gh.pr.merge.admin",
+    "bind_input": true,
+    "matched_rule": "gate-gh-pr-merge-admin"
+  }
+}

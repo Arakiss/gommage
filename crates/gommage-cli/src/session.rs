@@ -209,9 +209,11 @@ fn session_home_report(
 
 fn hook_report_for_home(agent: AgentKind, home: &Path, layout: &HomeLayout) -> AgentStatusReport {
     match agent {
-        AgentKind::Codex => {
-            build_codex_status_report_at(&home.join("hooks.json"), &home.join("config.toml"))
-        }
+        AgentKind::Codex => build_codex_status_report_at(
+            layout,
+            &home.join("hooks.json"),
+            &home.join("config.toml"),
+        ),
         AgentKind::Claude => build_claude_status_report_at(layout, &home.join("settings.json")),
     }
 }

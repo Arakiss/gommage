@@ -13,9 +13,22 @@ fn session_doctor_json_reports_gommage_wired_agent_processes() {
     let claude_home = temp.path().join("claude-home");
     fs::create_dir_all(&codex_home).unwrap();
     fs::create_dir_all(&claude_home).unwrap();
+    let codex_hook = format!(
+        "gommage --home '{}' hook --agent codex",
+        fs::canonicalize(temp.path())
+            .unwrap()
+            .join(".gommage")
+            .display()
+    );
     fs::write(
         codex_home.join("hooks.json"),
-        r#"{"PreToolUse":[{"matcher":"^Bash$|^apply_patch$|^mcp__.*$","hooks":[{"type":"command","command":"gommage hook --agent codex"}]}]}"#,
+        serde_json::to_vec(&serde_json::json!({
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{"type": "command", "command": codex_hook}],
+            }],
+        }))
+        .unwrap(),
     )
     .unwrap();
     fs::write(
@@ -23,9 +36,22 @@ fn session_doctor_json_reports_gommage_wired_agent_processes() {
         "sandbox_mode = \"workspace-write\"\n[features]\nhooks = true\n",
     )
     .unwrap();
+    let claude_hook = format!(
+        "gommage --home '{}' hook --agent claude",
+        fs::canonicalize(temp.path())
+            .unwrap()
+            .join(".gommage")
+            .display()
+    );
     fs::write(
         claude_home.join("settings.json"),
-        r#"{"hooks":{"PreToolUse":[{"matcher":"Bash|Read|Write|Edit|MultiEdit|NotebookEdit|Glob|Grep|WebFetch|WebSearch|mcp__.*","hooks":[{"type":"command","command":"gommage hook --agent claude"}]}]}}"#,
+        serde_json::to_vec(&serde_json::json!({
+            "hooks": {"PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{"type": "command", "command": claude_hook}],
+            }]},
+        }))
+        .unwrap(),
     )
     .unwrap();
     let process_table = format!(

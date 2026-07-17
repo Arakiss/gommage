@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-brace-expanded-admin-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 79 --repo github.com/Arakiss/galdr --body {body,--admin}" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

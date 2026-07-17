@@ -1,5 +1,7 @@
 use super::*;
-use gommage_core::{CapabilityProvenance, CapabilityProvenanceStatus, Decision};
+use gommage_core::{
+    AuthorizationEvidence, CapabilityProvenance, CapabilityProvenanceStatus, Decision, PictoBinding,
+};
 use rand_core::OsRng;
 use serde_json::json;
 use tempfile::tempdir;
@@ -29,7 +31,7 @@ fn legacy_v1_decision_line(sk: &SigningKey) -> String {
 
 fn v2_decision_line(sk: &SigningKey) -> String {
     let mut entry = AuditEntry {
-        version: DECISION_SCHEMA_VERSION,
+        version: PROVENANCE_DECISION_SCHEMA_VERSION,
         id: "audit_v2".to_string(),
         ts: "2026-07-16T20:00:00Z".to_string(),
         tool: "Bash".to_string(),
@@ -42,6 +44,7 @@ fn v2_decision_line(sk: &SigningKey) -> String {
             contributions: Vec::new(),
         }],
         decision: Decision::Allow,
+        authorization: None,
         matched_rule: None,
         policy_version: "sha256:test".to_string(),
         expedition: None,
@@ -71,7 +74,7 @@ fn object_with_field_order(value: &serde_json::Value, fields: &[&str]) -> String
 }
 
 #[test]
-fn decision_v2_round_trips_with_provenance() {
+fn decision_v3_round_trips_with_provenance() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("audit.log");
     let sk = SigningKey::generate(&mut OsRng);
@@ -91,6 +94,7 @@ fn decision_v2_round_trips_with_provenance() {
             effective_decision: Some(Decision::Allow),
             contributions: Vec::new(),
         }],
+        authorization: None,
     };
     let entry = w.append(&call, &eval, Some("expedition-x")).unwrap();
     assert_eq!(entry.version, DECISION_SCHEMA_VERSION);
@@ -106,7 +110,8 @@ fn decision_v2_round_trips_with_provenance() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(value["v"], json!(2));
+    assert_eq!(value["v"], json!(3));
+    assert_eq!(value["authorization"], serde_json::Value::Null);
     assert_eq!(
         value["capability_provenance"][0]["capability"],
         json!("proc.exec:ls")
@@ -138,7 +143,23 @@ fn legacy_v1_decision_without_provenance_still_verifies() {
 }
 
 #[test]
-fn decision_v2_always_serializes_empty_provenance() {
+fn decision_v2_without_authorization_still_verifies_and_omits_the_field() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("audit.log");
+    let sk = SigningKey::from_bytes(&[11_u8; 32]);
+    let line = v2_decision_line(&sk);
+    let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let entry: AuditEntry = serde_json::from_str(&line).unwrap();
+
+    assert_eq!(entry.version, PROVENANCE_DECISION_SCHEMA_VERSION);
+    assert!(entry.authorization.is_none());
+    assert!(value.get("authorization").is_none());
+    std::fs::write(&path, format!("{line}\n")).unwrap();
+    assert_eq!(verify_log(&path, &sk.verifying_key()).unwrap(), 1);
+}
+
+#[test]
+fn decision_v3_always_serializes_empty_provenance_and_null_authorization() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("audit.log");
     let sk = SigningKey::generate(&mut OsRng);
@@ -153,6 +174,7 @@ fn decision_v2_always_serializes_empty_provenance() {
         capabilities: vec![Capability::new("proc.exec:ls")],
         policy_version: "sha256:test".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
 
     writer.append(&call, &eval, None).unwrap();
@@ -160,13 +182,14 @@ fn decision_v2_always_serializes_empty_provenance() {
 
     let line = std::fs::read_to_string(&path).unwrap();
     let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
-    assert_eq!(value["v"], json!(2));
+    assert_eq!(value["v"], json!(3));
     assert_eq!(value["capability_provenance"], json!([]));
+    assert_eq!(value["authorization"], serde_json::Value::Null);
     assert_eq!(verify_log(&path, &sk.verifying_key()).unwrap(), 1);
 }
 
 #[test]
-fn tampering_v2_provenance_breaks_the_signature() {
+fn tampering_v3_provenance_breaks_the_signature() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("audit.log");
     let sk = SigningKey::generate(&mut OsRng);
@@ -186,6 +209,7 @@ fn tampering_v2_provenance_breaks_the_signature() {
             effective_decision: Some(Decision::Allow),
             contributions: Vec::new(),
         }],
+        authorization: None,
     };
 
     writer.append(&call, &eval, None).unwrap();
@@ -204,6 +228,73 @@ fn tampering_v2_provenance_breaks_the_signature() {
         verify_log(&path, &sk.verifying_key()),
         Err(AuditError::BadSignature { line: 1 })
     ));
+}
+
+#[test]
+fn decision_v3_signs_picto_authorization_evidence() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("audit.log");
+    let sk = SigningKey::generate(&mut OsRng);
+    let mut writer = AuditWriter::open(&path, sk.clone()).unwrap();
+    let call = ToolCall {
+        tool: "Bash".into(),
+        input: json!({"command":"git push origin main"}),
+    };
+    let bound_hash = format!("sha256:{}", "a".repeat(64));
+    let eval = EvalResult {
+        decision: Decision::Allow,
+        matched_rule: None,
+        capabilities: vec![Capability::new("git.push:refs/heads/main")],
+        policy_version: "sha256:test".into(),
+        capability_provenance: Vec::new(),
+        authorization: Some(AuthorizationEvidence {
+            picto_id: "picto_test".into(),
+            scope: "git.push:main".into(),
+            binding: PictoBinding::ExactInput {
+                input_hash: bound_hash,
+            },
+        }),
+    };
+    writer.append(&call, &eval, None).unwrap();
+    drop(writer);
+
+    let original: serde_json::Value =
+        serde_json::from_str(std::fs::read_to_string(&path).unwrap().trim()).unwrap();
+    assert_eq!(original["v"], 3);
+    assert_eq!(original["authorization"]["picto_id"], "picto_test");
+    assert_eq!(verify_log(&path, &sk.verifying_key()).unwrap(), 1);
+
+    let mutations = [
+        ("picto id", json!("picto_other"), "/authorization/picto_id"),
+        ("scope", json!("git.push:other"), "/authorization/scope"),
+        (
+            "binding",
+            json!({"kind":"scope_only"}),
+            "/authorization/binding",
+        ),
+        (
+            "binding input hash",
+            json!(format!("sha256:{}", "b".repeat(64))),
+            "/authorization/binding/input_hash",
+        ),
+        (
+            "decision input hash",
+            json!(format!("sha256:{}", "c".repeat(64))),
+            "/input_hash",
+        ),
+    ];
+    for (label, replacement, pointer) in mutations {
+        let mut tampered = original.clone();
+        *tampered.pointer_mut(pointer).expect("test pointer exists") = replacement;
+        std::fs::write(&path, serde_json::to_vec(&tampered).unwrap()).unwrap();
+        assert!(
+            matches!(
+                verify_log(&path, &sk.verifying_key()),
+                Err(AuditError::BadSignature { line: 1 })
+            ),
+            "{label} tampering must invalidate the signed decision"
+        );
+    }
 }
 
 #[test]
@@ -277,6 +368,20 @@ fn known_decision_versions_enforce_their_provenance_shape() {
             record_kind: "decision",
             reason,
         }) if reason == "v2 requires capability_provenance"
+    ));
+
+    std::fs::write(
+        &path,
+        r#"{"v":3,"capability_provenance":[],"sig":"ed25519:invalid"}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        verify_log(&path, &sk.verifying_key()),
+        Err(AuditError::InvalidSchema {
+            line: 1,
+            record_kind: "decision",
+            reason,
+        }) if reason == "v3 requires authorization (null when unused)"
     ));
 }
 
@@ -407,6 +512,82 @@ fn append_event_and_verify() {
 }
 
 #[test]
+#[ignore = "spawned by concurrent_audit_writers_keep_every_record_atomic"]
+fn concurrent_audit_writer_process() {
+    let path = std::path::PathBuf::from(std::env::var_os("GOMMAGE_AUDIT_TEST_PATH").unwrap());
+    let worker = std::env::var("GOMMAGE_AUDIT_TEST_WORKER").unwrap();
+    let sk = SigningKey::from_bytes(&[19_u8; 32]);
+    let mut writer = AuditWriter::open(&path, sk).unwrap();
+    let call = ToolCall {
+        tool: format!("Worker{worker}"),
+        input: json!({"worker": worker}),
+    };
+    let eval = EvalResult {
+        decision: Decision::Allow,
+        matched_rule: None,
+        capabilities: vec![Capability::new(format!("test.worker:{worker}"))],
+        policy_version: "sha256:concurrent-test".into(),
+        capability_provenance: Vec::new(),
+        authorization: None,
+    };
+
+    for record in 0..24 {
+        if record % 2 == 0 {
+            writer.append(&call, &eval, None).unwrap();
+        } else {
+            writer
+                .append_event(AuditEvent::PictoRevoked {
+                    id: format!("picto_{worker}_{record}"),
+                })
+                .unwrap();
+        }
+    }
+}
+
+#[test]
+fn concurrent_audit_writers_keep_every_record_atomic() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("audit.log");
+    let test_binary = std::env::current_exe().unwrap();
+    let children = (0..8)
+        .map(|worker| {
+            std::process::Command::new(&test_binary)
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "tests::concurrent_audit_writer_process",
+                ])
+                .env("GOMMAGE_AUDIT_TEST_PATH", &path)
+                .env("GOMMAGE_AUDIT_TEST_WORKER", worker.to_string())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    for child in children {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let contents = std::fs::read_to_string(&path).unwrap();
+    let lines = contents.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 8 * 24);
+    assert!(
+        lines
+            .iter()
+            .all(|line| serde_json::from_str::<serde_json::Value>(line).is_ok())
+    );
+    let sk = SigningKey::from_bytes(&[19_u8; 32]);
+    assert_eq!(verify_log(&path, &sk.verifying_key()).unwrap(), lines.len());
+}
+
+#[test]
 fn recent_stream_items_summarizes_decisions_and_events() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("audit.log");
@@ -422,6 +603,7 @@ fn recent_stream_items_summarizes_decisions_and_events() {
         capabilities: vec![Capability::new("proc.exec:ls")],
         policy_version: "sha256:test".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
     w.append(&call, &eval, Some("expedition-x")).unwrap();
     w.append_event(AuditEvent::PictoRevoked { id: "p1".into() })
@@ -481,6 +663,7 @@ fn mixed_decision_and_event_log_verifies() {
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
     w.append(&call, &eval, Some("exp")).unwrap();
     w.append_event(AuditEvent::PictoRevoked { id: "p1".into() })
@@ -510,6 +693,7 @@ fn explain_reports_total_verified_and_no_anomalies_on_clean_log() {
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
     for _ in 0..3 {
         w.append(&call, &eval, Some("exp")).unwrap();
@@ -541,6 +725,7 @@ fn explain_flags_policy_version_change() {
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
     let eval_b = EvalResult {
         decision: Decision::Allow,
@@ -548,6 +733,7 @@ fn explain_flags_policy_version_change() {
         capabilities: vec![],
         policy_version: "sha256:v2".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
     w.append(&call, &eval_a, None).unwrap();
     w.append(&call, &eval_b, None).unwrap();
@@ -580,6 +766,7 @@ fn explain_flags_bad_signature_but_keeps_walking() {
         capabilities: vec![],
         policy_version: "sha256:v1".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
     w.append(&call, &eval, None).unwrap();
     w.append(&call, &eval, None).unwrap();
@@ -617,6 +804,7 @@ fn tampered_line_fails() {
         capabilities: vec![],
         policy_version: "sha256:test".into(),
         capability_provenance: Vec::new(),
+        authorization: None,
     };
     w.append(&call, &eval, None).unwrap();
     drop(w);

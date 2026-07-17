@@ -1,0 +1,6 @@
+{
+  "name": "untrusted-explicit-gommage-path-fails-closed",
+  "note": "A binary merely named gommage outside a trusted installation root cannot inherit recovery authority.",
+  "call": { "tool": "Bash", "input": { "command": "/tmp/gommage --help" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

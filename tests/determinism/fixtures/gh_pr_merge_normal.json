@@ -1,5 +1,5 @@
 {
   "name": "gh-pr-merge-normal-is-allowed",
-  "call": { "tool": "Bash", "input": { "command": "gh pr merge 79 --repo Arakiss/galdr --squash --delete-branch" } },
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge 79 --repo github.com/Arakiss/galdr --squash" } },
   "expected": { "kind": "allow", "matched_rule": "allow-gh-pr-merge" }
 }

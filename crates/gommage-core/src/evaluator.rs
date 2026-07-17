@@ -1,4 +1,7 @@
-use crate::{Capability, Policy, Rule, RuleDecision, hardstop};
+use crate::{
+    Capability, Policy, Rule, RuleDecision, hardstop,
+    picto::{Picto, PictoBinding, validate_picto_scope},
+};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::BTreeMap};
 
@@ -88,6 +91,26 @@ pub struct CapabilityProvenance {
     pub contributions: Vec<RuleContribution>,
 }
 
+/// Signed evidence that an otherwise gated decision was authorized by
+/// consuming one specific Picto.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorizationEvidence {
+    pub picto_id: String,
+    pub scope: String,
+    pub binding: PictoBinding,
+}
+
+impl AuthorizationEvidence {
+    /// Preserve the exact public authority boundary from a consumed Picto.
+    pub fn from_picto(picto: &Picto) -> Self {
+        Self {
+            picto_id: picto.id.clone(),
+            scope: picto.scope.clone(),
+            binding: picto.binding.clone(),
+        }
+    }
+}
+
 /// The full result of evaluation: decision + provenance + the capabilities that
 /// were in play at the time. Stored in audit so `gommage explain` can be exact.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +123,9 @@ pub struct EvalResult {
     /// evaluation results recorded before compositional policy evaluation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capability_provenance: Vec<CapabilityProvenance>,
+    /// Populated only after a verified Picto is atomically consumed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<AuthorizationEvidence>,
 }
 
 /// Pure evaluation. Given the set of capabilities produced by the mapper and a
@@ -128,6 +154,7 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
             ),
             capabilities: caps,
             policy_version: policy.version_hash.clone(),
+            authorization: None,
         };
     }
 
@@ -197,6 +224,7 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
         capabilities: caps,
         policy_version: policy.version_hash.clone(),
         capability_provenance,
+        authorization: None,
     }
 }
 
@@ -226,6 +254,7 @@ pub fn evaluate_bypass(caps: Vec<Capability>) -> EvalResult {
             ),
             capabilities: caps,
             policy_version: "bypass:compiled-hardstop".to_string(),
+            authorization: None,
         };
     }
     let capability_provenance = caps
@@ -244,6 +273,7 @@ pub fn evaluate_bypass(caps: Vec<Capability>) -> EvalResult {
         capabilities: caps,
         policy_version: "bypass:policy-skipped".to_string(),
         capability_provenance,
+        authorization: None,
     }
 }
 
@@ -265,7 +295,7 @@ fn resolve_capability(
             continue;
         }
         if rule.r#match.matches(caps) && rule.r#match.covers(capability) {
-            contributions.push(contribution_from_rule(rule));
+            contributions.push(contribution_from_rule(rule, caps));
             layer_resolved = true;
         }
     }
@@ -273,13 +303,13 @@ fn resolve_capability(
     contributions
 }
 
-fn contribution_from_rule(rule: &Rule) -> RuleContribution {
+fn contribution_from_rule(rule: &Rule, caps: &[Capability]) -> RuleContribution {
     RuleContribution {
         layer: rule.source.layer.clone(),
         layer_index: rule.source.layer_index,
         file_index: rule.source.file_index,
         rule: matched_rule_from_rule(rule),
-        decision: decision_from_rule(rule),
+        decision: decision_from_rule(rule, caps),
     }
 }
 
@@ -447,21 +477,68 @@ fn hard_stop_provenance(
         .collect()
 }
 
-fn decision_from_rule(rule: &Rule) -> Decision {
+fn decision_from_rule(rule: &Rule, caps: &[Capability]) -> Decision {
     match rule.decision {
         RuleDecision::Allow => Decision::Allow,
         RuleDecision::Gommage => Decision::Gommage {
             reason: rule.reason.clone(),
             hard_stop: rule.hard_stop,
         },
-        RuleDecision::AskPicto => Decision::AskPicto {
-            required_scope: rule
-                .required_scope
-                .clone()
-                .expect("ask_picto rule without required_scope survived compilation; bug"),
-            reason: rule.reason.clone(),
-            bind_input: rule.bind_input,
-        },
+        RuleDecision::AskPicto => ask_picto_decision(rule, caps),
+    }
+}
+
+fn ask_picto_decision(rule: &Rule, caps: &[Capability]) -> Decision {
+    let required_scope = match (
+        rule.required_scope.as_deref(),
+        rule.required_scope_from_capability.as_deref(),
+        rule.required_scope_from_capability_matcher.as_ref(),
+    ) {
+        (Some(scope), None, None) => scope,
+        (None, Some(_), Some(selector)) => {
+            let mut matches = caps
+                .iter()
+                .filter(|capability| selector.is_match(capability.as_str()));
+            let Some(scope) = matches.next() else {
+                return invalid_picto_scope_decision(
+                    rule,
+                    "required_scope_from_capability matched no normalized capability",
+                );
+            };
+            if matches.next().is_some() {
+                let match_count = 2 + matches.count();
+                return invalid_picto_scope_decision(
+                    rule,
+                    &format!(
+                        "required_scope_from_capability matched {match_count} normalized capabilities; expected exactly one"
+                    ),
+                );
+            }
+            scope.as_str()
+        }
+        _ => {
+            return invalid_picto_scope_decision(rule, "ask_picto scope configuration is invalid");
+        }
+    };
+
+    if let Err(reason) = validate_picto_scope(required_scope) {
+        return invalid_picto_scope_decision(
+            rule,
+            &format!("derived Picto scope is invalid: {reason}"),
+        );
+    }
+
+    Decision::AskPicto {
+        required_scope: required_scope.to_string(),
+        reason: rule.reason.clone(),
+        bind_input: rule.bind_input,
+    }
+}
+
+fn invalid_picto_scope_decision(rule: &Rule, detail: &str) -> Decision {
+    Decision::Gommage {
+        reason: format!("rule {:?}: {detail} (fail-closed)", rule.name),
+        hard_stop: false,
     }
 }
 
@@ -570,5 +647,140 @@ mod tests {
             panic!("expected ask_picto");
         };
         assert!(bind_input);
+    }
+
+    #[test]
+    fn ask_picto_derives_scope_from_one_normalized_capability() {
+        let mut env = HashMap::new();
+        env.insert("HOME".to_string(), "/home/operator".to_string());
+        let pol = Policy::from_yaml_string(
+            r#"
+- name: gate-home-write
+  decision: ask_picto
+  required_scope_from_capability: "fs.write:${HOME}/**"
+  match:
+    all_capability: ["fs.write:${HOME}/**"]
+  reason: "write requires approval"
+"#,
+            &env,
+            "test.yaml",
+        )
+        .unwrap();
+        assert_eq!(
+            pol.rules[0].required_scope_from_capability.as_deref(),
+            Some("fs.write:/home/operator/**")
+        );
+        let res = evaluate(
+            &[
+                Capability::new("fs.write:~/.gommage/policy.d/rule.yaml"),
+                Capability::new("fs.write:/home/operator/.gommage/policy.d/rule.yaml"),
+            ],
+            &pol,
+        );
+        let Decision::AskPicto { required_scope, .. } = res.decision else {
+            panic!("expected ask_picto");
+        };
+
+        assert_eq!(
+            required_scope,
+            "fs.write:/home/operator/.gommage/policy.d/rule.yaml"
+        );
+        assert_eq!(res.capabilities, vec![Capability::new(&required_scope)]);
+    }
+
+    #[test]
+    fn capability_scope_selector_does_not_change_rule_matching() {
+        let pol = p(r#"
+- name: gate-mcp-write
+  decision: ask_picto
+  required_scope_from_capability: "mcp.write:*"
+  match:
+    all_capability: ["mcp.call:*", "mcp.write:*"]
+  reason: "write requires approval"
+- name: allow-mcp-read
+  decision: allow
+  match:
+    any_capability: ["mcp.call:read"]
+"#);
+        let res = evaluate(&[Capability::new("mcp.call:read")], &pol);
+
+        assert_eq!(res.decision, Decision::Allow);
+        assert_eq!(
+            res.matched_rule.as_ref().map(|rule| rule.name.as_str()),
+            Some("allow-mcp-read")
+        );
+    }
+
+    #[test]
+    fn capability_scope_selector_fails_closed_on_zero_internal_matches() {
+        let pol = p(r#"
+- name: gate-mcp-write
+  decision: ask_picto
+  required_scope_from_capability: "mcp.write:*"
+  match:
+    all_capability: ["mcp.write:*"]
+  reason: "write requires approval"
+"#);
+        let decision = decision_from_rule(&pol.rules[0], &[]);
+
+        assert_eq!(
+            decision,
+            Decision::Gommage {
+                reason: "rule \"gate-mcp-write\": required_scope_from_capability matched no normalized capability (fail-closed)".to_string(),
+                hard_stop: false,
+            }
+        );
+    }
+
+    #[test]
+    fn capability_scope_selector_fails_closed_on_multiple_matches() {
+        let pol = p(r#"
+- name: gate-mcp-write
+  decision: ask_picto
+  required_scope_from_capability: "mcp.write:*"
+  match:
+    all_capability: ["mcp.call:write", "mcp.write:*"]
+  reason: "write requires approval"
+"#);
+        let res = evaluate(
+            &[
+                Capability::new("mcp.call:write"),
+                Capability::new("mcp.write:server/first"),
+                Capability::new("mcp.write:server/second"),
+            ],
+            &pol,
+        );
+
+        assert_eq!(
+            res.decision,
+            Decision::Gommage {
+                reason: "rule \"gate-mcp-write\": required_scope_from_capability matched 2 normalized capabilities; expected exactly one (fail-closed)".to_string(),
+                hard_stop: false,
+            }
+        );
+    }
+
+    #[test]
+    fn capability_scope_selector_fails_closed_on_invalid_picto_scope() {
+        let pol = p(r#"
+- name: gate-mcp-write
+  decision: ask_picto
+  required_scope_from_capability: "mcp.write:*"
+  match:
+    all_capability: ["mcp.write:*"]
+  reason: "write requires approval"
+"#);
+        let invalid_scope = format!("mcp.write:safe{}evil", '\u{202e}');
+        let res = evaluate(&[Capability::new(invalid_scope)], &pol);
+        let Decision::Gommage { reason, hard_stop } = res.decision else {
+            panic!("expected fail-closed gommage decision");
+        };
+
+        assert!(!hard_stop);
+        assert!(
+            reason.contains("derived Picto scope is invalid"),
+            "{reason}"
+        );
+        assert!(reason.contains("U+202E"), "{reason}");
     }
 }

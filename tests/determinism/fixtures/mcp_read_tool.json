@@ -1,0 +1,12 @@
+{
+  "name": "mcp-read-like-tool-asks-for-input-bound-picto",
+  "call": {
+    "tool": "mcp__filesystem__read_file",
+    "input": { "path": "/tmp/proj/input.txt" }
+  },
+  "expected": {
+    "kind": "ask_picto",
+    "required_scope": "mcp.read:mcp__filesystem__read_file",
+    "bind_input": true
+  }
+}

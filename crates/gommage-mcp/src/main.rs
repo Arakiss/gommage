@@ -14,9 +14,9 @@ use anyhow::{Context, Result};
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
     ApprovalRequest, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
-    ApprovalWebhookSource, Capability, CapabilityMapper, Decision, EvalResult, PictoConsume,
-    PictoLookup, ToolCall, approval_webhook_generic_payload, deliver_prepared_approval_webhook,
-    evaluate, evaluate_bypass, prepare_approval_webhook,
+    ApprovalWebhookSource, AuthorizationEvidence, Capability, CapabilityMapper, Decision,
+    EvalResult, PictoConsume, PictoLookup, ToolCall, approval_webhook_generic_payload,
+    deliver_prepared_approval_webhook, evaluate, evaluate_bypass, prepare_approval_webhook,
     runtime::{HomeLayout, Runtime},
     webhook_signature::WebhookSignatureReport,
 };
@@ -35,7 +35,6 @@ use tokio::{
 
 #[derive(Debug, Deserialize)]
 struct HookInput {
-    #[allow(dead_code)]
     #[serde(default)]
     session_id: Option<String>,
     #[allow(dead_code)]
@@ -415,13 +414,29 @@ fn bypass_enabled() -> bool {
 }
 
 fn parse_hook_tool_call(buf: &str) -> Result<ToolCall> {
-    let input: HookInput = serde_json::from_str(buf).context("parsing hook JSON")?;
+    let raw: Value = serde_json::from_str(buf).context("parsing hook JSON")?;
+    validate_hook_session_id(&raw)?;
+    let input: HookInput = serde_json::from_value(raw).context("parsing hook JSON")?;
     let tool = input.tool_name;
-    let tool_input = enrich_tool_input(&tool, input.tool_input, input.cwd.as_deref());
+    let tool_input = enrich_tool_input(
+        &tool,
+        input.tool_input,
+        input.cwd.as_deref(),
+        input.session_id.as_deref(),
+    )?;
     Ok(ToolCall {
         tool,
         input: tool_input,
     })
+}
+
+fn validate_hook_session_id(input: &Value) -> Result<()> {
+    match input.get("session_id") {
+        None => Ok(()),
+        Some(Value::String(session_id)) if !session_id.is_empty() => Ok(()),
+        Some(Value::String(_)) => anyhow::bail!("hook session_id must not be empty"),
+        Some(_) => anyhow::bail!("hook session_id must be a string"),
+    }
 }
 
 fn handle_bypass(buf: &str) -> Result<()> {
@@ -503,15 +518,30 @@ fn print_help() {
     );
 }
 
-fn enrich_tool_input(tool: &str, mut input: Value, cwd: Option<&str>) -> Value {
+fn enrich_tool_input(
+    tool: &str,
+    mut input: Value,
+    cwd: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<Value> {
     let Value::Object(map) = &mut input else {
-        return input;
+        if session_id.is_some() {
+            anyhow::bail!("hook tool_input must be an object when session_id is present");
+        }
+        return Ok(input);
     };
 
     strip_internal_fields(map);
 
+    if let Some(session_id) = session_id {
+        map.insert(
+            "__gommage_session_hash".to_string(),
+            Value::String(ToolCall::host_session_hash(session_id)),
+        );
+    }
+
     let Some(cwd) = cwd else {
-        return input;
+        return Ok(input);
     };
 
     match tool {
@@ -556,7 +586,7 @@ fn enrich_tool_input(tool: &str, mut input: Value, cwd: Option<&str>) -> Value {
         _ => {}
     }
 
-    input
+    Ok(input)
 }
 
 fn strip_internal_fields(map: &mut serde_json::Map<String, Value>) {
@@ -826,13 +856,31 @@ fn decide_in_process_and_audit(
                 };
                 match consume {
                     PictoConsume::Consumed { picto } => {
+                        let authorization = AuthorizationEvidence::from_picto(&picto);
+                        let satisfied = rt.approvals.satisfy_matching_call(
+                            &call.tool,
+                            &input_hash,
+                            &required_scope,
+                            &picto.binding,
+                            &eval.policy_version,
+                            &picto.id,
+                        )?;
                         events.push(AuditEvent::PictoConsumed {
-                            id: picto.id,
-                            scope: picto.scope,
+                            id: picto.id.clone(),
+                            scope: picto.scope.clone(),
                             uses: picto.uses,
                             max_uses: picto.max_uses,
                             status: picto.status.as_str().to_string(),
                         });
+                        if let Some(resolution) = satisfied {
+                            events.push(AuditEvent::ApprovalResolved {
+                                id: resolution.request_id,
+                                status: resolution.status.as_str().to_string(),
+                                reason: resolution.reason,
+                                picto_id: resolution.picto_id,
+                            });
+                        }
+                        eval.authorization = Some(authorization);
                         eval.decision = Decision::Allow;
                     }
                     PictoConsume::NotUsable => {}
@@ -963,7 +1011,9 @@ mod tests {
             "Grep",
             json!({"pattern": "fn main", "glob": "*.rs"}),
             Some("/tmp/proj"),
-        );
+            None,
+        )
+        .unwrap();
         assert_eq!(input["__gommage_path"], "/tmp/proj");
         assert_eq!(input["__gommage_glob_path"], "/tmp/proj/*.rs");
     }
@@ -974,7 +1024,9 @@ mod tests {
             "Grep",
             json!({"pattern": "todo", "path": "src"}),
             Some("/tmp/proj"),
-        );
+            None,
+        )
+        .unwrap();
         assert_eq!(input["__gommage_path"], "/tmp/proj/src");
     }
 
@@ -984,7 +1036,9 @@ mod tests {
             "Grep",
             json!({"pattern": "todo", "__gommage_path": "/already"}),
             Some("/tmp/proj"),
-        );
+            None,
+        )
+        .unwrap();
         assert_eq!(input["__gommage_path"], "/tmp/proj");
     }
 
@@ -994,7 +1048,9 @@ mod tests {
             "Write",
             json!({"file_path": "src/lib.rs", "__gommage_file_path": "/spoofed"}),
             None,
-        );
+            None,
+        )
+        .unwrap();
         assert!(input.get("__gommage_file_path").is_none());
     }
 
@@ -1006,14 +1062,90 @@ mod tests {
                 "command": "*** Begin Patch\n*** Update File: src/lib.rs\n*** Delete File: old.rs\n*** End Patch\n"
             }),
             Some("/tmp/proj"),
-        );
+            None,
+        )
+        .unwrap();
         assert_eq!(input["__gommage_patch_path_0"], "/tmp/proj/src/lib.rs");
         assert_eq!(input["__gommage_patch_path_1"], "/tmp/proj/old.rs");
     }
 
     #[test]
     fn enriches_apply_patch_unparsed_when_command_is_missing() {
-        let input = enrich_tool_input("apply_patch", json!({}), Some("/tmp/proj"));
+        let input = enrich_tool_input("apply_patch", json!({}), Some("/tmp/proj"), None).unwrap();
         assert_eq!(input["__gommage_patch_unparsed"], true);
+    }
+
+    #[test]
+    fn hook_session_hash_is_domain_separated_and_spoof_resistant() {
+        let call = parse_hook_tool_call(
+            r#"{"session_id":"session-a","tool_name":"mcp__node_repl__js","tool_input":{"code":"1 + 1","__gommage_session_hash":"sha256:spoofed"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            call.input["__gommage_session_hash"],
+            ToolCall::host_session_hash("session-a")
+        );
+        assert_ne!(
+            call.input["__gommage_session_hash"],
+            Value::String("sha256:spoofed".to_string())
+        );
+        assert_eq!(
+            call.input_hash(),
+            "sha256:caf2b377b4cd0bcce801a72468fd232cf08a2bc2b1141990a3fceeaafa6a11c9"
+        );
+        assert!(
+            !serde_json::to_string(&call.input)
+                .unwrap()
+                .contains("session-a")
+        );
+    }
+
+    #[test]
+    fn hook_session_changes_hash_but_absence_is_stable() {
+        let payload = |session: Option<&str>| {
+            let session_field = session
+                .map(|session| format!(r#""session_id":"{session}","#))
+                .unwrap_or_default();
+            parse_hook_tool_call(&format!(
+                r#"{{{session_field}"tool_name":"mcp__node_repl__js","tool_input":{{"code":"1 + 1"}}}}"#
+            ))
+            .unwrap()
+        };
+
+        assert_ne!(
+            payload(Some("session-a")).input_hash(),
+            payload(Some("session-b")).input_hash()
+        );
+        let without_session = payload(None);
+        assert_eq!(without_session.input_hash(), payload(None).input_hash());
+        assert!(
+            without_session
+                .input
+                .get("__gommage_session_hash")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn hook_session_rejects_non_object_tool_input() {
+        let error = parse_hook_tool_call(
+            r#"{"session_id":"session-a","tool_name":"mcp__node_repl__js","tool_input":"1 + 1"}"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("tool_input must be an object"));
+    }
+
+    #[test]
+    fn hook_session_rejects_empty_or_non_string_identifiers() {
+        for session_id in [r#""""#, "null", "42"] {
+            let error = parse_hook_tool_call(&format!(
+                r#"{{"session_id":{session_id},"tool_name":"mcp__node_repl__js","tool_input":{{"code":"1 + 1"}}}}"#
+            ))
+            .unwrap_err();
+
+            assert!(error.to_string().contains("hook session_id must"));
+        }
     }
 }

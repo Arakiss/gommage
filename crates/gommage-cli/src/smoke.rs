@@ -89,8 +89,13 @@ pub(crate) struct SmokeFixture {
 
 enum SmokeExpectation {
     Allow,
-    Gommage { hard_stop: Option<bool> },
-    AskPicto { scope: &'static str },
+    Gommage {
+        hard_stop: Option<bool>,
+    },
+    AskPicto {
+        scope: &'static str,
+        bind_input: bool,
+    },
 }
 
 impl SmokeExpectation {
@@ -101,7 +106,14 @@ impl SmokeExpectation {
                 hard_stop: Some(value),
             } => format!("gommage hard_stop={value}"),
             Self::Gommage { hard_stop: None } => "gommage".to_string(),
-            Self::AskPicto { scope } => format!("ask_picto scope={scope}"),
+            Self::AskPicto { scope, bind_input } => format!(
+                "ask_picto scope={scope} binding={}",
+                if *bind_input {
+                    "exact_input"
+                } else {
+                    "scope_only"
+                }
+            ),
         }
     }
 
@@ -114,9 +126,14 @@ impl SmokeExpectation {
                 },
                 Decision::Gommage { hard_stop, .. },
             ) => expected.is_none_or(|expected| expected == *hard_stop),
-            (Self::AskPicto { scope }, Decision::AskPicto { required_scope, .. }) => {
-                required_scope == scope
-            }
+            (
+                Self::AskPicto { scope, bind_input },
+                Decision::AskPicto {
+                    required_scope,
+                    bind_input: actual_bind_input,
+                    ..
+                },
+            ) => required_scope == scope && actual_bind_input == bind_input,
             _ => false,
         }
     }
@@ -127,8 +144,12 @@ impl SmokeExpectation {
         matched_rule: Option<&MatchedRule>,
     ) -> Option<String> {
         match (self, decision, matched_rule) {
-            (Self::AskPicto { scope }, Decision::Allow, Some(rule)) => Some(format!(
+            (Self::AskPicto { scope, .. }, Decision::Allow, Some(rule)) => Some(format!(
                 "local policy relaxed the stdlib gate for {scope} via rule {} ({}:{})",
+                rule.name, rule.file, rule.index
+            )),
+            (Self::Gommage { .. }, Decision::Allow, Some(rule)) => Some(format!(
+                "local policy relaxed a fail-closed stdlib decision via rule {} ({}:{})",
                 rule.name, rule.file, rule.index
             )),
             _ => None,
@@ -223,6 +244,49 @@ pub(crate) fn smoke_fixtures() -> Vec<SmokeFixture> {
             allow_local_relaxation: false,
         },
         SmokeFixture {
+            name: "fail_closed_routine_shell",
+            description: "unclassified shell commands remain fail-closed in strict posture",
+            call: bash_call("echo gommage-smoke"),
+            expectation: SmokeExpectation::Gommage {
+                hard_stop: Some(false),
+            },
+            allow_local_relaxation: true,
+        },
+        SmokeFixture {
+            name: "fail_closed_outside_read",
+            description: "reads outside strict allow rules remain fail-closed",
+            call: ToolCall {
+                tool: "Read".to_string(),
+                input: serde_json::json!({ "file_path": "/etc/hosts" }),
+            },
+            expectation: SmokeExpectation::Gommage {
+                hard_stop: Some(false),
+            },
+            allow_local_relaxation: true,
+        },
+        SmokeFixture {
+            name: "fail_closed_outside_write",
+            description: "writes outside strict allow rules remain fail-closed",
+            call: ToolCall {
+                tool: "Write".to_string(),
+                input: serde_json::json!({ "file_path": "/opt/gommage-smoke" }),
+            },
+            expectation: SmokeExpectation::Gommage {
+                hard_stop: Some(false),
+            },
+            allow_local_relaxation: true,
+        },
+        SmokeFixture {
+            name: "deny_agent_config_write",
+            description: "strict posture does not grant blanket writes to agent configuration",
+            call: ToolCall {
+                tool: "Write".to_string(),
+                input: serde_json::json!({ "file_path": "$HOME/.claude/gommage-smoke" }),
+            },
+            expectation: SmokeExpectation::Gommage { hard_stop: None },
+            allow_local_relaxation: true,
+        },
+        SmokeFixture {
             name: "allow_feature_push",
             description: "feature-style branch pushes are allowed by stdlib policy",
             call: bash_call("git push origin chore/test-branch"),
@@ -235,6 +299,7 @@ pub(crate) fn smoke_fixtures() -> Vec<SmokeFixture> {
             call: bash_call("git push origin main"),
             expectation: SmokeExpectation::AskPicto {
                 scope: "git.push:main",
+                bind_input: false,
             },
             allow_local_relaxation: true,
         },
@@ -244,6 +309,7 @@ pub(crate) fn smoke_fixtures() -> Vec<SmokeFixture> {
             call: bash_call("git push --force origin main"),
             expectation: SmokeExpectation::AskPicto {
                 scope: "git.push.force",
+                bind_input: false,
             },
             allow_local_relaxation: false,
         },
@@ -254,7 +320,10 @@ pub(crate) fn smoke_fixtures() -> Vec<SmokeFixture> {
                 tool: "WebFetch".to_string(),
                 input: serde_json::json!({ "url": "https://example.com/docs" }),
             },
-            expectation: SmokeExpectation::AskPicto { scope: "net.fetch" },
+            expectation: SmokeExpectation::AskPicto {
+                scope: "net.fetch",
+                bind_input: false,
+            },
             allow_local_relaxation: true,
         },
         SmokeFixture {
@@ -264,7 +333,10 @@ pub(crate) fn smoke_fixtures() -> Vec<SmokeFixture> {
                 tool: "mcp__github__create_issue".to_string(),
                 input: serde_json::json!({ "title": "smoke" }),
             },
-            expectation: SmokeExpectation::AskPicto { scope: "mcp.write" },
+            expectation: SmokeExpectation::AskPicto {
+                scope: "mcp.write:mcp__github__create_issue",
+                bind_input: true,
+            },
             allow_local_relaxation: true,
         },
         SmokeFixture {

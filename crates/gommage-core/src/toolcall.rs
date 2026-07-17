@@ -13,6 +13,23 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
+    /// SHA-256 commitment for an external host session identifier.
+    ///
+    /// The encoding is deliberately independent from [`ToolCall`] canonical
+    /// JSON so adapter parity cannot drift if tool-call hashing evolves. It is
+    /// `gommage.host-session.v1\0`, followed by the identifier's UTF-8 byte
+    /// length as an unsigned 64-bit big-endian integer, followed by the UTF-8
+    /// bytes themselves. Only this digest, never the raw identifier, should be
+    /// inserted into canonical tool input.
+    pub fn host_session_hash(session_id: &str) -> String {
+        let session_bytes = session_id.as_bytes();
+        let mut hasher = Sha256::new();
+        hasher.update(b"gommage.host-session.v1\0");
+        hasher.update((session_bytes.len() as u64).to_be_bytes());
+        hasher.update(session_bytes);
+        format!("sha256:{}", hex::encode(hasher.finalize()))
+    }
+
     /// Stable SHA-256 of the canonical JSON encoding. Used as the input_hash
     /// field in audit entries so `gommage explain` can reproduce decisions.
     pub fn input_hash(&self) -> String {
@@ -115,5 +132,17 @@ mod tests {
             input: json!({ "command": "ls -la" }),
         };
         assert_ne!(a.input_hash(), b.input_hash());
+    }
+
+    #[test]
+    fn host_session_hash_has_a_stable_domain_separated_vector() {
+        assert_eq!(
+            ToolCall::host_session_hash("session-a"),
+            "sha256:8e6c26332d7de24bc6270326afe3a44f35f04c297a9759a147898d9777f94961"
+        );
+        assert_ne!(
+            ToolCall::host_session_hash("session-a"),
+            ToolCall::host_session_hash("session-b")
+        );
     }
 }

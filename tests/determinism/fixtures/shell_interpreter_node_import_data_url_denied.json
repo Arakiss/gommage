@@ -1,0 +1,15 @@
+{
+  "name": "node-data-url-import-preload-fails-closed",
+  "note": "A data URL is inline executable input even when Node receives an apparently static main program.",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "node '--import=data:text/javascript,console.error(\"NODE_IMPORT_DATA_EXECUTED\")' /dev/null"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

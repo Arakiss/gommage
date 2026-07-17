@@ -4,7 +4,7 @@ use gommage_core::runtime::HomeLayout;
 use std::process::ExitCode;
 
 use crate::{
-    agent::{AgentKind, install_agent},
+    agent::{AgentKind, AgentPolicyMode, install_agents_transactional},
     agent_uninstall::{AgentUninstallTarget, uninstall_agent_target},
 };
 
@@ -40,13 +40,21 @@ fn repair_agent(
     dry_run: bool,
 ) -> Result<ExitCode> {
     if restore_backup {
-        uninstall_agent_target(target, true, dry_run)?;
+        uninstall_agent_target(target, &layout, true, dry_run)?;
         print_restore_next(target);
         return Ok(ExitCode::SUCCESS);
     }
 
-    for agent in target_agents(target) {
-        install_agent(agent, &layout, false, true, dry_run)?;
+    let agents = target_agents(target);
+    install_agents_transactional(
+        &agents,
+        &layout,
+        false,
+        true,
+        AgentPolicyMode::Strict,
+        dry_run,
+    )?;
+    for agent in agents {
         println!(
             "next {}: gommage agent status {} --json",
             agent.as_str(),

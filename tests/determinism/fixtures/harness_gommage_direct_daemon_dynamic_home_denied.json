@@ -1,0 +1,9 @@
+{
+  "name": "direct-gommage-daemon-dynamic-home-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "gommage-daemon --foreground --home \"$TARGET\"" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

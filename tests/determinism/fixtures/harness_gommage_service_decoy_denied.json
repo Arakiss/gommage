@@ -1,0 +1,12 @@
+{
+  "name": "service-decoy-cannot-inherit-gommage-disable",
+  "call": {
+    "tool": "Bash",
+    "input": { "command": "service postgresql stop gommage-daemon" }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

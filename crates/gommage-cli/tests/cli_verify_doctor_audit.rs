@@ -317,6 +317,25 @@ fn verify_json_accepts_public_fixture_library() {
             .and_then(|value| value.as_u64()),
         Some(8)
     );
+    let mcp_case = report
+        .pointer("/policy_tests/0/report/cases")
+        .and_then(|value| value.as_array())
+        .unwrap()
+        .iter()
+        .find(|case| case.get("name").and_then(|value| value.as_str()) == Some("ask_mcp_write"))
+        .unwrap();
+    assert_eq!(
+        mcp_case
+            .pointer("/actual/required_scope")
+            .and_then(|value| value.as_str()),
+        Some("mcp.write:mcp__github__create_issue")
+    );
+    assert_eq!(
+        mcp_case
+            .pointer("/actual/bind_input")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
 }
 
 #[test]
@@ -602,7 +621,7 @@ fn explain_trace_json_reports_signed_v2_and_active_provenance() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["kind"].as_str(), Some("decision"));
-    assert_eq!(report["audit_schema_version"].as_u64(), Some(2));
+    assert_eq!(report["audit_schema_version"].as_u64(), Some(3));
     assert_eq!(report["signature_verified"].as_bool(), Some(true));
     assert_eq!(report["input_available"].as_bool(), Some(false));
     assert_eq!(

@@ -3,7 +3,8 @@ use clap::ValueEnum;
 use gommage_audit::explain_log;
 use gommage_core::{
     ApprovalRequest, ApprovalState, ApprovalStore, Decision, approval_webhook_generic_payload,
-    evaluate, runtime::HomeLayout, runtime::Runtime,
+    evaluate,
+    runtime::{HomeLayout, PolicyReadModel},
 };
 use serde::Serialize;
 use std::{
@@ -56,8 +57,8 @@ pub(crate) fn approval_replay(layout: HomeLayout, id: &str, json: bool) -> Resul
     let state = store
         .get(id)?
         .with_context(|| format!("approval request {id:?} not found"))?;
-    let rt = Runtime::open(HomeLayout::at(&layout.root)).context("opening current runtime")?;
-    let eval = evaluate(&state.request.capabilities, &rt.policy);
+    let read_model = PolicyReadModel::load(&layout).context("loading current policy")?;
+    let eval = evaluate(&state.request.capabilities, &read_model.policy);
     let conclusion = replay_conclusion(
         &state.request.required_scope,
         state.request.bind_input,

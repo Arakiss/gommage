@@ -1,0 +1,5 @@
+{
+  "name": "untrusted-explicit-gh-path-has-no-merge-authority",
+  "call": { "tool": "Bash", "input": { "command": "/tmp/gh pr merge 79 -R github.com/Arakiss/galdr --squash" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

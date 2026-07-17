@@ -1,0 +1,14 @@
+{
+  "name": "shell-stdin-heredoc-cannot-hide-administrative-pr-merge",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "bash <<'EOF'\ngh pr merge 79 -R github.com/Arakiss/galdr --admin --match-head-commit 0123456789abcdef0123456789abcdef01234567\nEOF"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

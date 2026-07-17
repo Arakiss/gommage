@@ -137,6 +137,74 @@
   reason: "ec2 terminate destroys compute — picto required"
 
 # --- gh (GitHub CLI) ------------------------------------------------------
+- name: gate-gh-pr-merge-admin-delete-branch-body-file
+  decision: ask_picto
+  required_scope: "gh.pr.merge.admin-delete-branch-body-file"
+  bind_input: true
+  match:
+    all_capability:
+      - "gh.pr.merge.admin:*"
+      - "gh.pr.merge.delete-branch:*"
+      - "gh.pr.merge.body-file:*"
+      - "gh.pr.merge:*"
+      - "fs.read:*"
+      - "net.out.post:*"
+      - "proc.exec:*"
+  reason: "administrative merge, branch deletion, and external body-file upload combine three remote mutations — one input-bound picto is required"
+
+- name: gate-gh-pr-merge-admin-body-file
+  decision: ask_picto
+  required_scope: "gh.pr.merge.admin-body-file"
+  bind_input: true
+  match:
+    all_capability:
+      - "gh.pr.merge.admin:*"
+      - "gh.pr.merge.body-file:*"
+      - "gh.pr.merge:*"
+      - "fs.read:*"
+      - "net.out.post:*"
+      - "proc.exec:*"
+  reason: "administrative merge plus external body-file upload combines two sensitive remote effects — one input-bound picto is required"
+
+- name: gate-gh-pr-merge-delete-branch-body-file
+  decision: ask_picto
+  required_scope: "gh.pr.merge.delete-branch-body-file"
+  bind_input: true
+  match:
+    all_capability:
+      - "gh.pr.merge.delete-branch:*"
+      - "gh.pr.merge.body-file:*"
+      - "gh.pr.merge:*"
+      - "fs.read:*"
+      - "net.out.post:*"
+      - "proc.exec:*"
+  reason: "branch deletion plus external body-file upload combines two remote effects — one input-bound picto is required"
+
+- name: gate-gh-pr-merge-body-file
+  decision: ask_picto
+  required_scope: "gh.pr.merge.body-file"
+  bind_input: true
+  match:
+    all_capability:
+      - "gh.pr.merge.body-file:*"
+      - "gh.pr.merge:*"
+      - "fs.read:*"
+      - "net.out.post:*"
+      - "proc.exec:*"
+  reason: "reading a local body file and posting it to the pull-request host requires an input-bound picto"
+
+- name: gate-gh-pr-merge-admin-delete-branch
+  decision: ask_picto
+  required_scope: "gh.pr.merge.admin-delete-branch"
+  bind_input: true
+  match:
+    all_capability:
+      - "gh.pr.merge.admin:*"
+      - "gh.pr.merge.delete-branch:*"
+      - "gh.pr.merge:*"
+      - "proc.exec:*"
+  reason: "administrative merge plus branch deletion combines two remote mutations — one input-bound picto is required"
+
 - name: gate-gh-pr-merge-admin
   decision: ask_picto
   required_scope: "gh.pr.merge.admin"
@@ -147,6 +215,17 @@
       - "gh.pr.merge:*"
       - "proc.exec:*"
   reason: "administrative PR merges bypass branch protection — picto required"
+
+- name: gate-gh-pr-merge-delete-branch
+  decision: ask_picto
+  required_scope: "gh.pr.merge.delete-branch"
+  bind_input: true
+  match:
+    all_capability:
+      - "gh.pr.merge.delete-branch:*"
+      - "gh.pr.merge:*"
+      - "proc.exec:*"
+  reason: "deleting the pull request branch is a separate remote mutation — picto required"
 
 - name: allow-gh-pr-merge
   decision: allow

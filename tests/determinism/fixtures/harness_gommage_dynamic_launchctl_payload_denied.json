@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-launchctl-payload-cannot-reconfigure-gommage",
+  "call": { "tool": "Bash", "input": { "command": "launchctl submit -l dev.gommage.daemon -- \"$BIN\"" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

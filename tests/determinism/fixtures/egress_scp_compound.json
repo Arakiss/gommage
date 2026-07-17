@@ -1,6 +1,6 @@
 {
-  "name": "shell-compound-scp-remote-asks-for-picto",
-  "note": "Proves shell-awareness: `cd /x && scp f host:/p` is gated exactly like a bare scp because the mapper runs capability rules per shell segment.",
+  "name": "shell-compound-scp-remote-requires-every-execution",
+  "note": "The remote copy remains visible, but the separate `cd` execution must also be resolved instead of inheriting the egress approval.",
   "call": { "tool": "Bash", "input": { "command": "cd /x && scp f user@host:/p" } },
-  "expected": { "kind": "ask_picto", "required_scope": "net.scp:out" }
+  "expected": { "kind": "gommage", "hard_stop": false }
 }

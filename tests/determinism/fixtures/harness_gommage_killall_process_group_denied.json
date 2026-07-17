@@ -1,0 +1,5 @@
+{
+  "name": "killall-process-group-selection-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "killall --process-group gommage-daemon" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

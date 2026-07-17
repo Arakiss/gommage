@@ -1,0 +1,14 @@
+{
+  "name": "shell-stdin-heredoc-cannot-hide-gommage-authorization",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "bash <<'EOF'\ngommage approval approve apr_1\nEOF"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

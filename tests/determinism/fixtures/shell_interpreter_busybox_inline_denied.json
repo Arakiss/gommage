@@ -1,0 +1,14 @@
+{
+  "name": "busybox-shell-inline-program-fails-closed",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "busybox sh -c 'echo ok'"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

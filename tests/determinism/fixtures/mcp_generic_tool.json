@@ -1,0 +1,12 @@
+{
+  "name": "mcp-generic-tool-asks-for-input-bound-picto",
+  "call": {
+    "tool": "mcp__node_repl__js",
+    "input": { "code": "6 * 7" }
+  },
+  "expected": {
+    "kind": "ask_picto",
+    "required_scope": "mcp.call:mcp__node_repl__js",
+    "bind_input": true
+  }
+}

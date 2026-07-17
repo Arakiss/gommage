@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-home-mutation-before-body-file-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "HOME=/tmp/authority; gh pr merge 79 --repo github.com/Arakiss/galdr --squash --body-file ~/body.md" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

@@ -597,11 +597,11 @@ fn tui_approval_snapshot_lists_pending_requests() {
     assert!(stdout.contains("requests: 1 pending"));
     assert!(stdout.contains("mcp__db__write_row"));
     assert!(stdout.contains("selected:"));
-    assert!(stdout.contains("scope: mcp.write"));
+    assert!(stdout.contains("scope: mcp.write:mcp__db__write_row"));
     assert!(stdout.contains("created:"));
     assert!(stdout.contains("input: sha256:"));
     assert!(stdout.contains("capabilities:"));
-    assert!(stdout.contains("current policy: ask_picto scope=mcp.write"));
+    assert!(stdout.contains("current policy: ask_picto scope=mcp.write:mcp__db__write_row"));
     assert!(stdout.contains("current rule:"));
     assert!(stdout.contains("gommage approval evidence apr_"));
     assert!(stdout.contains("gommage approval approve apr_"));

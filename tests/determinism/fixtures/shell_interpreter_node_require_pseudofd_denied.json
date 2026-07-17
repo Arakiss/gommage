@@ -1,0 +1,15 @@
+{
+  "name": "node-pseudo-fd-require-preload-fails-closed",
+  "note": "Node executes --require before the main program, so a pseudo-fd preload is opaque executable input even when the main program is a static path.",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "node --require /dev/fd/3 /dev/null 3<<< \"console.error('NODE_PRELOAD_EXECUTED')\""
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

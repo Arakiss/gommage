@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use gommage_core::{ToolCall, evaluate, runtime::Runtime};
+use gommage_core::{CapabilityMapper, Policy, ToolCall, evaluate};
 use std::{
     io::{self, Read},
     path::{Path, PathBuf},
@@ -9,9 +9,13 @@ use std::{
 const MAX_APPLY_PATCH_PATHS: usize = 16;
 const MAX_GIT_WRITE_CONTEXTS: usize = 16;
 
-pub(crate) fn evaluate_only(rt: &Runtime, call: &ToolCall) -> gommage_core::EvalResult {
-    let caps = rt.mapper.map(call);
-    evaluate(&caps, &rt.policy)
+pub(crate) fn evaluate_only(
+    mapper: &CapabilityMapper,
+    policy: &Policy,
+    call: &ToolCall,
+) -> gommage_core::EvalResult {
+    let caps = mapper.map(call);
+    evaluate(&caps, policy)
 }
 
 pub(crate) fn read_tool_call_from_stdin(hook: bool) -> Result<ToolCall> {
@@ -52,10 +56,22 @@ pub(crate) fn tool_call_from_hook_payload(input: serde_json::Value) -> Result<To
         .cloned()
         .unwrap_or(serde_json::Value::Null);
     let cwd = input.get("cwd").and_then(|v| v.as_str());
+    let session_id = hook_session_id(&input)?;
     Ok(ToolCall {
         tool: tool_name.to_string(),
-        input: enrich_hook_tool_input(tool_name, tool_input, cwd),
+        input: enrich_hook_tool_input(tool_name, tool_input, cwd, session_id)?,
     })
+}
+
+fn hook_session_id(input: &serde_json::Value) -> Result<Option<&str>> {
+    match input.get("session_id") {
+        None => Ok(None),
+        Some(serde_json::Value::String(session_id)) if !session_id.is_empty() => {
+            Ok(Some(session_id))
+        }
+        Some(serde_json::Value::String(_)) => anyhow::bail!("hook session_id must not be empty"),
+        Some(_) => anyhow::bail!("hook session_id must be a string"),
+    }
 }
 
 pub(crate) fn bash_call(command: &str) -> ToolCall {
@@ -69,15 +85,26 @@ pub(crate) fn enrich_hook_tool_input(
     tool: &str,
     mut input: serde_json::Value,
     cwd: Option<&str>,
-) -> serde_json::Value {
+    session_id: Option<&str>,
+) -> Result<serde_json::Value> {
     let serde_json::Value::Object(map) = &mut input else {
-        return input;
+        if session_id.is_some() {
+            anyhow::bail!("hook tool_input must be an object when session_id is present");
+        }
+        return Ok(input);
     };
 
     strip_internal_fields(map);
 
+    if let Some(session_id) = session_id {
+        map.insert(
+            "__gommage_session_hash".to_string(),
+            serde_json::Value::String(ToolCall::host_session_hash(session_id)),
+        );
+    }
+
     let Some(cwd) = cwd else {
-        return input;
+        return Ok(input);
     };
 
     match tool {
@@ -131,7 +158,7 @@ pub(crate) fn enrich_hook_tool_input(
         _ => {}
     }
 
-    input
+    Ok(input)
 }
 
 fn strip_internal_fields(map: &mut serde_json::Map<String, serde_json::Value>) {
@@ -331,7 +358,9 @@ mod tests {
                 "command": "*** Begin Patch\n*** Update File: src/lib.rs\n*** Move to: src/main.rs\n*** End Patch\n"
             }),
             Some("/tmp/proj"),
-        );
+            None,
+        )
+        .unwrap();
 
         assert_eq!(input["__gommage_patch_path_0"], "/tmp/proj/src/lib.rs");
         assert_eq!(input["__gommage_patch_path_1"], "/tmp/proj/src/main.rs");
@@ -340,7 +369,8 @@ mod tests {
 
     #[test]
     fn enriches_apply_patch_unparsed_when_command_is_missing() {
-        let input = enrich_hook_tool_input("apply_patch", json!({}), Some("/tmp/proj"));
+        let input =
+            enrich_hook_tool_input("apply_patch", json!({}), Some("/tmp/proj"), None).unwrap();
 
         assert_eq!(input["__gommage_patch_unparsed"], true);
     }
@@ -351,7 +381,9 @@ mod tests {
             "Write",
             json!({"file_path": "src/lib.rs", "__gommage_file_path": "/spoofed"}),
             Some("/tmp/proj"),
-        );
+            None,
+        )
+        .unwrap();
 
         assert_eq!(input["__gommage_file_path"], "/tmp/proj/src/lib.rs");
     }
@@ -362,7 +394,9 @@ mod tests {
             "Bash",
             json!({"command": "cat > src/lib.rs <<EOF\nx\nEOF"}),
             Some("/tmp/proj"),
-        );
+            None,
+        )
+        .unwrap();
 
         assert_eq!(input["__gommage_cwd"], "/tmp/proj");
     }
@@ -373,8 +407,94 @@ mod tests {
             "Write",
             json!({"file_path": "src/lib.rs", "__gommage_file_path": "/spoofed"}),
             None,
-        );
+            None,
+        )
+        .unwrap();
 
         assert!(input.get("__gommage_file_path").is_none());
+    }
+
+    #[test]
+    fn hook_session_hash_is_domain_separated_and_spoof_resistant() {
+        let payload = json!({
+            "session_id": "session-a",
+            "tool_name": "mcp__node_repl__js",
+            "tool_input": {
+                "code": "1 + 1",
+                "__gommage_session_hash": "sha256:spoofed"
+            }
+        });
+
+        let call = tool_call_from_hook_payload(payload).unwrap();
+        assert_eq!(
+            call.input["__gommage_session_hash"],
+            ToolCall::host_session_hash("session-a")
+        );
+        assert_ne!(
+            call.input["__gommage_session_hash"],
+            serde_json::Value::String("sha256:spoofed".to_string())
+        );
+        assert_eq!(
+            call.input_hash(),
+            "sha256:caf2b377b4cd0bcce801a72468fd232cf08a2bc2b1141990a3fceeaafa6a11c9"
+        );
+        assert!(
+            !serde_json::to_string(&call.input)
+                .unwrap()
+                .contains("session-a")
+        );
+    }
+
+    #[test]
+    fn hook_session_changes_hash_but_absence_is_stable() {
+        let payload = |session_id: Option<&str>| {
+            let mut value = json!({
+                "tool_name": "mcp__node_repl__js",
+                "tool_input": {"code": "1 + 1"}
+            });
+            if let Some(session_id) = session_id {
+                value["session_id"] = json!(session_id);
+            }
+            tool_call_from_hook_payload(value).unwrap()
+        };
+
+        assert_ne!(
+            payload(Some("session-a")).input_hash(),
+            payload(Some("session-b")).input_hash()
+        );
+        let without_session = payload(None);
+        assert_eq!(without_session.input_hash(), payload(None).input_hash());
+        assert!(
+            without_session
+                .input
+                .get("__gommage_session_hash")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn hook_session_rejects_non_object_tool_input() {
+        let error = tool_call_from_hook_payload(json!({
+            "session_id": "session-a",
+            "tool_name": "mcp__node_repl__js",
+            "tool_input": "1 + 1"
+        }))
+        .unwrap_err();
+
+        assert!(error.to_string().contains("tool_input must be an object"));
+    }
+
+    #[test]
+    fn hook_session_rejects_empty_or_non_string_identifiers() {
+        for session_id in [json!(""), json!(null), json!(42)] {
+            let error = tool_call_from_hook_payload(json!({
+                "session_id": session_id,
+                "tool_name": "mcp__node_repl__js",
+                "tool_input": {"code": "1 + 1"}
+            }))
+            .unwrap_err();
+
+            assert!(error.to_string().contains("hook session_id must"));
+        }
     }
 }

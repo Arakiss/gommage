@@ -18,7 +18,7 @@
 
 use gommage_core::{
     Capability, CapabilityMapper, Decision, GommageError, Policy, ToolCall, evaluate,
-    picto::{Picto, PictoStatus},
+    picto::{Picto, PictoBinding, PictoStatus},
 };
 use proptest::prelude::*;
 use std::collections::HashMap;
@@ -352,6 +352,7 @@ proptest! {
             status: PictoStatus::Active,
             reason: "proptest".into(),
             signature_b64: general_purpose::STANDARD_NO_PAD.encode(&sig),
+            binding: PictoBinding::ScopeOnly,
         };
 
         prop_assert!(matches!(picto.verify(&vk), Err(GommageError::BadSignature)));

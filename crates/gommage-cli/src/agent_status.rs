@@ -5,8 +5,10 @@ use std::{path::Path, process::ExitCode};
 
 use crate::{
     agent::{
-        AgentKind, CLAUDE_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_HOOK_COMMAND, CODEX_GOMMAGE_MATCHER,
-        claude_gommage_matcher, native_permission_rules, translate_claude_native_rules,
+        AgentKind, CODEX_GOMMAGE_MATCHER, ClaudeImportKind, claude_gommage_matcher,
+        is_generated_claude_permission_import, is_generated_relaxation_layer,
+        legacy_agent_hook_command, native_permission_rules, render_agent_hook_command,
+        render_claude_permission_import, translate_claude_native_rules,
         translate_claude_permission_allow, translate_claude_permission_deny,
     },
     codex_config::codex_hooks_feature_state,
@@ -132,7 +134,7 @@ pub(crate) fn build_agent_status_report(
 ) -> AgentStatusReport {
     match agent {
         AgentKind::Claude => build_claude_status_report(layout),
-        AgentKind::Codex => build_codex_status_report(),
+        AgentKind::Codex => build_codex_status_report(layout),
     }
 }
 
@@ -194,6 +196,7 @@ pub(crate) fn build_claude_status_report_at(
     push_hook_hygiene_report(
         &mut report,
         AgentKind::Claude,
+        layout,
         settings_path,
         &settings,
         "/hooks/PreToolUse",
@@ -203,31 +206,43 @@ pub(crate) fn build_claude_status_report_at(
         &mut report,
         &settings,
         layout,
-        "/permissions/deny",
-        "deny_import",
-        "05-claude-import.yaml",
-        translate_claude_permission_deny,
+        ClaudeImportStatusSpec {
+            pointer: "/permissions/deny",
+            check_name: "deny_import",
+            file_name: "05-claude-import.yaml",
+            translate: translate_claude_permission_deny,
+            kind: ClaudeImportKind::Deny,
+            required_in_strict_mode: true,
+        },
     );
     push_claude_import_status(
         &mut report,
         &settings,
         layout,
-        "/permissions/allow",
-        "allow_import",
-        "90-claude-allow-import.yaml",
-        translate_claude_permission_allow,
+        ClaudeImportStatusSpec {
+            pointer: "/permissions/allow",
+            check_name: "allow_import",
+            file_name: "90-claude-allow-import.yaml",
+            translate: translate_claude_permission_allow,
+            kind: ClaudeImportKind::Allow,
+            required_in_strict_mode: false,
+        },
     );
+    push_generated_policy_posture_status(&mut report, layout);
 
     report
 }
 
-fn build_codex_status_report() -> AgentStatusReport {
+fn build_codex_status_report(layout: &HomeLayout) -> AgentStatusReport {
     let hooks_path = env_path_or_home("GOMMAGE_CODEX_HOOKS", &[".codex", "hooks.json"]);
     let config_path = env_path_or_home("GOMMAGE_CODEX_CONFIG", &[".codex", "config.toml"]);
-    build_codex_status_report_at(&hooks_path, &config_path)
+    let mut report = build_codex_status_report_at(layout, &hooks_path, &config_path);
+    push_generated_policy_posture_status(&mut report, layout);
+    report
 }
 
 pub(crate) fn build_codex_status_report_at(
+    layout: &HomeLayout,
     hooks_path: &Path,
     config_path: &Path,
 ) -> AgentStatusReport {
@@ -280,6 +295,7 @@ pub(crate) fn build_codex_status_report_at(
     push_hook_hygiene_report(
         &mut report,
         AgentKind::Codex,
+        layout,
         hooks_path,
         &hooks,
         pre_tool_use_pointer,
@@ -388,58 +404,180 @@ fn push_agent_path_check(report: &mut AgentStatusReport, name: &str, path: &Path
     }
 }
 
+struct ClaudeImportStatusSpec {
+    pointer: &'static str,
+    check_name: &'static str,
+    file_name: &'static str,
+    translate: fn(&str) -> Option<String>,
+    kind: ClaudeImportKind,
+    required_in_strict_mode: bool,
+}
+
 fn push_claude_import_status(
     report: &mut AgentStatusReport,
     settings: &serde_json::Value,
     layout: &HomeLayout,
-    pointer: &str,
-    check_name: &str,
-    file_name: &str,
-    translate: fn(&str) -> Option<String>,
+    spec: ClaudeImportStatusSpec,
 ) {
+    let ClaudeImportStatusSpec {
+        pointer,
+        check_name,
+        file_name,
+        translate,
+        kind,
+        required_in_strict_mode,
+    } = spec;
     let rules = native_permission_rules(settings, pointer);
     let (translated, skipped) = translate_claude_native_rules(&rules, translate);
     let path = layout.policy_dir.join(file_name);
-    if translated.is_empty() {
-        report.push(
+    let expected = match render_claude_permission_import(kind, &translated) {
+        Ok(expected) => expected,
+        Err(error) => {
+            report.push(
+                check_name,
+                AgentStatus::Fail,
+                format!("could not render expected native permission import: {error}"),
+                None,
+            );
+            return;
+        }
+    };
+    let current = if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(current) => Some(current),
+            Err(error) => {
+                report.push(
+                    check_name,
+                    AgentStatus::Fail,
+                    format!("could not read {}: {error}", path.display()),
+                    Some(path_details(&path)),
+                );
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let generated = current
+        .as_ref()
+        .is_some_and(|_| is_generated_claude_permission_import(&path, kind).unwrap_or(false));
+    let details = |content_state: &str| {
+        Some(serde_json::json!({
+            "path": path_display(&path),
+            "native_rules": rules.len(),
+            "importable_rules": translated.len(),
+            "skipped_rules": skipped.len(),
+            "content_state": content_state,
+            "policy_posture": if required_in_strict_mode { "strict" } else { "relaxed_or_custom" },
+        }))
+    };
+
+    match (required_in_strict_mode, expected.as_deref(), current.as_deref()) {
+        (true, None, None) => report.push(
             check_name,
             AgentStatus::Ok,
             format!("no importable native rules at {pointer}"),
-            Some(serde_json::json!({
-                "path": path_display(&path),
-                "native_rules": rules.len(),
-                "importable_rules": translated.len(),
-                "skipped_rules": skipped.len(),
-            })),
-        );
-    } else if path.exists() {
-        report.push(
+            details("absent_as_expected"),
+        ),
+        (true, Some(expected), Some(current)) if expected == current => report.push(
+            check_name,
+            AgentStatus::Ok,
+            format!("{} native deny rule(s) are synchronized", translated.len()),
+            details("current"),
+        ),
+        (true, Some(_), None) => report.push(
+            check_name,
+            AgentStatus::Fail,
+            format!(
+                "{} importable native deny rule(s) are missing from Gommage policy",
+                translated.len()
+            ),
+            details("missing"),
+        ),
+        (true, _, Some(_)) if generated => report.push(
+            check_name,
+            AgentStatus::Fail,
+            "generated native deny import is stale; rerun agent install",
+            details("stale_generated"),
+        ),
+        (true, _, Some(_)) => report.push(
+            check_name,
+            AgentStatus::Fail,
+            "custom or modified policy occupies the reserved native deny import path",
+            details("custom_reserved"),
+        ),
+        (false, _, None) => report.push(
             check_name,
             AgentStatus::Ok,
             format!(
-                "{} importable native rule(s) have a generated policy file",
+                "{} importable native allow rule(s) intentionally remain outside strict Gommage policy",
                 translated.len()
             ),
+            details("absent_strict"),
+        ),
+        (false, Some(expected), Some(current)) if generated && expected == current => report.push(
+            check_name,
+            AgentStatus::Warn,
+            "current generated native allow import is active in relaxed posture",
+            details("current_generated_relaxation"),
+        ),
+        (false, _, Some(_)) if generated => report.push(
+            check_name,
+            AgentStatus::Warn,
+            "generated native allow import is active but stale",
+            details("stale_generated_relaxation"),
+        ),
+        (false, _, Some(_)) => report.push(
+            check_name,
+            AgentStatus::Fail,
+            "custom or modified policy occupies the reserved native allow import path",
+            details("custom_reserved"),
+        ),
+    }
+}
+
+fn push_generated_policy_posture_status(report: &mut AgentStatusReport, layout: &HomeLayout) {
+    let mut active = Vec::new();
+    let mut modified = Vec::new();
+    for name in ["06-agent-config-writable.yaml", "95-agent-catch-all.yaml"] {
+        let path = layout.policy_dir.join(name);
+        if !path.exists() {
+            continue;
+        }
+        if is_generated_relaxation_layer(&path, name).unwrap_or(false) {
+            active.push(path_display(&path));
+        } else {
+            modified.push(path_display(&path));
+        }
+    }
+    if !modified.is_empty() {
+        report.push(
+            "policy_posture",
+            AgentStatus::Fail,
+            "custom or modified policy occupies a reserved broad-agent policy path",
             Some(serde_json::json!({
-                "path": path_display(&path),
-                "native_rules": rules.len(),
-                "importable_rules": translated.len(),
-                "skipped_rules": skipped.len(),
+                "policy_posture": "custom_reserved",
+                "modified_layers": modified,
+                "active_generated_layers": active,
             })),
+        );
+        return;
+    }
+    if active.is_empty() {
+        report.push(
+            "policy_posture",
+            AgentStatus::Ok,
+            "no generated broad agent policy layers are active",
+            Some(serde_json::json!({ "policy_posture": "strict" })),
         );
     } else {
         report.push(
-            check_name,
+            "policy_posture",
             AgentStatus::Warn,
-            format!(
-                "{} importable native rule(s) have not been converted into Gommage policy",
-                translated.len()
-            ),
+            "generated broad agent policy layers are active; run `gommage posture --json`",
             Some(serde_json::json!({
-                "path": path_display(&path),
-                "native_rules": rules.len(),
-                "importable_rules": translated.len(),
-                "skipped_rules": skipped.len(),
+                "policy_posture": "relaxed",
+                "active_layers": active,
             })),
         );
     }
@@ -462,15 +600,30 @@ struct HookEntry {
 fn push_hook_hygiene_report(
     report: &mut AgentStatusReport,
     agent: AgentKind,
+    layout: &HomeLayout,
     path: &Path,
     root: &serde_json::Value,
     pointer: &str,
 ) {
     let entries = gommage_hook_entries(root, pointer);
+    let expected = match render_agent_hook_command(agent, layout) {
+        Ok(expected) => expected,
+        Err(error) => {
+            report.push(
+                "hook_home",
+                AgentStatus::Fail,
+                format!(
+                    "could not resolve the canonical Gommage home for hook validation: {error}"
+                ),
+                Some(path_details(path)),
+            );
+            legacy_agent_hook_command(agent).to_string()
+        }
+    };
     let legacy = entries
         .iter()
         .filter(|entry| is_gommage_hook_command(&entry.command))
-        .filter(|entry| !is_canonical_hook_command(&entry.command, agent))
+        .filter(|entry| !is_canonical_hook_command(&entry.command, &expected))
         .map(hook_entry_json)
         .collect::<Vec<_>>();
     if !legacy.is_empty() {
@@ -479,7 +632,7 @@ fn push_hook_hygiene_report(
             AgentStatus::Warn,
             format!(
                 "legacy Gommage hook command(s) found; new installs use `{}`; run `gommage repair agent {} --dry-run`",
-                canonical_hook_command(agent),
+                expected,
                 agent.as_str(),
             ),
             Some(serde_json::json!({
@@ -491,25 +644,33 @@ fn push_hook_hygiene_report(
         );
     }
 
-    let aggressive = entries
+    let misbound = entries
         .iter()
-        .filter(|entry| matcher_is_global(&entry.matcher))
+        .filter(|entry| is_agent_hook_adapter(&entry.command, agent))
+        .filter(|entry| !is_canonical_hook_command(&entry.command, &expected))
         .map(hook_entry_json)
         .collect::<Vec<_>>();
-    if !aggressive.is_empty() {
+    if !misbound.is_empty() {
         report.push(
-            "hook_scope",
-            AgentStatus::Warn,
-            format!(
-                "Gommage hook matcher is global or missing; run `gommage repair agent {} --dry-run`",
-                agent.as_str()
-            ),
+            "hook_home",
+            AgentStatus::Fail,
+            format!("Gommage hook is not bound to this installation home; expected `{expected}`"),
             Some(serde_json::json!({
                 "path": path_display(path),
-                "pointer": pointer,
-                "hooks": aggressive,
+                "expected_command": expected,
+                "hooks": misbound,
                 "repair": format!("gommage repair agent {} --dry-run", agent.as_str()),
             })),
+        );
+    } else if entries
+        .iter()
+        .any(|entry| is_canonical_hook_command(&entry.command, &expected))
+    {
+        report.push(
+            "hook_home",
+            AgentStatus::Ok,
+            "Gommage hook is bound to the canonical installation home",
+            Some(serde_json::json!({ "expected_command": expected })),
         );
     }
 }
@@ -624,28 +785,26 @@ fn is_gommage_hook_command(command: &str) -> bool {
         || command_contains_gommage_subcommand(&command, "mcp")
 }
 
-fn is_canonical_hook_command(command: &str, agent: AgentKind) -> bool {
+fn is_agent_hook_adapter(command: &str, agent: AgentKind) -> bool {
     let command = command.to_ascii_lowercase();
     command_contains_gommage_subcommand(&command, "hook")
         && command_has_agent_arg(&command, agent.as_str())
 }
 
-fn canonical_hook_command(agent: AgentKind) -> &'static str {
-    match agent {
-        AgentKind::Claude => CLAUDE_GOMMAGE_HOOK_COMMAND,
-        AgentKind::Codex => CODEX_GOMMAGE_HOOK_COMMAND,
-    }
+fn is_canonical_hook_command(command: &str, expected: &str) -> bool {
+    command.trim() == expected
 }
 
 fn command_contains_gommage_subcommand(command: &str, subcommand: &str) -> bool {
-    command_tokens(command).windows(2).any(|pair| {
-        let Some(binary) = pair.first() else {
+    let tokens = command_tokens(command);
+    tokens.iter().enumerate().any(|(index, binary)| {
+        if !binary.ends_with("gommage") {
             return false;
-        };
-        let Some(arg) = pair.get(1) else {
-            return false;
-        };
-        binary.ends_with("gommage") && *arg == subcommand
+        }
+        let args = &tokens[index + 1..];
+        args.first().is_some_and(|arg| *arg == subcommand)
+            || matches!(args, ["--home", _, command, ..] if *command == subcommand)
+            || matches!(args, [home, command, ..] if home.starts_with("--home=") && *command == subcommand)
     })
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "gh-pr-merge-dynamic-target-fails-closed",
-  "call": { "tool": "Bash", "input": { "command": "gh pr merge \"$PR\" --repo Arakiss/galdr --squash" } },
+  "call": { "tool": "Bash", "input": { "command": "gh pr merge \"$PR\" --repo github.com/Arakiss/galdr --squash" } },
   "expected": {
     "kind": "gommage",
     "hard_stop": true,

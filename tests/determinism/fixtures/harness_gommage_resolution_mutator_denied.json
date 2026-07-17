@@ -1,0 +1,5 @@
+{
+  "name": "shell-resolution-mutator-cannot-share-gommage-authority",
+  "call": { "tool": "Bash", "input": { "command": "export PATH=/tmp:$PATH; gommage approval approve apr_1" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

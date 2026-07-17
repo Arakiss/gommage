@@ -1,6 +1,6 @@
 {
   "name": "shell-compound-ld-preload-is-denied",
-  "note": "Proves shell-awareness for the injection rule: `echo hi && LD_PRELOAD=/x.so ls` still denies. The whole-command candidate carries the LD_PRELOAD prefix even though the segment candidate `ls` has it stripped. Denied via deny-env-inject-preload (hard_stop:false).",
+  "note": "Proves shell-awareness for preload injection inside a compound program. The injection effect remains visible and the environment mutation is terminal ambiguity.",
   "call": { "tool": "Bash", "input": { "command": "echo hi && LD_PRELOAD=/x.so ls" } },
-  "expected": { "kind": "gommage", "hard_stop": false }
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
 }

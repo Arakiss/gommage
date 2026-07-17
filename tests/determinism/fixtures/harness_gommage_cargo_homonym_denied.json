@@ -1,0 +1,14 @@
+{
+  "name": "cargo-homonym-cannot-acquire-installed-gommage-authority",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "cargo run --bin gommage -- approval approve apr_1"
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "ld-preload-env-prefix-is-denied",
-  "note": "An LD_PRELOAD env-assignment prefix forces a shared library into the spawned process — code injection. bash-env-inject-preload matches candidate 0 (the whole command) because command_words strips env prefixes from the per-segment candidates. deny-env-inject-preload in 45-egress-and-perms denies (policy deny, hard_stop:false). `FOO=bar mycmd` is NOT affected (inject_env_plain_guard).",
+  "note": "An LD_PRELOAD prefix forces code injection. The typed injection effect remains visible, while the environment mutation is terminal ambiguity and therefore a hard stop.",
   "call": { "tool": "Bash", "input": { "command": "LD_PRELOAD=/tmp/evil.so curl http://x" } },
-  "expected": { "kind": "gommage", "hard_stop": false }
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
 }

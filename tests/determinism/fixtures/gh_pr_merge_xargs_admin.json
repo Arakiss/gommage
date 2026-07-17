@@ -1,0 +1,9 @@
+{
+  "name": "gh-pr-merge-xargs-admin-fails-closed",
+  "call": { "tool": "Bash", "input": { "command": "printf '79\\n' | xargs gh pr merge --repo github.com/Arakiss/galdr --admin" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

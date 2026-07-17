@@ -1,0 +1,5 @@
+{
+  "name": "untrusted-explicit-git-path-has-no-push-authority",
+  "call": { "tool": "Bash", "input": { "command": "/tmp/git push origin main" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

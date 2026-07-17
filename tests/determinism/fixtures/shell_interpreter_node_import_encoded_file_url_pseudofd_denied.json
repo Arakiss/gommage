@@ -1,0 +1,15 @@
+{
+  "name": "node-percent-encoded-file-url-pseudo-fd-import-preload-fails-closed",
+  "note": "The file URL path is percent-decoded before pseudo-fd classification so encoding a path component cannot bypass the guard.",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "node --import=file:///dev/%66d/3 /dev/null 3<<< \"console.error('NODE_IMPORT_ENCODED_FILE_URL_EXECUTED')\""
+    }
+  },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

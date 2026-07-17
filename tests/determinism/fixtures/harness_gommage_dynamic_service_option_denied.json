@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-service-killer-option-cannot-disable-gommage",
+  "call": { "tool": "Bash", "input": { "command": "pkill --signal \"$SIGNAL\" gommage-daemon" } },
+  "expected": { "kind": "gommage", "hard_stop": true, "matched_rule": "deny-ambiguous-shell-effects" }
+}

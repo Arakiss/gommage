@@ -50,6 +50,16 @@ fn run_mcp(home: &std::path::Path, payload: &[u8]) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+fn first_pending_request_id(home: &std::path::Path) -> String {
+    let output = gommage(home)
+        .args(["approval", "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let approvals: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    approvals[0]["request"]["id"].as_str().unwrap().to_string()
+}
+
 #[cfg(unix)]
 fn fake_curl(temp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
     use std::os::unix::fs::PermissionsExt;
@@ -125,7 +135,13 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
         request
             .pointer("/request/required_scope")
             .and_then(|value| value.as_str()),
-        Some("mcp.write")
+        Some("mcp.write:mcp__db__write_row")
+    );
+    assert_eq!(
+        request
+            .pointer("/request/bind_input")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
 
     let approve = gommage(&home)
@@ -160,7 +176,7 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
     );
     assert_eq!(
         approved.get("scope").and_then(|value| value.as_str()),
-        Some("mcp.write")
+        Some("mcp.write:mcp__db__write_row")
     );
     assert_eq!(
         approved.get("next_action").and_then(|value| value.as_str()),
@@ -173,17 +189,24 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
             .unwrap()
             .starts_with("picto_")
     );
+    let approved_picto_id = approved["picto_id"].as_str().unwrap().to_string();
     assert_eq!(
         approved
             .pointer("/picto/kind")
             .and_then(|value| value.as_str()),
-        Some("scope_only")
+        Some("exact_input")
+    );
+    assert_eq!(
+        approved
+            .pointer("/picto/input_bound")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
     assert_eq!(
         approved
             .pointer("/picto/authorizes")
             .and_then(|value| value.as_str()),
-        Some("any_matching_call_in_scope")
+        Some("only_the_exact_observed_tool_input")
     );
     assert_eq!(
         approved
@@ -207,7 +230,7 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
         approved
             .pointer("/picto/scope")
             .and_then(|value| value.as_str()),
-        Some("mcp.write")
+        Some("mcp.write:mcp__db__write_row")
     );
     assert_eq!(
         approved
@@ -229,6 +252,14 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
             .contains('T')
     );
 
+    let listed = gommage(&home).args(["list", "--json"]).output().unwrap();
+    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(listed[0]["binding"]["kind"], "exact_input");
+    assert_eq!(
+        listed[0]["binding"]["input_hash"],
+        request["request"]["input_hash"]
+    );
+
     let allowed = run_mcp(&home, payload);
     assert_eq!(
         allowed
@@ -241,10 +272,235 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
     assert!(audit.contains(r#""type":"approval_requested""#));
     assert!(audit.contains(r#""type":"approval_resolved""#));
     assert!(audit.contains(r#""type":"picto_consumed""#));
+    let allow_decision = audit
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|entry| entry["tool"] == "mcp__db__write_row" && entry["decision"]["kind"] == "allow")
+        .unwrap();
+    let consumed_event = audit
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|entry| entry["event"]["type"] == "picto_consumed")
+        .unwrap();
+    assert_eq!(
+        allow_decision["authorization"]["picto_id"],
+        approved_picto_id
+    );
+    assert_eq!(consumed_event["event"]["id"], approved_picto_id);
+    assert_eq!(
+        allow_decision["authorization"]["binding"]["kind"],
+        "exact_input"
+    );
+    assert_eq!(
+        allow_decision["authorization"]["binding"]["input_hash"],
+        request["request"]["input_hash"]
+    );
 }
 
 #[test]
-fn scope_only_probe_consumes_the_only_use_before_the_intended_retry() {
+fn approval_supersedes_stale_scope_without_minting_a_picto() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+    let request_id = first_pending_request_id(&home);
+
+    let policy_path = home.join("policy.d/15-agent-tools.yaml");
+    let policy = fs::read_to_string(&policy_path).unwrap();
+    let changed = policy.replacen(
+        "required_scope_from_capability: \"mcp.write:*\"",
+        "required_scope: \"mcp.write.changed\"",
+        1,
+    );
+    assert_ne!(changed, policy);
+    fs::write(policy_path, changed).unwrap();
+
+    let approve = gommage(&home)
+        .args(["approval", "approve", &request_id, "--json"])
+        .output()
+        .unwrap();
+    assert!(!approve.status.success());
+    assert!(String::from_utf8_lossy(&approve.stderr).contains("was superseded"));
+
+    let state = gommage(&home)
+        .args(["approval", "show", &request_id, "--json"])
+        .output()
+        .unwrap();
+    let state: serde_json::Value = serde_json::from_slice(&state.stdout).unwrap();
+    assert_eq!(state["status"], "superseded");
+    assert_eq!(state["resolution"]["picto_id"], serde_json::Value::Null);
+
+    let pictos = gommage(&home).args(["list", "--json"]).output().unwrap();
+    let pictos: serde_json::Value = serde_json::from_slice(&pictos.stdout).unwrap();
+    assert_eq!(pictos, serde_json::json!([]));
+}
+
+#[test]
+fn approval_supersedes_stale_binding_without_minting_a_picto() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    let payload =
+        br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
+    let _ = run_mcp(&home, payload);
+    let request_id = first_pending_request_id(&home);
+
+    let policy_path = home.join("policy.d/15-agent-tools.yaml");
+    let policy = fs::read_to_string(&policy_path).unwrap();
+    let changed = policy.replacen("bind_input: true", "bind_input: false", 1);
+    assert_ne!(changed, policy);
+    fs::write(policy_path, changed).unwrap();
+
+    let approve = gommage(&home)
+        .args(["approval", "approve", &request_id, "--json"])
+        .output()
+        .unwrap();
+    assert!(!approve.status.success());
+    assert!(String::from_utf8_lossy(&approve.stderr).contains("was superseded"));
+
+    let state = gommage(&home)
+        .args(["approval", "show", &request_id, "--json"])
+        .output()
+        .unwrap();
+    let state: serde_json::Value = serde_json::from_slice(&state.stdout).unwrap();
+    assert_eq!(state["status"], "superseded");
+    let pictos = gommage(&home).args(["list", "--json"]).output().unwrap();
+    let pictos: serde_json::Value = serde_json::from_slice(&pictos.stdout).unwrap();
+    assert_eq!(pictos, serde_json::json!([]));
+}
+
+#[test]
+fn consumed_scope_picto_satisfies_matching_pending_request_and_signs_evidence() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    let payload = br#"{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/docs"}}"#;
+    let ask = run_mcp(&home, payload);
+    assert_eq!(
+        ask.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("ask")
+    );
+    let request_id = first_pending_request_id(&home);
+
+    let grant = gommage(&home)
+        .args([
+            "grant",
+            "--scope",
+            "net.fetch",
+            "--uses",
+            "1",
+            "--reason",
+            "approved exact retry window",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        grant.status.success(),
+        "{}",
+        String::from_utf8_lossy(&grant.stderr)
+    );
+    let pictos = gommage(&home).args(["list", "--json"]).output().unwrap();
+    let pictos: serde_json::Value = serde_json::from_slice(&pictos.stdout).unwrap();
+    let granted_picto_id = pictos[0]["id"].as_str().unwrap().to_string();
+
+    let allowed = run_mcp(&home, payload);
+    assert_eq!(
+        allowed
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+    let state = gommage(&home)
+        .args(["approval", "show", &request_id, "--json"])
+        .output()
+        .unwrap();
+    let state: serde_json::Value = serde_json::from_slice(&state.stdout).unwrap();
+    assert_eq!(state["status"], "satisfied");
+    assert_eq!(state["resolution"]["picto_id"], granted_picto_id);
+
+    let audit = fs::read_to_string(home.join("audit.log")).unwrap();
+    let decision = audit
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|entry| entry["tool"] == "WebFetch" && entry["decision"]["kind"] == "allow")
+        .expect("allow decision is audited");
+    assert_eq!(decision["v"], 3);
+    assert_eq!(decision["authorization"]["picto_id"], granted_picto_id);
+    assert_eq!(decision["authorization"]["scope"], "net.fetch");
+    assert_eq!(decision["authorization"]["binding"]["kind"], "scope_only");
+}
+
+#[test]
+fn scope_only_picto_authorizes_a_different_input_in_the_same_scope() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    setup_home(&home);
+    let original = br#"{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/original"}}"#;
+    let different = br#"{"hook_event_name":"PreToolUse","tool_name":"WebFetch","tool_input":{"url":"https://example.com/different"}}"#;
+
+    let ask = run_mcp(&home, original);
+    assert_eq!(
+        ask.pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("ask")
+    );
+    let request_id = first_pending_request_id(&home);
+
+    let grant = gommage(&home)
+        .args([
+            "grant",
+            "--scope",
+            "net.fetch",
+            "--uses",
+            "1",
+            "--reason",
+            "scope-only regression",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        grant.status.success(),
+        "{}",
+        String::from_utf8_lossy(&grant.stderr)
+    );
+
+    let allowed = run_mcp(&home, different);
+    assert_eq!(
+        allowed
+            .pointer("/hookSpecificOutput/permissionDecision")
+            .and_then(serde_json::Value::as_str),
+        Some("allow")
+    );
+
+    let state = gommage(&home)
+        .args(["approval", "show", &request_id, "--json"])
+        .output()
+        .unwrap();
+    let state: serde_json::Value = serde_json::from_slice(&state.stdout).unwrap();
+    assert_eq!(state["status"], "pending");
+
+    let audit = fs::read_to_string(home.join("audit.log")).unwrap();
+    let records = audit
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>();
+    let request = records
+        .iter()
+        .find(|entry| entry["event"]["type"] == "approval_requested")
+        .expect("original request is audited");
+    let decision = records
+        .iter()
+        .find(|entry| entry["tool"] == "WebFetch" && entry["decision"]["kind"] == "allow")
+        .expect("different input is allowed and audited");
+    assert_ne!(request["event"]["input_hash"], decision["input_hash"]);
+    assert_eq!(decision["authorization"]["binding"]["kind"], "scope_only");
+}
+
+#[test]
+fn input_bound_probe_does_not_consume_the_only_use_before_the_intended_retry() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     setup_home(&home);
@@ -274,10 +530,10 @@ fn scope_only_probe_consumes_the_only_use_before_the_intended_retry() {
         .unwrap();
     assert!(approve.status.success());
     let approved: serde_json::Value = serde_json::from_slice(&approve.stdout).unwrap();
-    assert_eq!(approved["picto"]["kind"], "scope_only");
+    assert_eq!(approved["picto"]["kind"], "exact_input");
     assert_eq!(
         approved["picto"]["authorizes"],
-        "any_matching_call_in_scope"
+        "only_the_exact_observed_tool_input"
     );
     assert_eq!(
         approved["picto"]["consumption"],
@@ -291,7 +547,7 @@ fn scope_only_probe_consumes_the_only_use_before_the_intended_retry() {
         probe
             .pointer("/hookSpecificOutput/permissionDecision")
             .and_then(|value| value.as_str()),
-        Some("allow")
+        Some("ask")
     );
 
     let retry = run_mcp(&home, intended_payload);
@@ -299,14 +555,7 @@ fn scope_only_probe_consumes_the_only_use_before_the_intended_retry() {
         retry
             .pointer("/hookSpecificOutput/permissionDecision")
             .and_then(|value| value.as_str()),
-        Some("ask")
-    );
-    assert!(
-        retry
-            .pointer("/hookSpecificOutput/permissionDecisionReason")
-            .and_then(|value| value.as_str())
-            .unwrap()
-            .contains("approval request apr_")
+        Some("allow")
     );
 }
 
@@ -315,20 +564,6 @@ fn input_bound_approval_does_not_unlock_a_different_mcp_write() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     setup_home(&home);
-    fs::write(
-        home.join("policy.d/00-input-bound-mcp.yaml"),
-        r#"
-- name: input-bound-mcp-write
-  decision: ask_picto
-  required_scope: "mcp.write"
-  bind_input: true
-  match:
-    any_capability:
-      - "mcp.write:*"
-  reason: "this write needs approval for its exact input"
-"#,
-    )
-    .unwrap();
 
     let approved_payload =
         br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
@@ -418,20 +653,6 @@ fn signed_approval_callback_dry_run_and_apply_approve_pending_request() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     setup_home(&home);
-    fs::write(
-        home.join("policy.d/00-input-bound-mcp.yaml"),
-        r#"
-- name: input-bound-mcp-write
-  decision: ask_picto
-  required_scope: "mcp.write"
-  bind_input: true
-  match:
-    any_capability:
-      - "mcp.write:*"
-  reason: "this write needs approval for its exact input"
-"#,
-    )
-    .unwrap();
 
     let payload =
         br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
@@ -559,7 +780,7 @@ fn approval_human_output_is_scannable_for_operators() {
     assert!(list_stdout.contains("Approval inbox"));
     assert!(list_stdout.contains("filter:   pending"));
     assert!(list_stdout.contains("requests: 1"));
-    assert!(list_stdout.contains("  scope:  mcp.write"));
+    assert!(list_stdout.contains("  scope:  mcp.write:mcp__db__write_row"));
     assert!(list_stdout.contains("  next:   gommage approval show apr_"));
 
     let output = gommage(&home)
@@ -582,7 +803,7 @@ fn approval_human_output_is_scannable_for_operators() {
     assert!(show_stdout.contains("Approval request"));
     assert!(show_stdout.contains("status:  pending"));
     assert!(show_stdout.contains("Capabilities"));
-    assert!(show_stdout.contains("- mcp.write"));
+    assert!(show_stdout.contains("- mcp.write:mcp__db__write_row"));
     assert!(show_stdout.contains("approve: gommage approval approve apr_"));
 
     let approve = gommage(&home)
@@ -599,14 +820,16 @@ fn approval_human_output_is_scannable_for_operators() {
     let approve_stdout = String::from_utf8(approve.stdout).unwrap();
     assert!(approve_stdout.contains("Approval granted"));
     assert!(approve_stdout.contains("status:  approved"));
-    assert!(approve_stdout.contains("scope:   mcp.write"));
+    assert!(approve_stdout.contains("scope:   mcp.write:mcp__db__write_row"));
     assert!(approve_stdout.contains("Picto minted"));
-    assert!(approve_stdout.contains("kind:    scope-only"));
-    assert!(approve_stdout.contains("binding: scope only — not tied to the request input hash"));
+    assert!(approve_stdout.contains("kind:    exact-input"));
+    assert!(approve_stdout.contains("binding: exact tool input only"));
     assert!(
         approve_stdout.contains("spends:  one use per matching call; non-matches do not consume")
     );
-    assert!(approve_stdout.contains("next:    retry the intended blocked call directly"));
+    assert!(approve_stdout.contains(
+        "next:    retry the intended blocked call; only the exact-input match spends a use"
+    ));
 }
 
 #[test]
@@ -1147,20 +1370,6 @@ fn approval_webhook_can_shape_slack_payloads() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     setup_home(&home);
-    fs::write(
-        home.join("policy.d/00-input-bound-mcp.yaml"),
-        r#"
-- name: input-bound-mcp-write
-  decision: ask_picto
-  required_scope: "mcp.write"
-  bind_input: true
-  match:
-    any_capability:
-      - "mcp.write:*"
-  reason: "this write needs approval for its exact input"
-"#,
-    )
-    .unwrap();
 
     let payload =
         br#"{"hook_event_name":"PreToolUse","tool_name":"mcp__db__write_row","tool_input":{"table":"users"}}"#;
@@ -1301,6 +1510,18 @@ fn approval_replay_and_evidence_are_machine_readable() {
     let approvals: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let request_id = approvals[0]["request"]["id"].as_str().unwrap();
 
+    for name in [
+        "key.ed25519",
+        "pictos.sqlite",
+        "pictos.sqlite-wal",
+        "pictos.sqlite-shm",
+    ] {
+        let path = home.join(name);
+        if path.exists() {
+            fs::remove_file(path).unwrap();
+        }
+    }
+
     let replay = gommage(&home)
         .args(["approval", "replay", request_id, "--json"])
         .output()
@@ -1319,6 +1540,17 @@ fn approval_replay_and_evidence_are_machine_readable() {
         replay.get("conclusion").and_then(|value| value.as_str()),
         Some("still_requires_same_scope")
     );
+    for name in [
+        "key.ed25519",
+        "pictos.sqlite",
+        "pictos.sqlite-wal",
+        "pictos.sqlite-shm",
+    ] {
+        assert!(
+            !home.join(name).exists(),
+            "approval replay recreated read-only state {name}"
+        );
+    }
 
     let evidence_path = temp.path().join("approval-evidence.json");
     let evidence = gommage(&home)

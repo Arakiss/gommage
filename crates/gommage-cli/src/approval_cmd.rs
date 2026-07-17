@@ -4,9 +4,9 @@ use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
     ApprovalState, ApprovalStatus, ApprovalStore, ApprovalWebhookDeadLetter,
     ApprovalWebhookDeadLetterStore, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
-    ApprovalWebhookSource, PictoStore, approval_callback_nonce, deliver_prepared_approval_webhook,
-    prepare_approval_webhook,
-    runtime::HomeLayout,
+    ApprovalWebhookSource, Decision, PictoStore, approval_callback_nonce,
+    deliver_prepared_approval_webhook, evaluate, prepare_approval_webhook,
+    runtime::{HomeLayout, PolicyReadModel},
     webhook_signature::{
         WebhookSignatureReport, WebhookSignatureVerification, verify_webhook_body,
     },
@@ -188,6 +188,8 @@ pub(crate) enum ApprovalStatusArg {
     Pending,
     Approved,
     Denied,
+    Satisfied,
+    Superseded,
 }
 
 impl ApprovalStatusArg {
@@ -197,6 +199,8 @@ impl ApprovalStatusArg {
             ApprovalStatusArg::Pending => Some(ApprovalStatus::Pending),
             ApprovalStatusArg::Approved => Some(ApprovalStatus::Approved),
             ApprovalStatusArg::Denied => Some(ApprovalStatus::Denied),
+            ApprovalStatusArg::Satisfied => Some(ApprovalStatus::Satisfied),
+            ApprovalStatusArg::Superseded => Some(ApprovalStatus::Superseded),
         }
     }
 
@@ -206,6 +210,8 @@ impl ApprovalStatusArg {
             ApprovalStatusArg::Pending => "pending",
             ApprovalStatusArg::Approved => "approved",
             ApprovalStatusArg::Denied => "denied",
+            ApprovalStatusArg::Satisfied => "satisfied",
+            ApprovalStatusArg::Superseded => "superseded",
         }
     }
 }
@@ -712,6 +718,33 @@ pub(crate) fn approve_request(
         anyhow::bail!("approval request {id:?} is {}", state.status.as_str());
     }
 
+    let read_model = PolicyReadModel::load(layout).context("loading current policy")?;
+    let replay = evaluate(&state.request.capabilities, &read_model.policy);
+    let replay_matches = matches!(
+        &replay.decision,
+        Decision::AskPicto {
+            required_scope,
+            bind_input,
+            ..
+        } if required_scope == &state.request.required_scope
+            && *bind_input == state.request.bind_input
+    );
+    if !replay_matches {
+        let replay_reason = format!(
+            "current policy no longer requires the same scope and binding (current decision: {})",
+            decision_summary(&replay.decision)
+        );
+        let resolution = store.resolve(id, ApprovalStatus::Superseded, &replay_reason, None)?;
+        let sk = layout.load_key()?;
+        AuditWriter::open(&layout.audit_log, sk)?.append_event(AuditEvent::ApprovalResolved {
+            id: resolution.request_id,
+            status: resolution.status.as_str().to_string(),
+            reason: resolution.reason,
+            picto_id: None,
+        })?;
+        anyhow::bail!("approval request {id:?} was superseded: {replay_reason}");
+    }
+
     let sk = layout.load_key()?;
     let pictos = PictoStore::open(&layout.pictos_db)?;
     let picto_id = format!("picto_{}", uuid::Uuid::now_v7());
@@ -811,6 +844,20 @@ pub(crate) fn approve_request(
             )
         },
     })
+}
+
+fn decision_summary(decision: &Decision) -> String {
+    match decision {
+        Decision::Allow => "allow".to_string(),
+        Decision::Gommage { reason, hard_stop } => {
+            format!("gommage(hard_stop={hard_stop}, reason={reason})")
+        }
+        Decision::AskPicto {
+            required_scope,
+            bind_input,
+            ..
+        } => format!("ask_picto(scope={required_scope}, bind_input={bind_input})"),
+    }
 }
 
 fn approval_deny(layout: HomeLayout, id: &str, reason: &str, json: bool) -> Result<ExitCode> {
@@ -1417,6 +1464,8 @@ fn approval_status_tone(status: ApprovalStatus) -> UiTone {
         ApprovalStatus::Pending => UiTone::Gold,
         ApprovalStatus::Approved => UiTone::Green,
         ApprovalStatus::Denied => UiTone::Red,
+        ApprovalStatus::Satisfied => UiTone::Green,
+        ApprovalStatus::Superseded => UiTone::Muted,
     }
 }
 

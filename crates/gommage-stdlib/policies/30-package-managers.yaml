@@ -1,5 +1,42 @@
 # Package manager policy defaults.
 
+- name: allow-package-manager-information
+  decision: allow
+  match:
+    any_capability:
+      - "proc.exec:cargo publish --help"
+      - "proc.exec:cargo publish -h"
+      - "proc.exec:cargo publish --version"
+      - "proc.exec:cargo install --help"
+      - "proc.exec:cargo install -h"
+      - "proc.exec:cargo help publish"
+      - "proc.exec:cargo help install"
+      - "proc.exec:cargo --help publish"
+      - "proc.exec:cargo --help install"
+      - "proc.exec:npm publish --help"
+      - "proc.exec:npm publish -h"
+      - "proc.exec:npm install --help"
+      - "proc.exec:npm install -h"
+      - "proc.exec:bun publish --help"
+      - "proc.exec:bun publish -h"
+      - "proc.exec:bun add --help"
+      - "proc.exec:bun add -h"
+      - "proc.exec:twine upload --help"
+      - "proc.exec:twine upload -h"
+      - "proc.exec:pip upload --help"
+      - "proc.exec:pip upload -h"
+      - "proc.exec:python -m twine upload --help"
+      - "proc.exec:python3 -m twine upload --help"
+      - "proc.exec:./scripts/publish-crates.sh --execute --help"
+      - "proc.exec:sh scripts/publish-crates.sh --help --execute"
+    none_capability:
+      - "pkg.bun:publish"
+      - "pkg.npm:publish"
+      - "pkg.cargo:publish"
+      - "pkg.python:publish"
+      - "proc.exec.ambiguous:*"
+  reason: "known package-manager help and version forms exit before mutation"
+
 - name: allow-bun-install
   decision: allow
   match:
@@ -31,6 +68,16 @@
 # --- Supply-chain publish: irreversible registry mutation -------------------
 # Publishing a package to a public registry cannot be undone (versions are
 # immutable). Gate the publish verb with a picto; install/build/test stay free.
+
+- name: gate-bun-publish
+  decision: ask_picto
+  required_scope: "pkg.bun:publish"
+  match:
+    all_capability:
+      - "pkg.bun:publish"
+      - "net.out:registry.npmjs.org"
+      - "proc.exec:**bun publish**"
+  reason: "bun publish pushes to the public registry; a published version cannot be replaced"
 
 - name: gate-npm-publish
   decision: ask_picto

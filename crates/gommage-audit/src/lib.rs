@@ -3,9 +3,10 @@
 //! Each decision produces one JSONL line of the form:
 //!
 //! ```json
-//! {"v":2,"id":"...","ts":"...","tool":"Bash","input_hash":"sha256:...",
+//! {"v":3,"id":"...","ts":"...","tool":"Bash","input_hash":"sha256:...",
 //!  "capabilities":["git.push:refs/heads/main"],"decision":{...},
 //!  "capability_provenance":[],
+//!  "authorization":null,
 //!  "matched_rule":{"name":"gate-main-push","file":"...","index":0},
 //!  "policy_version":"sha256:...","sig":"ed25519:..."}
 //! ```
@@ -16,7 +17,10 @@
 //! not prove that valid records were never deleted, reordered, or duplicated.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use gommage_core::{Capability, CapabilityProvenance, Decision, EvalResult, MatchedRule, ToolCall};
+use gommage_core::{
+    AuthorizationEvidence, Capability, CapabilityProvenance, Decision, EvalResult, MatchedRule,
+    ToolCall,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
@@ -54,7 +58,8 @@ pub enum AuditError {
 }
 
 const LEGACY_DECISION_SCHEMA_VERSION: u32 = 1;
-const DECISION_SCHEMA_VERSION: u32 = 2;
+const PROVENANCE_DECISION_SCHEMA_VERSION: u32 = 2;
+const DECISION_SCHEMA_VERSION: u32 = 3;
 const EVENT_SCHEMA_VERSION: u32 = 1;
 const DECISION_V1_FIELDS: &[&str] = &[
     "v",
@@ -83,6 +88,21 @@ const DECISION_V2_FIELDS: &[&str] = &[
     "expedition",
     "sig",
 ];
+const DECISION_V3_FIELDS: &[&str] = &[
+    "v",
+    "id",
+    "ts",
+    "tool",
+    "input_hash",
+    "capabilities",
+    "capability_provenance",
+    "decision",
+    "authorization",
+    "matched_rule",
+    "policy_version",
+    "expedition",
+    "sig",
+];
 const EVENT_V1_FIELDS: &[&str] = &["v", "id", "ts", "kind", "event", "sig"];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -101,6 +121,10 @@ pub struct AuditEntry {
     #[serde(default)]
     pub capability_provenance: Vec<CapabilityProvenance>,
     pub decision: Decision,
+    /// The Picto authority consumed for this decision, if any. V3 records
+    /// always serialize this field, including `null`.
+    #[serde(default)]
+    pub authorization: Option<AuthorizationEvidence>,
     pub matched_rule: Option<MatchedRule>,
     pub policy_version: String,
     pub expedition: Option<String>,
@@ -116,8 +140,9 @@ impl Serialize for AuditEntry {
         use serde::ser::SerializeStruct;
 
         let include_provenance = self.version != LEGACY_DECISION_SCHEMA_VERSION;
-        let mut entry =
-            serializer.serialize_struct("AuditEntry", if include_provenance { 12 } else { 11 })?;
+        let include_authorization = self.version >= DECISION_SCHEMA_VERSION;
+        let field_count = 11 + usize::from(include_provenance) + usize::from(include_authorization);
+        let mut entry = serializer.serialize_struct("AuditEntry", field_count)?;
         entry.serialize_field("v", &self.version)?;
         entry.serialize_field("id", &self.id)?;
         entry.serialize_field("ts", &self.ts)?;
@@ -128,6 +153,9 @@ impl Serialize for AuditEntry {
             entry.serialize_field("capability_provenance", &self.capability_provenance)?;
         }
         entry.serialize_field("decision", &self.decision)?;
+        if include_authorization {
+            entry.serialize_field("authorization", &self.authorization)?;
+        }
         entry.serialize_field("matched_rule", &self.matched_rule)?;
         entry.serialize_field("policy_version", &self.policy_version)?;
         entry.serialize_field("expedition", &self.expedition)?;
@@ -284,22 +312,20 @@ impl AuditWriter {
             capabilities: eval.capabilities.clone(),
             capability_provenance: eval.capability_provenance.clone(),
             decision: eval.decision.clone(),
+            authorization: eval.authorization.clone(),
             matched_rule: eval.matched_rule.clone(),
             policy_version: eval.policy_version.clone(),
             expedition: expedition.map(str::to_string),
             sig: String::new(),
         };
-        let payload = canonical_decision_v2_bytes(&entry);
+        let payload = canonical_decision_v3_bytes(&entry);
         let sig: Signature = self.key.sign(&payload);
         entry.sig = format!(
             "ed25519:{}",
             base64::encode_standard_no_pad(sig.to_bytes().as_slice())
         );
 
-        let line = serde_json::to_string(&entry)?;
-        self.file.write_all(line.as_bytes())?;
-        self.file.write_all(b"\n")?;
-        self.file.flush()?;
+        self.append_record(&entry)?;
         Ok(entry)
     }
 
@@ -321,11 +347,27 @@ impl AuditWriter {
             base64::encode_standard_no_pad(sig.to_bytes().as_slice())
         );
 
-        let line = serde_json::to_string(&entry)?;
-        self.file.write_all(line.as_bytes())?;
-        self.file.write_all(b"\n")?;
-        self.file.flush()?;
+        self.append_record(&entry)?;
         Ok(entry)
+    }
+
+    fn append_record(&mut self, entry: &impl Serialize) -> Result<(), AuditError> {
+        let mut line = serde_json::to_vec(entry)?;
+        line.push(b'\n');
+
+        self.file.lock()?;
+        let write_result = (|| -> Result<(), AuditError> {
+            self.file.write_all(&line)?;
+            self.file.sync_data()?;
+            Ok(())
+        })();
+        let unlock_result = File::unlock(&self.file).map_err(AuditError::from);
+
+        match (write_result, unlock_result) {
+            (Err(write_error), _) => Err(write_error),
+            (Ok(()), Err(unlock_error)) => Err(unlock_error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -334,6 +376,7 @@ impl AuditWriter {
 }
 
 /// Canonical bytes of a v2 decision entry **without** the `sig` field.
+#[cfg(test)]
 fn canonical_decision_v2_bytes(e: &AuditEntry) -> Vec<u8> {
     let obj = serde_json::json!({
         "v": e.version,
@@ -344,6 +387,25 @@ fn canonical_decision_v2_bytes(e: &AuditEntry) -> Vec<u8> {
         "capabilities": e.capabilities,
         "capability_provenance": e.capability_provenance,
         "decision": e.decision,
+        "matched_rule": e.matched_rule,
+        "policy_version": e.policy_version,
+        "expedition": e.expedition,
+    });
+    canonical_render(&obj).into_bytes()
+}
+
+/// Canonical bytes of a v3 decision entry **without** the `sig` field.
+fn canonical_decision_v3_bytes(e: &AuditEntry) -> Vec<u8> {
+    let obj = serde_json::json!({
+        "v": e.version,
+        "id": e.id,
+        "ts": e.ts,
+        "tool": e.tool,
+        "input_hash": e.input_hash,
+        "capabilities": e.capabilities,
+        "capability_provenance": e.capability_provenance,
+        "decision": e.decision,
+        "authorization": e.authorization,
         "matched_rule": e.matched_rule,
         "policy_version": e.policy_version,
         "expedition": e.expedition,
@@ -573,7 +635,7 @@ fn parse_record(line: &str, line_number: usize) -> Result<ParsedRecord, AuditErr
             }
             DECISION_V1_FIELDS
         }
-        version if version == u64::from(DECISION_SCHEMA_VERSION) => {
+        version if version == u64::from(PROVENANCE_DECISION_SCHEMA_VERSION) => {
             if value.get("capability_provenance").is_none() {
                 return Err(AuditError::InvalidSchema {
                     line: line_number,
@@ -582,6 +644,23 @@ fn parse_record(line: &str, line_number: usize) -> Result<ParsedRecord, AuditErr
                 });
             }
             DECISION_V2_FIELDS
+        }
+        version if version == u64::from(DECISION_SCHEMA_VERSION) => {
+            if value.get("capability_provenance").is_none() {
+                return Err(AuditError::InvalidSchema {
+                    line: line_number,
+                    record_kind: "decision",
+                    reason: "v3 requires capability_provenance".to_string(),
+                });
+            }
+            if value.get("authorization").is_none() {
+                return Err(AuditError::InvalidSchema {
+                    line: line_number,
+                    record_kind: "decision",
+                    reason: "v3 requires authorization (null when unused)".to_string(),
+                });
+            }
+            DECISION_V3_FIELDS
         }
         version => {
             return Err(AuditError::UnsupportedSchema {

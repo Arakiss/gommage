@@ -11,6 +11,23 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ## [Unreleased]
 
+### Security
+
+- GitHub pull-request merge authority now binds to an explicit
+  `HOST/OWNER/REPOSITORY#PR` identity. Numeric targets without a host, compound
+  merge programs, decoy-plus-admin payloads, repeating dispatchers, and option
+  values that resemble repository selectors fail closed instead of inheriting
+  the current checkout or ambient `GH_HOST`. Merge body files emit secret-aware
+  filesystem read effects. Administrative merges additionally require a static
+  40- or 64-hex `--match-head-commit`; deleting the remote branch has its own
+  input-bound authority scope, including a combined scope when used with
+  `--admin`.
+- Shell analysis now treats environment-changing wrappers, assignment-bearing
+  control flow, generated dispatch, dynamic file descriptors, here documents,
+  and direct daemon invocation conservatively. It preserves the typed effect of
+  any inner Gommage or GitHub operation while refusing to certify execution
+  context that cannot be resolved statically.
+
 ### Changed
 
 - Approval action JSON is now schema version 2. Scope-wide grants are named
@@ -83,15 +100,56 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   and strict read-only Picto SQLite access. They cannot create a home, generate
   a key, migrate a legacy database, or leave WAL/SHM sidecars; commands that
   need runtime state retain the explicit initialization path.
+- Agent installation and quickstart now use a strict policy posture by default:
+  generated broad shell/file allow layers and imported native allow rules are
+  absent unless the operator explicitly selects `--relaxed`. Moving from the
+  former generated posture backs up and removes only recognized Gommage files;
+  static generated files require canonical byte equality and dynamic native
+  imports require a valid content digest and constrained generated rule shape.
+  Digest-less legacy imports require operator review and are never replaced or
+  removed automatically.
+  Custom or modified content at a reserved path blocks the operation before
+  any integration write. Standalone agent installation journals selected host
+  config and reserved policy files. Quickstart starts a broader filesystem
+  journal before home initialization, covering directory modes, key, bundled
+  defaults, runtime/context paths, host config, backups, and the optional
+  service definition. Generated native imports synchronize independently of
+  `--replace-hooks` while import remains enabled and are removed with a backup
+  when their source becomes empty. Successful policy mutations make one fully
+  bounded daemon reload request; rollback may make a second request for
+  restored files. Only missing/refused sockets are treated as unavailable.
+  Other connection errors, timeout, malformed, incomplete, oversized, or
+  rejected responses fail setup. Optional daemon setup now preflights a
+  canonical regular executable and compensates failed activation back to the
+  previous service bytes and loaded/enabled state.
 
 ### Fixed
 
-- GitHub pull-request merge effects now bind the canonical host, repository,
+- Package installation and registry-publication capabilities now come from the
+  quote-preserving argv analyzer instead of regexes over command text. Known
+  `--help`, `-h`, and version forms no longer request or consume publication
+  authority, while a real publish in any sibling shell segment remains gated.
+  `bun publish` now receives its own input-bound public-registry gate instead of
+  falling through as raw execution.
+- Daemon uninstall now journals both the service definition and live manager
+  state, treats stop/reload failures as errors, verifies that the unit is truly
+  absent, and restores the prior file and enablement/activity state when a later
+  step fails. Service mutation also refuses a definition bound to a different
+  Gommage home, and cleanup removes broken symlinks without following them.
+
+- GitHub pull-request merge effects now bind the normalized explicit host, repository,
   and PR number from an explicit `-R` / `--repo` selector or exact PR URL.
   Dynamic targets, ambient `GH_REPO`, current-directory inference, conflicting
   repositories, and branch-name targets fail closed. Administrative merges are
   input-bound, and `--admin=false` no longer requests administrative authority.
   Numeric merge targets without an explicit repository must add `--repo`.
+  `--body-file` now emits its local read and outbound POST effects and uses
+  input-bound body-file scopes, including distinct admin/delete combinations;
+  opaque stdin and compound privileged merge scripts fail closed.
+- Read-only policy, posture, sandbox, expedition-status, snapshot, capture,
+  suggestion, and approval-replay commands no longer initialize an absent home,
+  generate a signing key, create SQLite sidecars, or mutate an existing
+  uninitialized directory.
 - `gommage uninstall --purge-home` now validates the selected home and removes
   only Gommage's known inventory. It rejects filesystem roots, the operator
   home and its ancestors, symlinked roots, and unrecognized custom directories;

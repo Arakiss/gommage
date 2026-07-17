@@ -1,0 +1,10 @@
+{
+  "name": "gommage-recovery-command-does-not-authorize-a-sibling-execution",
+  "note": "Each static shell execution emits independent authority, and opaque Python inline code is terminal ambiguity rather than an unresolved raw sibling.",
+  "call": { "tool": "Bash", "input": { "command": "gommage doctor && python3 -c 'print(1)'" } },
+  "expected": {
+    "kind": "gommage",
+    "hard_stop": true,
+    "matched_rule": "deny-ambiguous-shell-effects"
+  }
+}

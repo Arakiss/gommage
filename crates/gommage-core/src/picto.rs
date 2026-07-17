@@ -15,9 +15,11 @@
 
 use crate::error::GommageError;
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior, params,
+};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{path::Path, time::Duration};
 use time::{OffsetDateTime, UtcOffset};
 
 const MAX_PICTO_TTL_SECONDS: i64 = 86_400;
@@ -25,6 +27,7 @@ const MAX_PICTO_ID_BYTES: usize = 128;
 const MAX_PICTO_SCOPE_BYTES: usize = 512;
 const MAX_PICTO_REASON_BYTES: usize = 4 * 1024;
 const ED25519_SIGNATURE_B64_BYTES: usize = 86;
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -45,6 +48,35 @@ impl PictoStatus {
     }
 }
 
+/// The signed authority boundary carried by a Picto.
+///
+/// `ScopeOnly` is the legacy v1 shape. `ExactInput` appends the canonical
+/// `ToolCall::input_hash` to the otherwise byte-identical v1 signing payload.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PictoBinding {
+    /// Authorizes any matching call in the exact Picto scope.
+    #[default]
+    ScopeOnly,
+    /// Authorizes only the exact canonical tool call whose hash was signed.
+    ExactInput { input_hash: String },
+}
+
+impl PictoBinding {
+    /// Return the canonical input hash when this Picto is exact-input bound.
+    pub fn input_hash(&self) -> Option<&str> {
+        match self {
+            Self::ScopeOnly => None,
+            Self::ExactInput { input_hash } => Some(input_hash),
+        }
+    }
+
+    /// Whether this Picto is restricted to one canonical tool input.
+    pub fn is_exact_input(&self) -> bool {
+        matches!(self, Self::ExactInput { .. })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Picto {
     pub id: String,
@@ -56,12 +88,9 @@ pub struct Picto {
     pub status: PictoStatus,
     pub reason: String,
     pub signature_b64: String,
-}
-
-#[derive(Debug, Clone)]
-struct StoredPicto {
-    picto: Picto,
-    input_hash: Option<String>,
+    /// Signed authority binding. Absent legacy JSON means scope-only.
+    #[serde(default)]
+    pub binding: PictoBinding,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,19 +164,32 @@ impl Picto {
         Ok(())
     }
 
-    /// Verify a legacy scope-only Picto signature.
+    /// Verify this Picto against its visible signed binding.
     ///
-    /// Approval-created Pictos with an input binding must be verified through
-    /// [`PictoStore`], which reads the signed binding from the same SQLite row.
-    /// This preserves verification of Pictos created before input binding
-    /// existed.
+    /// Legacy serialized Pictos omit `binding` and deserialize as scope-only,
+    /// preserving their byte-identical v1 verification path.
     pub fn verify(&self, vk: &VerifyingKey) -> Result<(), GommageError> {
-        self.verify_for_input_hash(None, vk)
+        let input_hash = self.binding.input_hash();
+        self.verify_binding_unchecked(input_hash, vk)
     }
 
-    /// Verify a Picto signature with its optional canonical tool-call input
-    /// hash binding.
+    /// Verify that this Picto visibly carries the requested optional binding,
+    /// then verify the signature over that binding.
+    ///
+    /// This compatibility method cannot reinterpret an exact-input Picto as a
+    /// scope-only Picto, or vice versa.
     pub fn verify_for_input_hash(
+        &self,
+        input_hash: Option<&str>,
+        vk: &VerifyingKey,
+    ) -> Result<(), GommageError> {
+        if self.binding.input_hash() != input_hash {
+            return Err(GommageError::BadSignature);
+        }
+        self.verify_binding_unchecked(input_hash, vk)
+    }
+
+    fn verify_binding_unchecked(
         &self,
         input_hash: Option<&str>,
         vk: &VerifyingKey,
@@ -213,6 +255,7 @@ impl PictoReadStore {
 impl PictoStore {
     pub fn open(path: &Path) -> Result<Self, GommageError> {
         let conn = Connection::open(path)?;
+        conn.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -223,6 +266,7 @@ impl PictoStore {
 
     pub fn open_in_memory() -> Result<Self, GommageError> {
         let conn = Connection::open_in_memory()?;
+        conn.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
         let store = PictoStore { conn };
         store.migrate()?;
         Ok(store)
@@ -253,12 +297,7 @@ impl PictoStore {
     }
 
     fn ensure_input_hash_column(&self) -> Result<(), GommageError> {
-        let mut statement = self.conn.prepare("PRAGMA table_info(pictos)")?;
-        let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
-        if columns
-            .filter_map(Result::ok)
-            .any(|name| name == "input_hash")
-        {
+        if has_input_hash_column(&self.conn)? {
             return Ok(());
         }
         self.conn
@@ -357,6 +396,11 @@ impl PictoStore {
             status,
             reason: reason.to_string(),
             signature_b64: String::new(),
+            binding: input_hash.map_or(PictoBinding::ScopeOnly, |input_hash| {
+                PictoBinding::ExactInput {
+                    input_hash: input_hash.to_string(),
+                }
+            }),
         };
         picto
             .validate_signing_fields(input_hash)
@@ -385,7 +429,7 @@ impl PictoStore {
     pub fn get(&self, id: &str) -> Result<Option<Picto>, GommageError> {
         Ok(self
             .conn
-            .query_row("SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64 FROM pictos WHERE id = ?1", params![id], row_to_picto)
+            .query_row("SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash FROM pictos WHERE id = ?1", params![id], row_to_picto)
             .optional()?)
     }
 
@@ -417,7 +461,7 @@ impl PictoStore {
         now: OffsetDateTime,
     ) -> Result<Option<Picto>, GommageError> {
         let mut stmt = self.conn.prepare(
-            r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64
+            r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash
                FROM pictos
                WHERE scope = ?1
                  AND status = 'active'
@@ -443,7 +487,7 @@ impl PictoStore {
             return Ok(None);
         }
         let mut statement = self.conn.prepare(
-            r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64
+            r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash
                FROM pictos
                WHERE scope = ?1
                  AND status = 'active'
@@ -514,7 +558,7 @@ impl PictoStore {
                        ORDER BY created_at DESC
                        LIMIT 1"#,
                     params![required_scope, now.unix_timestamp(), input_hash],
-                    row_to_stored_picto,
+                    row_to_picto,
                 )
                 .optional()?,
             None => self
@@ -530,25 +574,19 @@ impl PictoStore {
                        ORDER BY created_at DESC
                        LIMIT 1"#,
                     params![required_scope, now.unix_timestamp()],
-                    row_to_stored_picto,
+                    row_to_picto,
                 )
                 .optional()?,
         };
-        let Some(stored) = stored else {
+        let Some(picto) = stored else {
             return Ok(PictoLookup::None);
         };
-        if stored
-            .picto
-            .verify_for_input_hash(stored.input_hash.as_deref(), verifying_key)
-            .is_ok()
-        {
-            return Ok(PictoLookup::Verified {
-                picto: stored.picto,
-            });
+        if picto.verify(verifying_key).is_ok() {
+            return Ok(PictoLookup::Verified { picto });
         }
         Ok(PictoLookup::BadSignature {
-            id: stored.picto.id,
-            scope: stored.picto.scope,
+            id: picto.id,
+            scope: picto.scope,
         })
     }
 
@@ -585,7 +623,10 @@ impl PictoStore {
         now: OffsetDateTime,
         verifying_key: &VerifyingKey,
     ) -> Result<PictoConsume, GommageError> {
-        let tx = self.conn.unchecked_transaction()?;
+        // Reserve the writer slot before reading mutable usage state. A
+        // deferred transaction permits concurrent readers to observe the same
+        // remaining use; BEGIN IMMEDIATE linearizes the security transition.
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
         let query = match input_hash {
             Some(_) => {
                 r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash
@@ -611,53 +652,79 @@ impl PictoStore {
                 .query_row(
                     query,
                     params![id, now.unix_timestamp(), input_hash],
-                    row_to_stored_picto,
+                    row_to_picto,
                 )
                 .optional()?,
             None => tx
-                .query_row(
-                    query,
-                    params![id, now.unix_timestamp()],
-                    row_to_stored_picto,
-                )
+                .query_row(query, params![id, now.unix_timestamp()], row_to_picto)
                 .optional()?,
         };
-        let Some(mut stored) = stored else {
+        let Some(mut picto) = stored else {
             return Ok(PictoConsume::NotUsable);
         };
-        if stored
-            .picto
-            .verify_for_input_hash(stored.input_hash.as_deref(), verifying_key)
-            .is_err()
-        {
+        if picto.verify(verifying_key).is_err() {
             return Ok(PictoConsume::BadSignature {
-                id: stored.picto.id,
-                scope: stored.picto.scope,
+                id: picto.id,
+                scope: picto.scope,
             });
         }
 
-        let new_uses = stored.picto.uses + 1;
-        let new_status = if new_uses >= stored.picto.max_uses {
+        let new_uses = picto.uses + 1;
+        let new_status = if new_uses >= picto.max_uses {
             PictoStatus::Spent
         } else {
             PictoStatus::Active
         };
-        tx.execute(
-            "UPDATE pictos SET uses = ?1, status = ?2 WHERE id = ?3",
-            params![new_uses, status_str(new_status), id],
-        )?;
+        let updated = match input_hash {
+            Some(input_hash) => tx.execute(
+                r#"UPDATE pictos
+                   SET uses = ?1, status = ?2
+                   WHERE id = ?3
+                     AND uses = ?4
+                     AND status = 'active'
+                     AND uses < max_uses
+                     AND ttl_expires_at > ?5
+                     AND input_hash = ?6"#,
+                params![
+                    new_uses,
+                    status_str(new_status),
+                    id,
+                    picto.uses,
+                    now.unix_timestamp(),
+                    input_hash,
+                ],
+            )?,
+            None => tx.execute(
+                r#"UPDATE pictos
+                   SET uses = ?1, status = ?2
+                   WHERE id = ?3
+                     AND uses = ?4
+                     AND status = 'active'
+                     AND uses < max_uses
+                     AND ttl_expires_at > ?5
+                     AND input_hash IS NULL"#,
+                params![
+                    new_uses,
+                    status_str(new_status),
+                    id,
+                    picto.uses,
+                    now.unix_timestamp(),
+                ],
+            )?,
+        };
+        if updated != 1 {
+            return Ok(PictoConsume::NotUsable);
+        }
         tx.commit()?;
-        stored.picto.uses = new_uses;
-        stored.picto.status = new_status;
-        Ok(PictoConsume::Consumed {
-            picto: stored.picto,
-        })
+        picto.uses = new_uses;
+        picto.status = new_status;
+        Ok(PictoConsume::Consumed { picto })
     }
 
     /// Atomically burn one use from the picto. Returns `true` on success,
     /// `false` if the picto vanished / was revoked / exhausted in the meantime.
     pub fn consume(&self, id: &str) -> Result<bool, GommageError> {
-        let tx = self.conn.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
         let row = tx
             .query_row(
                 "SELECT max_uses, uses FROM pictos WHERE id = ?1 AND status = 'active'",
@@ -677,10 +744,15 @@ impl PictoStore {
         } else {
             "active"
         };
-        tx.execute(
-            "UPDATE pictos SET uses = ?1, status = ?2 WHERE id = ?3",
-            params![new_uses, new_status, id],
+        let updated = tx.execute(
+            r#"UPDATE pictos
+               SET uses = ?1, status = ?2
+               WHERE id = ?3 AND uses = ?4 AND status = 'active' AND uses < max_uses"#,
+            params![new_uses, new_status, id, uses],
         )?;
+        if updated != 1 {
+            return Ok(false);
+        }
         tx.commit()?;
         Ok(true)
     }
@@ -696,9 +768,12 @@ impl PictoStore {
 }
 
 fn list_pictos(conn: &Connection) -> Result<Vec<Picto>, GommageError> {
-    let mut stmt = conn.prepare(
-        "SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64 FROM pictos ORDER BY created_at",
-    )?;
+    let query = if has_input_hash_column(conn)? {
+        "SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash FROM pictos ORDER BY created_at"
+    } else {
+        "SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, NULL AS input_hash FROM pictos ORDER BY created_at"
+    };
+    let mut stmt = conn.prepare(query)?;
     let rows = stmt.query_map([], row_to_picto)?;
     let mut out = Vec::new();
     for row in rows {
@@ -707,10 +782,19 @@ fn list_pictos(conn: &Connection) -> Result<Vec<Picto>, GommageError> {
     Ok(out)
 }
 
+fn has_input_hash_column(conn: &Connection) -> Result<bool, GommageError> {
+    let mut statement = conn.prepare("PRAGMA table_info(pictos)")?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    Ok(columns
+        .filter_map(Result::ok)
+        .any(|name| name == "input_hash"))
+}
+
 fn row_to_picto(row: &rusqlite::Row<'_>) -> rusqlite::Result<Picto> {
     let status: String = row.get(6)?;
     let ttl: i64 = row.get(4)?;
     let created: i64 = row.get(5)?;
+    let input_hash: Option<String> = row.get(9)?;
     Ok(Picto {
         id: row.get(0)?,
         scope: row.get(1)?,
@@ -721,13 +805,9 @@ fn row_to_picto(row: &rusqlite::Row<'_>) -> rusqlite::Result<Picto> {
         status: parse_status(&status),
         reason: row.get(7)?,
         signature_b64: row.get(8)?,
-    })
-}
-
-fn row_to_stored_picto(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredPicto> {
-    Ok(StoredPicto {
-        picto: row_to_picto(row)?,
-        input_hash: row.get(9)?,
+        binding: input_hash.map_or(PictoBinding::ScopeOnly, |input_hash| {
+            PictoBinding::ExactInput { input_hash }
+        }),
     })
 }
 
@@ -840,7 +920,11 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, GommageError> {
 mod tests {
     use super::*;
     use rand_core::OsRng;
-    use std::fs;
+    use std::{
+        fs,
+        sync::{Arc, Barrier},
+        thread,
+    };
     use tempfile::tempdir;
 
     fn key() -> SigningKey {
@@ -997,6 +1081,64 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_verified_consumers_spend_one_use_exactly_once() {
+        const CONSUMERS: usize = 32;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("pictos.sqlite");
+        let sk = key();
+        let store = PictoStore::open(&path).unwrap();
+        store
+            .create("p1", "git.push:main", 1, 600, "test", &sk, false)
+            .unwrap();
+        drop(store);
+
+        // Open before the barrier so WAL setup is not part of the race under
+        // test. Each worker still owns an independent SQLite connection, as
+        // separate daemon/MCP processes would.
+        let stores = (0..CONSUMERS)
+            .map(|_| PictoStore::open(&path).unwrap())
+            .collect::<Vec<_>>();
+        let barrier = Arc::new(Barrier::new(CONSUMERS));
+        let verifying_key = sk.verifying_key();
+        let handles = stores
+            .into_iter()
+            .map(|store| {
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    store
+                        .consume_verified("p1", OffsetDateTime::now_utc(), &verifying_key)
+                        .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, PictoConsume::Consumed { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, PictoConsume::NotUsable))
+                .count(),
+            CONSUMERS - 1
+        );
+
+        let stored = PictoStore::open(&path).unwrap().get("p1").unwrap().unwrap();
+        assert_eq!(stored.uses, 1);
+        assert_eq!(stored.status, PictoStatus::Spent);
+    }
+
+    #[test]
     fn revoke_blocks_match() {
         let store = PictoStore::open_in_memory().unwrap();
         let sk = key();
@@ -1073,6 +1215,7 @@ mod tests {
             status: PictoStatus::Revoked,
             reason: "operator reviewed exact command".to_string(),
             signature_b64: String::new(),
+            binding: PictoBinding::ScopeOnly,
         };
         let input_hash = input_hash('a');
         let scope_payload = picto.signing_payload_for_input_hash_unchecked(None);
@@ -1092,6 +1235,9 @@ mod tests {
             "Zgig5tGaUvom9GgN4rXhIf3fHKoWM35J0yL9Q0eWGXfUHOqNfx2oHaY5BxSt/lrR+Ag+h4wNva/xBJGaJC2KBg"
                 .to_string();
         let mut input_bound = picto;
+        input_bound.binding = PictoBinding::ExactInput {
+            input_hash: input_hash.clone(),
+        };
         input_bound.signature_b64 =
             "JHfuED1g5eQaJNXsXX0w5zZ2HjpdUImRLYTi+jTjO8Rs719bjgll2MICxn+RJ7LeQMtI9ajJ/TsE8xkFiznTBQ"
                 .to_string();
@@ -1152,6 +1298,7 @@ mod tests {
             status: PictoStatus::Active,
             reason: "strict verification regression".to_string(),
             signature_b64: base64_encode(&signature_bytes),
+            binding: PictoBinding::ScopeOnly,
         };
         let payload = picto.signing_payload_for_input_hash_unchecked(None);
 
@@ -1366,7 +1513,7 @@ mod tests {
         let sk = key();
         let approved_input = input_hash('a');
         let other_input = input_hash('b');
-        store
+        let created = store
             .create_for_input(
                 "p1",
                 "deploy.production",
@@ -1378,6 +1525,22 @@ mod tests {
                 false,
             )
             .unwrap();
+        assert_eq!(
+            created.binding,
+            PictoBinding::ExactInput {
+                input_hash: approved_input.clone(),
+            }
+        );
+        assert!(created.verify(&sk.verifying_key()).is_ok());
+        assert!(matches!(
+            created.verify_for_input_hash(None, &sk.verifying_key()),
+            Err(GommageError::BadSignature)
+        ));
+        let encoded = serde_json::to_value(&created).unwrap();
+        assert_eq!(encoded["binding"]["kind"], "exact_input");
+        assert_eq!(encoded["binding"]["input_hash"], approved_input);
+        assert_eq!(store.get("p1").unwrap().unwrap().binding, created.binding);
+        assert_eq!(store.list().unwrap()[0].binding, created.binding);
 
         assert!(matches!(
             store
@@ -1425,6 +1588,21 @@ mod tests {
                 .unwrap(),
             PictoConsume::Consumed { .. }
         ));
+    }
+
+    #[test]
+    fn legacy_json_without_binding_defaults_to_scope_only() {
+        let store = PictoStore::open_in_memory().unwrap();
+        let sk = key();
+        let picto = store.create("p1", "scope", 1, 60, "r", &sk, false).unwrap();
+        let mut value = serde_json::to_value(&picto).unwrap();
+        assert_eq!(value["binding"]["kind"], "scope_only");
+        value.as_object_mut().unwrap().remove("binding");
+
+        let legacy: Picto = serde_json::from_value(value).unwrap();
+
+        assert_eq!(legacy.binding, PictoBinding::ScopeOnly);
+        legacy.verify(&sk.verifying_key()).unwrap();
     }
 
     #[test]
@@ -1504,15 +1682,13 @@ mod tests {
                 r#"SELECT id, scope, max_uses, uses, ttl_expires_at, created_at, status, reason, signature_b64, input_hash
                    FROM pictos WHERE id = 'p1'"#,
                 [],
-                row_to_stored_picto,
+                row_to_picto,
             )
             .unwrap();
-        assert_eq!(reinterpreted.input_hash, None);
+        assert_eq!(reinterpreted.binding, PictoBinding::ScopeOnly);
         assert_eq!(
             signed_input_bound_payload,
-            reinterpreted
-                .picto
-                .signing_payload_for_input_hash_unchecked(None)
+            reinterpreted.signing_payload_for_input_hash_unchecked(None)
         );
 
         assert!(matches!(
@@ -1550,6 +1726,7 @@ mod tests {
             status: PictoStatus::Active,
             reason: "legacy".to_string(),
             signature_b64: String::new(),
+            binding: PictoBinding::ScopeOnly,
         };
         let signed_bytes = originally_signed.signing_payload_for_input_hash_unchecked(None);
         originally_signed.signature_b64 = base64_encode(&sk.sign(&signed_bytes).to_bytes());

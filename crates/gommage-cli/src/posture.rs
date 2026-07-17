@@ -121,7 +121,6 @@ pub(crate) fn cmd_posture(layout: HomeLayout, json: bool) -> Result<ExitCode> {
 }
 
 fn build_posture_report(layout: &HomeLayout) -> Result<PostureReport> {
-    layout.ensure()?;
     let expedition = Expedition::load(&layout.expedition_file)?;
     let env = expedition
         .as_ref()
