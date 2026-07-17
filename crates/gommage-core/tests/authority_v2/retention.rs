@@ -265,6 +265,188 @@ fn bootstrap_pending_with_committed_genesis_promotes_on_open() {
 }
 
 #[test]
+fn bootstrap_pending_without_a_final_path_resumes_the_exact_prepared_genesis() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    let bootstrap_path = directory
+        .path()
+        .join(".authority.sqlite3.gommage-bootstrap");
+    let retention = retention_for(&path);
+    retention.inject_stage(RetentionFault::IndeterminateAfter);
+
+    assert!(matches!(
+        Authority::bootstrap(
+            &path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(retention.clone()),
+        ),
+        Err(AuthorityError::Retention {
+            operation: CheckpointRetentionOperationV2::Stage,
+            outcome: CheckpointRetentionErrorV2::Indeterminate,
+        })
+    ));
+    assert!(
+        !path.exists(),
+        "partial bootstrap must never publish the final path"
+    );
+    assert!(bootstrap_path.is_file());
+    assert!(matches!(
+        retention.state(),
+        CheckpointRetentionStateV2::BootstrapPending(_)
+    ));
+
+    let authority = Authority::bootstrap(
+        &path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        Box::new(retention.clone()),
+    )
+    .unwrap();
+    assert!(!bootstrap_path.exists());
+    assert!(
+        !directory
+            .path()
+            .join(".authority.sqlite3.gommage-bootstrap-wal")
+            .exists()
+    );
+    assert!(
+        !directory
+            .path()
+            .join(".authority.sqlite3.gommage-bootstrap-shm")
+            .exists()
+    );
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "1");
+    assert_active_matches(&authority, &retention);
+}
+
+#[test]
+fn rejected_bootstrap_stage_leaves_no_final_path_and_is_retryable() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    let retention = retention_for(&path);
+    retention.inject_stage(RetentionFault::Rejected);
+
+    assert!(matches!(
+        Authority::bootstrap(
+            &path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(retention.clone()),
+        ),
+        Err(AuthorityError::Retention {
+            operation: CheckpointRetentionOperationV2::Stage,
+            outcome: CheckpointRetentionErrorV2::Rejected,
+        })
+    ));
+    assert!(!path.exists());
+    assert_eq!(retention.state(), CheckpointRetentionStateV2::Empty);
+
+    let authority = Authority::bootstrap(
+        &path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        Box::new(retention.clone()),
+    )
+    .unwrap();
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "1");
+    assert_active_matches(&authority, &retention);
+}
+
+#[test]
+fn pending_genesis_reconstructs_an_undurable_missing_preparation() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    let bootstrap_path = directory
+        .path()
+        .join(".authority.sqlite3.gommage-bootstrap");
+    let retention = retention_for(&path);
+    retention.inject_stage(RetentionFault::IndeterminateAfter);
+    assert!(
+        Authority::bootstrap(
+            &path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(retention.clone()),
+        )
+        .is_err()
+    );
+    assert!(matches!(
+        retention.state(),
+        CheckpointRetentionStateV2::BootstrapPending(_)
+    ));
+    std::fs::remove_file(&bootstrap_path).unwrap();
+
+    let authority = Authority::bootstrap(
+        &path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        Box::new(retention.clone()),
+    )
+    .unwrap();
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "1");
+    assert_active_matches(&authority, &retention);
+}
+
+#[cfg(unix)]
+#[test]
+fn open_finishes_a_crash_after_no_clobber_publication() {
+    use std::os::unix::fs::MetadataExt;
+
+    let (directory, path, authority) = fixture();
+    let retention = retention_for(&path);
+    let CheckpointRetentionStateV2::Active(genesis) = retention.state() else {
+        panic!("bootstrap must leave genesis active");
+    };
+    drop(authority);
+    retention.force_state(CheckpointRetentionStateV2::BootstrapPending(genesis));
+    let bootstrap_path = directory
+        .path()
+        .join(".authority.sqlite3.gommage-bootstrap");
+    std::fs::hard_link(&path, &bootstrap_path).unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().nlink(), 2);
+
+    let recovered = open(&path);
+    assert!(!bootstrap_path.exists());
+    assert_eq!(std::fs::metadata(&path).unwrap().nlink(), 1);
+    assert_eq!(recovered.verify_ledger().unwrap().head_seq, "1");
+    assert_active_matches(&recovered, &retention);
+}
+
+#[test]
+fn empty_retention_never_reanchors_an_initialized_bootstrap_preparation() {
+    let (directory, path, authority) = fixture();
+    let retention = retention_for(&path);
+    drop(authority);
+    retention.force_state(CheckpointRetentionStateV2::Empty);
+    let bootstrap_path = directory
+        .path()
+        .join(".authority.sqlite3.gommage-bootstrap");
+    std::fs::rename(&path, &bootstrap_path).unwrap();
+
+    assert!(matches!(
+        Authority::bootstrap(
+            &path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(retention.clone()),
+        ),
+        Err(AuthorityError::RecoveryAmbiguous(message))
+            if message.contains("cannot be anchored from empty retention")
+    ));
+    assert!(!path.exists());
+    assert!(bootstrap_path.is_file());
+    assert_eq!(retention.state(), CheckpointRetentionStateV2::Empty);
+}
+
+#[test]
 fn durable_state_that_is_behind_or_missing_the_db_head_fails_closed() {
     let (_directory, path, mut authority) = fixture();
     let retention = retention_for(&path);

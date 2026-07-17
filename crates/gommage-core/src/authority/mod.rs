@@ -190,6 +190,13 @@ impl AuthorityRuntimeSource for SystemAuthorityRuntimeSource {
 /// identities before returning. The stable lock file is intentionally never
 /// unlinked.
 ///
+/// Bootstrap initializes genesis at a deterministic private sibling path and
+/// publishes it through a same-directory no-clobber hard link only after the
+/// SQLite transaction, WAL checkpoint, explicit close, and file sync complete.
+/// Both directory transitions are synced. Interrupted publication is recovered
+/// only when the prepared database matches the exact durably pending genesis.
+/// Unsupported local filesystem semantics fail closed.
+///
 /// These checks do not claim isolation from a hostile process running as the
 /// same UID with write access to the database directory. That boundary requires
 /// a separately protected service identity or operating-system sandbox.

@@ -11,6 +11,8 @@ pub(super) fn configure_connection(conn: &Connection) -> Result<(), AuthorityErr
     conn.busy_timeout(Duration::from_millis(5_000))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "FULL")?;
+    conn.pragma_update(None, "fullfsync", "ON")?;
+    conn.pragma_update(None, "checkpoint_fullfsync", "ON")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.pragma_update(None, "trusted_schema", "OFF")?;
     Ok(())
@@ -19,19 +21,24 @@ pub(super) fn configure_connection(conn: &Connection) -> Result<(), AuthorityErr
 pub(super) fn verify_pragmas(conn: &Connection) -> Result<(), AuthorityError> {
     let journal: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
     let synchronous: i32 = conn.pragma_query_value(None, "synchronous", |row| row.get(0))?;
+    let fullfsync: i32 = conn.pragma_query_value(None, "fullfsync", |row| row.get(0))?;
+    let checkpoint_fullfsync: i32 =
+        conn.pragma_query_value(None, "checkpoint_fullfsync", |row| row.get(0))?;
     let foreign_keys: i32 = conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
     let trusted_schema: i32 = conn.pragma_query_value(None, "trusted_schema", |row| row.get(0))?;
     let application_id: i32 = conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
     let user_version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if !journal.eq_ignore_ascii_case("wal")
         || synchronous != 2
+        || fullfsync != 1
+        || checkpoint_fullfsync != 1
         || foreign_keys != 1
         || trusted_schema != 0
         || application_id != APPLICATION_ID
         || user_version != SCHEMA_VERSION
     {
         return Err(AuthorityError::Schema(format!(
-            "unsafe pragmas: journal={journal}, synchronous={synchronous}, foreign_keys={foreign_keys}, trusted_schema={trusted_schema}, application_id={application_id}, user_version={user_version}"
+            "unsafe pragmas: journal={journal}, synchronous={synchronous}, fullfsync={fullfsync}, checkpoint_fullfsync={checkpoint_fullfsync}, foreign_keys={foreign_keys}, trusted_schema={trusted_schema}, application_id={application_id}, user_version={user_version}"
         )));
     }
     Ok(())

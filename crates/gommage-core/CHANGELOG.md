@@ -27,6 +27,13 @@ enforced by `cargo-semver-checks` in CI.
   the effective UID, regular, single-link, mode-0600 files in a directory that
   is not group- or world-writable. This is a cooperative writer boundary and
   does not claim isolation from a hostile process under the same UID.
+* Bootstrap now commits, checkpoints, closes, and syncs genesis at a private
+  deterministic sibling path before publishing it through a same-directory
+  no-clobber hard link. It syncs both directory transitions, reopens the final
+  path, and only then promotes pending retention. Interrupted empty, pending,
+  post-link, and post-publication states resume exactly or fail closed; empty
+  retention cannot re-anchor an initialized preparation. SQLite enables
+  `fullfsync` and `checkpoint_fullfsync` for supported local Unix filesystems.
 
 ## [0.17.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.16.1-alpha.1...gommage-core-v0.17.0-alpha.1) (2026-07-13)
 

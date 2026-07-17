@@ -210,6 +210,11 @@ directory. They do not turn same-UID advisory locks into a privilege boundary:
 a hostile process with that UID can ignore the lock, invoke SQLite directly,
 or modify directory entries. Reference deployment therefore still requires a
 separate service identity or sandbox in addition to the core storage checks.
+Bootstrap publishes a fully committed, checkpointed, closed, and synced genesis
+database through a same-directory no-clobber hard link and syncs both directory
+transitions. The recovery matrix is fail-closed on supported local Unix
+filesystems; it is not a universal power-loss guarantee for remote or exotic
+filesystems whose link or sync semantics do not meet those operations.
 
 The shipped daemon, CLI, key, policy, approval inbox, picto database, and Unix
 socket are user-local. A process under the same UID can edit policy and state,

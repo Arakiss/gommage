@@ -124,6 +124,16 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   single-linked; their parent directory must not be group- or world-writable.
   This is cooperative single-writer enforcement, not protection from a hostile
   process running as the same UID with directory write access.
+- Authority bootstrap now commits and checkpoints genesis at a deterministic
+  private sibling path before publishing the final database with a
+  same-directory, no-clobber hard link. It syncs the database and directory,
+  removes the preparation link, syncs again, then reopens and promotes the
+  durably pending checkpoint. Empty, rejected, pending, post-link, and
+  post-publication crash states are either recovered exactly or remain blocked;
+  empty retention never re-anchors an already initialized preparation. SQLite
+  connections also enable `fullfsync` and `checkpoint_fullfsync`. These
+  guarantees target supported local Unix filesystems; unsupported filesystem
+  semantics fail closed instead of weakening publication.
 - Pinned `serde_json_canonicalizer` as a determinism-critical dependency for
   Authority v2's RFC 8785 signed envelopes.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
