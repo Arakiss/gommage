@@ -47,6 +47,7 @@ Automated via `release-please`. Do not tag manually. The bot opens a release PR 
 
 ```sh
 cargo fmt --all
+scripts/check-rust-module-size.sh
 sh scripts/check-workspace-internal-deps.sh
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -62,6 +63,9 @@ regress in docs or harness output.
 ## Style
 
 - `rustfmt` defaults, no custom `rustfmt.toml` unless we outgrow them.
+- Rust source files must stay at or below 1,000 physical lines. Split modules
+  and integration scenarios by responsibility before they cross that limit;
+  `scripts/check-rust-module-size.sh` enforces it without exceptions.
 - `clippy::pedantic` not enforced globally; apply where it clarifies, skip where it produces noise.
 - Doc comments on every public item in `gommage-core`.
 - YAML policies + capability mappers: one concern per file, lexicographic numeric prefix to control load order (`00-`, `10-`, `20-`, …).
