@@ -1,13 +1,14 @@
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signer as _, SigningKey};
 use gommage_core::{
-    ActivateGenerationCommand, ApproveCommand, ApproveResult, Authority, AuthorityConfig,
-    AuthorityError, AuthorityGenerationV2, AuthorityRuntimeSource, AuthorizationContextV2,
-    AuthorizeApprovalCommandV2, AuthorizeApprovalResultV2, ConsumeCommand, ConsumeResult,
-    CreateRequestCommand, CreateRequestResult, DenyCommand, DenyResult, FreshnessVerdict,
-    GrantNotUsableReason, GrantStatusV2, MAX_LEDGER_PAGE_ENTRIES, RevokeCommand, RevokeResult,
-    SetMaintenanceCommand, SignedGrantClaimV2, SignedGrantStateV2, SignedJcs, SignedLedgerCursorV2,
-    ToolCall,
+    ActivateGenerationCommand, ApprovalRequestV2, ApproveCommand, ApproveResult, Authority,
+    AuthorityConfig, AuthorityDecisionOutcomeV2, AuthorityError, AuthorityGenerationV2,
+    AuthorityRuntimeSource, Capability, CapabilityProvenance, CapabilityProvenanceStatus,
+    CommitDecisionCommandV2, CommittedDecisionV2, Decision, DenyCommand, DenyResult, EvalResult,
+    FreshnessVerdict, GrantStatusV2, LedgerPayloadV2, MAX_CANONICAL_TOOL_CALL_BYTES,
+    MAX_LEDGER_PAGE_ENTRIES, MatchedRule, PictoBinding, Policy, RevokeCommand, RevokeResult,
+    RuleContribution, SetMaintenanceCommand, SignedGrantClaimV2, SignedGrantStateV2, SignedJcs,
+    SignedLedgerCursorV2, ToolCall, evaluate,
 };
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -25,6 +26,57 @@ use tempfile::TempDir;
 struct FixedRuntimeSource {
     timestamp: AtomicI64,
     next_nonce: AtomicU64,
+}
+
+struct DefaultTestRuntimeSource;
+
+struct CollidingDecisionRuntimeSource {
+    identifiers: AtomicU64,
+}
+
+struct RejectRuntimeSource;
+
+static NEXT_TEST_NONCE: AtomicU64 = AtomicU64::new(1);
+
+impl AuthorityRuntimeSource for DefaultTestRuntimeSource {
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
+        Ok(1_700_000_030)
+    }
+
+    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
+        let nonce = NEXT_TEST_NONCE.fetch_add(1, Ordering::SeqCst);
+        Ok(format!("test{nonce:016x}"))
+    }
+}
+
+impl AuthorityRuntimeSource for CollidingDecisionRuntimeSource {
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
+        Ok(1_700_000_030)
+    }
+
+    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
+        match self.identifiers.fetch_add(1, Ordering::SeqCst) {
+            0 => Ok("unique_state".into()),
+            1 => Ok("collision".into()),
+            _ => Err(AuthorityError::RuntimeSource(
+                "unexpected extra identifier request".into(),
+            )),
+        }
+    }
+}
+
+impl AuthorityRuntimeSource for RejectRuntimeSource {
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
+        Err(AuthorityError::RuntimeSource(
+            "runtime source must not be consulted".into(),
+        ))
+    }
+
+    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
+        Err(AuthorityError::RuntimeSource(
+            "runtime source must not be consulted".into(),
+        ))
+    }
 }
 
 impl AuthorityRuntimeSource for FixedRuntimeSource {
@@ -86,7 +138,14 @@ fn config() -> AuthorityConfig {
 }
 
 fn open(path: &Path) -> Authority {
-    Authority::open(path, config(), grant_key(), ledger_key()).unwrap()
+    Authority::open_with_runtime_source(
+        path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        Arc::new(DefaultTestRuntimeSource),
+    )
+    .unwrap()
 }
 
 fn fixture() -> (TempDir, PathBuf, Authority) {
@@ -101,6 +160,12 @@ fn hash(byte: char) -> String {
 }
 
 fn resign_ledger_suffix_with_build(path: &Path, first_seq: i64, build_identity: &str) {
+    resign_ledger_suffix(path, first_seq, |_, entry| {
+        entry["build_identity"] = serde_json::json!(build_identity);
+    });
+}
+
+fn resign_ledger_suffix(path: &Path, first_seq: i64, mut mutate: impl FnMut(i64, &mut Value)) {
     let raw = Connection::open(path).unwrap();
     raw.execute_batch("DROP TRIGGER ledger_entries_no_update;")
         .unwrap();
@@ -131,7 +196,7 @@ fn resign_ledger_suffix_with_build(path: &Path, first_seq: i64, build_identity: 
     for (seq, stored_jcs) in entries {
         let mut entry: Value = serde_json::from_str(&stored_jcs).unwrap();
         entry["previous_hash"] = serde_json::json!(previous_hash);
-        entry["build_identity"] = serde_json::json!(build_identity);
+        mutate(seq, &mut entry);
         let jcs = String::from_utf8(gommage_core::crypto_envelope::canonicalize(&entry).unwrap())
             .unwrap();
         let mut message = b"GOMMAGE\0LEDGER_ENTRY\0V2\0".to_vec();
@@ -159,64 +224,15 @@ fn resign_ledger_suffix_with_build(path: &Path, first_seq: i64, build_identity: 
     .unwrap();
 }
 
-fn context_with(
-    build_identity: &str,
-    integration: &str,
-    tool: &str,
-    input_hash: char,
-    policy_identity: char,
-    capabilities: &[&str],
-) -> AuthorizationContextV2 {
-    AuthorizationContextV2::new(
-        build_identity.into(),
-        integration.into(),
-        tool.into(),
-        hash(input_hash),
-        hash(policy_identity),
-        capabilities.iter().map(|value| (*value).into()).collect(),
-    )
-    .unwrap()
-}
-
-fn authorization_context() -> AuthorizationContextV2 {
-    authorization_context_for(&generation("1"))
-}
-
-fn authorization_context_for(generation: &AuthorityGenerationV2) -> AuthorizationContextV2 {
-    AuthorizationContextV2::new(
-        generation.build_identity().into(),
-        "codex".into(),
-        "Bash".into(),
-        hash('1'),
-        generation.policy_identity().into(),
-        vec![
-            "git.push:refs/heads/main".into(),
-            "proc.exec:git".into(),
-            "git.push:refs/heads/main".into(),
-        ],
-    )
-    .unwrap()
-}
-
-fn request_command(request_id: &str, event_id: &str) -> CreateRequestCommand {
-    CreateRequestCommand {
-        request_id: request_id.into(),
-        event_id: event_id.into(),
-        created_at: 1_700_000_010,
-        context: authorization_context(),
-        generation: generation("1"),
-        required_scope: "git.push:refs/heads/main".into(),
-        reason: "Release the reviewed commit".into(),
+fn create_request(authority: &mut Authority) -> ApprovalRequestV2 {
+    match authority.commit_decision(&authorize_command()).unwrap() {
+        CommittedDecisionV2::ApprovalRequired {
+            request,
+            created: true,
+            ..
+        } => *request,
+        other => panic!("expected a new Authority-owned request, got {other:?}"),
     }
-}
-
-fn create_request(authority: &mut Authority) {
-    assert!(matches!(
-        authority
-            .create_or_get_request(&request_command("request_1", "event_request_1"))
-            .unwrap(),
-        CreateRequestResult::Created(_)
-    ));
 }
 
 fn approve_command(index: usize) -> ApproveCommand {
@@ -232,6 +248,13 @@ fn approve_command(index: usize) -> ApproveCommand {
     }
 }
 
+fn approval_command(request: &ApprovalRequestV2, index: usize) -> ApproveCommand {
+    let mut command = approve_command(index);
+    command.request_id = request.request_id().into();
+    command.resolved_at = request.created_at();
+    command
+}
+
 fn deny_command(request_id: &str, index: usize, resolved_at: i64) -> DenyCommand {
     DenyCommand {
         request_id: request_id.into(),
@@ -242,8 +265,11 @@ fn deny_command(request_id: &str, index: usize, resolved_at: i64) -> DenyCommand
     }
 }
 
-fn approve(authority: &mut Authority) -> (SignedGrantClaimV2, SignedGrantStateV2) {
-    match authority.approve(&approve_command(1)).unwrap() {
+fn approve(
+    authority: &mut Authority,
+    request: &ApprovalRequestV2,
+) -> (SignedGrantClaimV2, SignedGrantStateV2) {
+    match authority.approve(&approval_command(request, 1)).unwrap() {
         ApproveResult::Approved { claim, state } => (claim, state),
         other => panic!("expected a new grant, got {other:?}"),
     }
@@ -271,35 +297,86 @@ fn approve_request_at(
     }
 }
 
-fn consume_command(index: usize) -> ConsumeCommand {
-    ConsumeCommand {
-        required_scope: "git.push:refs/heads/main".into(),
-        context: authorization_context(),
-        generation: generation("1"),
-        state_event_id: format!("event_spend_{index}"),
-        decision_event_id: format!("event_allow_{index}"),
-        consumed_at: 1_700_000_030,
+fn observed_call() -> ToolCall {
+    ToolCall {
+        tool: "Bash".into(),
+        input: json!({
+            "command": "git push origin main",
+            "timeout_ms": 120_000,
+        }),
     }
 }
 
-fn authorize_command() -> AuthorizeApprovalCommandV2 {
-    AuthorizeApprovalCommandV2 {
-        integration: "codex".into(),
-        call: ToolCall {
-            tool: "Bash".into(),
-            input: json!({
-                "command": "git push origin main",
-                "timeout_ms": 120_000,
-            }),
-        },
-        capabilities: vec![
-            "proc.exec:git".into(),
-            "git.push:refs/heads/main".into(),
-            "proc.exec:git".into(),
-        ],
-        required_scope: "git.push:refs/heads/main".into(),
-        reason: "Release the reviewed commit".into(),
+fn resolved_evaluation(
+    generation: &AuthorityGenerationV2,
+    decision: Decision,
+    capabilities: &[&str],
+) -> EvalResult {
+    let mut capabilities: Vec<Capability> = capabilities
+        .iter()
+        .map(|capability| Capability::new(*capability))
+        .collect();
+    capabilities.sort_by(|left, right| left.as_str().as_bytes().cmp(right.as_str().as_bytes()));
+    capabilities.dedup_by(|left, right| left.as_str() == right.as_str());
+    let matched_rule = MatchedRule {
+        name: "authority-test-rule".into(),
+        file: "authority-test-policy.yaml".into(),
+        index: 0,
+    };
+    let contribution = RuleContribution {
+        layer: "inline".into(),
+        layer_index: 0,
+        file_index: 0,
+        rule: matched_rule.clone(),
+        decision: decision.clone(),
+    };
+    let capability_provenance = capabilities
+        .iter()
+        .cloned()
+        .map(|capability| CapabilityProvenance {
+            capability,
+            status: CapabilityProvenanceStatus::Resolved,
+            effective_decision: Some(decision.clone()),
+            contributions: vec![contribution.clone()],
+        })
+        .collect();
+    EvalResult {
+        decision,
+        matched_rule: Some(matched_rule),
+        capabilities,
+        policy_version: generation.policy_identity().into(),
+        capability_provenance,
+        authorization: None,
     }
+}
+
+fn ask_evaluation(generation: &AuthorityGenerationV2) -> EvalResult {
+    resolved_evaluation(
+        generation,
+        Decision::AskPicto {
+            required_scope: "git.push:refs/heads/main".into(),
+            reason: "Release the reviewed commit".into(),
+            bind_input: true,
+        },
+        &["git.push:refs/heads/main", "proc.exec:git"],
+    )
+}
+
+fn authorize_command_for(generation: AuthorityGenerationV2) -> CommitDecisionCommandV2 {
+    CommitDecisionCommandV2 {
+        evaluation: ask_evaluation(&generation),
+        evaluated_generation: generation,
+        integration: "codex".into(),
+        call: observed_call(),
+    }
+}
+
+fn authorize_command() -> CommitDecisionCommandV2 {
+    authorize_command_for(generation("1"))
+}
+
+fn consume_command(_index: usize) -> CommitDecisionCommandV2 {
+    authorize_command()
 }
 
 fn activate_command(id: &str, index: usize, activated_at: i64) -> ActivateGenerationCommand {
@@ -322,18 +399,26 @@ fn maintenance_command(enabled: bool, index: usize, transitioned_at: i64) -> Set
     }
 }
 
-fn create_second_request(authority: &mut Authority, created_at: i64) {
-    let mut command = request_command("request_2", "event_request_2");
-    command.created_at = created_at;
-    assert!(matches!(
-        authority.create_or_get_request(&command).unwrap(),
-        CreateRequestResult::Created(request) if request.request_id() == "request_2"
-    ));
+fn create_second_request(authority: &mut Authority) -> ApprovalRequestV2 {
+    let mut command = authorize_command();
+    command.call.input["command"] = json!("git push origin second-review");
+    match authority.commit_decision(&command).unwrap() {
+        CommittedDecisionV2::ApprovalRequired {
+            request,
+            created: true,
+            ..
+        } => *request,
+        other => panic!("expected a second Authority-owned request, got {other:?}"),
+    }
 }
 
-fn approve_second_request(authority: &mut Authority, resolved_at: i64) {
+fn approve_second_request(
+    authority: &mut Authority,
+    request: &ApprovalRequestV2,
+    resolved_at: i64,
+) {
     let mut command = approve_command(2);
-    command.request_id = "request_2".into();
+    command.request_id = request.request_id().into();
     command.resolved_at = resolved_at;
     assert!(matches!(
         authority.approve(&command).unwrap(),
@@ -343,6 +428,8 @@ fn approve_second_request(authority: &mut Authority, resolved_at: i64) {
 
 #[path = "authority_v2/concurrency.rs"]
 mod concurrency;
+#[path = "authority_v2/decisions.rs"]
+mod decisions;
 #[path = "authority_v2/lifecycle.rs"]
 mod lifecycle;
 #[path = "authority_v2/state.rs"]

@@ -200,10 +200,16 @@ enforced by `cargo-semver-checks` in CI.
 
 - An opt-in Authority v2 API with a single `BEGIN IMMEDIATE` SQLite writer,
   RFC 8785 JCS/domain-separated Ed25519 envelopes, separate grant and ledger
-  keys, immutable approval requests, single-use grants bound to the exact
-  build/integration/tool/input/policy/capability context, signed state
-  revisions, atomic allow evidence, and externally anchorable checkpoints. The
-  API deliberately cannot import active or pending v1 grants.
+  keys, and externally anchorable checkpoints. Every allow, denial, approval
+  requirement, and grant-backed allow commits one signed decision record;
+  immutable requests can only originate inside that transaction. Single-use
+  grants sign an explicit scope-only or exact-input binding and retain signed
+  append-only state. Decision records carry a bounded normalized attestation of
+  evaluator output and provenance under a frozen v2 reducer, and the reader
+  keeps byte-stable compatibility with historical requests, claims, states,
+  and `DecisionAllow` entries. Canonical tool-call hashing rejects byte, depth,
+  and node limits before reading time or opening a transaction. The API
+  deliberately cannot import active or pending v1 grants.
 - Bounded Authority v2 ledger pages with ledger-key-signed continuation
   cursors. Each cursor binds the authority instance and epoch, one immutable
   verified snapshot head, and the exact next sequence so concurrent appends do

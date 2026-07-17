@@ -5,6 +5,14 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::BTreeMap};
 
+mod evidence;
+mod evidence_v2;
+
+pub(crate) use evidence::validate_reference_evaluation;
+#[cfg(test)]
+pub(crate) use evidence::{live_reconstruction_probe, reset_live_reconstruction_probe};
+pub(crate) use evidence_v2::{effective_decision_for_provenance_v2, reconstruct_evaluation_v2};
+
 /// The final decision the daemon will return to the agent.
 ///
 /// `Allow` and `Gommage` are self-explanatory. `AskPicto` is returned to the
@@ -377,11 +385,11 @@ fn aggregate_contributions(
         }
 
         if scopes.len() > 1 {
-            let scopes = scopes.keys().cloned().collect::<Vec<_>>().join(", ");
+            let scope_count = scopes.len();
             return (
                 Decision::Gommage {
                     reason: format!(
-                        "multiple Picto scopes required ({scopes}); split the call before requesting authorization"
+                        "multiple Picto scopes required ({scope_count} distinct scopes); split the call before requesting authorization"
                     ),
                     hard_stop: false,
                 },
@@ -647,6 +655,35 @@ mod tests {
             panic!("expected ask_picto");
         };
         assert!(bind_input);
+    }
+
+    #[test]
+    fn multiple_picto_scope_denial_reason_is_bounded_independently_of_scope_size() {
+        let contributions: Vec<_> = (0..9)
+            .map(|index| RuleContribution {
+                layer: "inline".into(),
+                layer_index: 0,
+                file_index: 0,
+                rule: MatchedRule {
+                    name: format!("ask-{index}"),
+                    file: "test.yaml".into(),
+                    index,
+                },
+                decision: Decision::AskPicto {
+                    required_scope: format!("scope.{index}.{}", "x".repeat(500)),
+                    reason: "approval required".into(),
+                    bind_input: false,
+                },
+            })
+            .collect();
+
+        assert_eq!(
+            aggregate_contributions(&contributions).0,
+            Decision::Gommage {
+                reason: "multiple Picto scopes required (9 distinct scopes); split the call before requesting authorization".into(),
+                hard_stop: false,
+            }
+        );
     }
 
     #[test]

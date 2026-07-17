@@ -267,22 +267,6 @@ pub(super) fn ensure_decision_admitted(
     Ok(())
 }
 
-pub(super) fn validate_context_generation(
-    context: &AuthorizationContextV2,
-    generation: &AuthorityGenerationV2,
-) -> Result<(), AuthorityError> {
-    context.validate()?;
-    generation.validate()?;
-    if context.build_identity() != generation.build_identity()
-        || context.policy_identity() != generation.policy_identity()
-    {
-        return Err(AuthorityError::InvalidInput(
-            "authorization context does not match its declared generation".into(),
-        ));
-    }
-    Ok(())
-}
-
 pub(super) fn next_runtime_revision(
     current: &AuthorityRuntimeStateV2,
 ) -> Result<i64, AuthorityError> {

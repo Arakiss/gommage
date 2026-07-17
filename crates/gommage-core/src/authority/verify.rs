@@ -528,6 +528,7 @@ fn verify_relations(
             || resolution.grant_id.as_deref() != Some(claim.grant_id())
             || claim.request_hash() != request.request_hash
             || claim.input_hash() != request.request.input_hash()
+            || claim.binding() != request.request.binding()
             || claim.required_scope() != request.request.required_scope()
             || claim.operator_principal() != resolution.operator_principal
             || claim.reason() != resolution.reason
@@ -668,163 +669,15 @@ fn verify_relations(
         states.entry(grant_id).or_default().push((signed, state));
     }
 
-    let decisions_by_state: HashMap<String, Vec<AllowEvidenceLink>> = entries
-        .iter()
-        .enumerate()
-        .filter_map(|(index, verified)| match verified.entry.payload() {
-            LedgerPayloadV2::DecisionAllow {
-                grant_id,
-                required_scope,
-                input_hash,
-                context,
-                generation,
-                state_hash,
-            } => Some((
-                state_hash.clone(),
-                AllowEvidenceLink {
-                    seq: index + 1,
-                    timestamp: verified.entry.timestamp(),
-                    build_identity: verified.entry.build_identity().map(str::to_owned),
-                    policy_identity: verified.entry.policy_identity().map(str::to_owned),
-                    grant_id: grant_id.clone(),
-                    required_scope: required_scope.clone(),
-                    input_hash: input_hash.clone(),
-                    context: context.clone(),
-                    generation: generation.clone(),
-                },
-            )),
-            _ => None,
-        })
-        .fold(HashMap::new(), |mut map, (hash, decision)| {
-            map.entry(hash).or_default().push(decision);
-            map
-        });
-
-    for (grant_id, (signed_claim, claim)) in &claims {
-        let revisions = states
-            .get(grant_id)
-            .ok_or_else(|| AuthorityError::Corrupt("grant claim has no state revision".into()))?;
-        if revisions.is_empty() || revisions.len() > 2 {
-            return Err(AuthorityError::Corrupt(
-                "grant has an invalid number of state revisions".into(),
-            ));
-        }
-        let (active_signed, active) = &revisions[0];
-        if active.revision() != "0"
-            || active.status() != GrantStatusV2::Active
-            || active.uses() != 0
-            || active.previous_state_hash().is_some()
-            || active.claim_hash() != signed_claim.claim_hash()
-            || active.transitioned_at() != claim.issued_at()
-        {
-            return Err(AuthorityError::Corrupt(
-                "grant revision zero is not its signed active origin".into(),
-            ));
-        }
-        let resolution = resolutions
-            .get(claim.approval_request_id())
-            .ok_or_else(|| AuthorityError::Corrupt("active grant resolution is missing".into()))?;
-        let resolution_event = events
-            .get(&resolution.event_id)
-            .ok_or_else(|| AuthorityError::Corrupt("resolution event is missing".into()))?;
-        let activation_event = events
-            .get(active.transition_event_id())
-            .ok_or_else(|| AuthorityError::Corrupt("activation event is missing".into()))?;
-        if activation_event.seq != resolution_event.seq.saturating_add(1)
-            || activation_event.build_identity != resolution_event.build_identity
-            || activation_event.policy_identity != resolution_event.policy_identity
-        {
-            return Err(AuthorityError::Corrupt(
-                "grant activation does not exactly and immediately follow its approval resolution"
-                    .into(),
-            ));
-        }
-        if revisions.len() == 2 {
-            let (terminal_signed, terminal) = &revisions[1];
-            terminal.verify_successor_of(active, active_signed.state_hash())?;
-            let terminal_seq = events
-                .get(terminal.transition_event_id())
-                .map(|event| event.seq)
-                .ok_or_else(|| AuthorityError::Corrupt("terminal state event is missing".into()))?;
-            if terminal_seq <= activation_event.seq {
-                return Err(AuthorityError::Corrupt(
-                    "terminal grant state does not follow activation in the ledger".into(),
-                ));
-            }
-            match terminal.status() {
-                GrantStatusV2::Spent => {
-                    let decisions = decisions_by_state
-                        .get(terminal_signed.state_hash())
-                        .ok_or_else(|| {
-                            AuthorityError::Corrupt(
-                                "spent state has no atomically linked allow evidence".into(),
-                            )
-                        })?;
-                    if decisions.len() != 1
-                        || decisions[0].timestamp != terminal.transitioned_at()
-                        || decisions[0].grant_id != *grant_id
-                        || decisions[0].required_scope != claim.required_scope()
-                        || decisions[0].input_hash != claim.input_hash()
-                        || &decisions[0].context
-                            != requests
-                                .get(claim.approval_request_id())
-                                .ok_or_else(|| {
-                                    AuthorityError::Corrupt(
-                                        "allow decision approval request is missing".into(),
-                                    )
-                                })?
-                                .request
-                                .context()
-                        || &decisions[0].generation
-                            != requests
-                                .get(claim.approval_request_id())
-                                .ok_or_else(|| {
-                                    AuthorityError::Corrupt(
-                                        "allow decision approval request is missing".into(),
-                                    )
-                                })?
-                                .request
-                                .generation()
-                        || runtime.state_at(decisions[0].seq).is_none_or(|state| {
-                            state.maintenance || state.active_generation != decisions[0].generation
-                        })
-                        || decisions[0].build_identity.as_deref()
-                            != Some(decisions[0].context.build_identity())
-                        || decisions[0].policy_identity.as_deref()
-                            != Some(decisions[0].context.policy_identity())
-                        || decisions[0].seq != terminal_seq.saturating_add(1)
-                    {
-                        return Err(AuthorityError::Corrupt(
-                            "allow evidence does not exactly and consecutively follow spent state"
-                                .into(),
-                        ));
-                    }
-                }
-                GrantStatusV2::Revoked => {
-                    if decisions_by_state.contains_key(terminal_signed.state_hash()) {
-                        return Err(AuthorityError::Corrupt(
-                            "revoked state cannot authorize an allow decision".into(),
-                        ));
-                    }
-                }
-                GrantStatusV2::Active => {
-                    return Err(AuthorityError::Corrupt(
-                        "revision one cannot remain active".into(),
-                    ));
-                }
-            }
-        }
-    }
-    for state_hash in decisions_by_state.keys() {
-        let linked = states.values().flatten().any(|(signed, state)| {
-            signed.state_hash() == state_hash && state.status() == GrantStatusV2::Spent
-        });
-        if !linked {
-            return Err(AuthorityError::Corrupt(
-                "allow decision references no verified spent state".into(),
-            ));
-        }
-    }
+    let decision_events = verify_decision_relations(
+        entries,
+        &events,
+        &runtime,
+        &requests,
+        &resolutions,
+        &claims,
+        &states,
+    )?;
     let request_events: HashSet<&str> = requests
         .values()
         .map(|request| request.event_id.as_str())
@@ -859,8 +712,8 @@ fn verify_relations(
             LedgerPayloadV2::GrantStateChanged { .. } => {
                 state_events.contains(verified.entry.event_id())
             }
-            LedgerPayloadV2::DecisionAllow { state_hash, .. } => {
-                decisions_by_state.contains_key(state_hash)
+            LedgerPayloadV2::DecisionAllow { .. } | LedgerPayloadV2::DecisionRecorded { .. } => {
+                decision_events.contains(verified.entry.event_id())
             }
         };
         if !linked {

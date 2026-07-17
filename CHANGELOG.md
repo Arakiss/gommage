@@ -99,6 +99,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Bumped determinism-critical dependency pins for `regex`, `rusqlite`,
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
+- CI now rejects Rust modules above 1,000 lines. The existing Authority, CLI,
+  MCP, shell-analysis, policy, Picto, and integration-test modules were split
+  by responsibility so the limit applies to the whole current tree rather
+  than only to new files.
 - Pinned `serde_json_canonicalizer` as a determinism-critical dependency for
   Authority v2's RFC 8785 signed envelopes.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
@@ -196,11 +200,17 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 ### Added
 
 - `gommage-core` now exposes an opt-in Authority v2 substrate: one SQLite
-  transactional writer for approval deduplication, single-use grants bound to
-  the exact build/integration/tool/input/policy/capability context, signed
-  append-only state revisions, atomic allow evidence, and externally anchorable
-  ledger checkpoints. Existing Picto and approval paths remain unchanged until
-  a later control-plane migration integrates the API.
+  transactional writer commits every allow, denial, approval requirement, and
+  grant-backed allow together with approval deduplication and signed single-use
+  grant state. Grants carry an explicit scope-only or exact-input binding;
+  approval requests can only originate inside the decision transaction. Signed
+  decision records retain a bounded normalized attestation of evaluator output
+  and provenance under a frozen v2 reducer, while historical requests, claims,
+  states, and `DecisionAllow` entries remain verifiable. Tool-call commitments
+  are bounded by canonical bytes, JSON depth, and node count before Authority
+  reads time or opens a transaction. Externally anchorable checkpoints remain
+  available. Existing Picto and approval paths remain unchanged until a later
+  control-plane migration integrates the API.
 - `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes
   only the canonical observed tool input as well as its scope.
 - `gommage daemon reload` reloads policy and capability mappers in the running

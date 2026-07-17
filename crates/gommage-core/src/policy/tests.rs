@@ -7,6 +7,38 @@ fn env() -> HashMap<String, String> {
     e
 }
 
+fn evidence_rule_yaml(name: &str, decision: &str, reason: &str) -> String {
+    let scope = if decision == "ask_picto" {
+        "  required_scope: test.scope\n"
+    } else {
+        ""
+    };
+    format!(
+        "- name: {}\n  decision: {decision}\n{scope}  match:\n    any_capability: [\"test.capability\"]\n  reason: {}\n",
+        serde_json::to_string(name).unwrap(),
+        serde_json::to_string(reason).unwrap(),
+    )
+}
+
+#[test]
+fn policy_rejects_rules_that_cannot_be_recorded_by_authority() {
+    let cases = [
+        evidence_rule_yaml("", "allow", ""),
+        evidence_rule_yaml(&"n".repeat(257), "allow", ""),
+        evidence_rule_yaml("deny-empty", "gommage", ""),
+        evidence_rule_yaml("ask-empty", "ask_picto", ""),
+        evidence_rule_yaml("ask-too-long", "ask_picto", &"r".repeat(1_025)),
+        evidence_rule_yaml("bad\u{1}name", "allow", ""),
+        evidence_rule_yaml("bad-reason", "gommage", "bad\u{1}reason"),
+    ];
+    for yaml in cases {
+        assert!(
+            Policy::from_yaml_string(&yaml, &HashMap::new(), "test.yaml").is_err(),
+            "accepted unrecordable policy rule: {yaml:?}"
+        );
+    }
+}
+
 #[test]
 fn env_substitution() {
     let out = substitute_env("allow fs.read:${EXPEDITION_ROOT}/**", &env()).unwrap();
@@ -170,6 +202,7 @@ fn layered_policy_preserves_layer_order() {
   decision: ask_picto
   required_scope: "project:secret"
   match: { any_capability: ["fs.write:/repo/secret"] }
+  reason: "project secret writes require approval"
 "#,
     )
     .unwrap();
@@ -362,17 +395,20 @@ fn policy_reports_static_and_derived_picto_scope_binding_modes() {
   bind_input: true
   match:
     all_capability: ["mcp.write:*"]
+  reason: "MCP writes require exact-input approval"
 - name: shared-scope-only
   decision: ask_picto
   required_scope: "shared.scope"
   match:
     all_capability: ["task.scope-only:*"]
+  reason: "shared tasks require scope approval"
 - name: shared-input-bound
   decision: ask_picto
   required_scope: "shared.scope"
   bind_input: true
   match:
     all_capability: ["task.input-bound:*"]
+  reason: "shared tasks require exact-input approval"
 "#;
     let policy = Policy::from_yaml_string(yaml, &HashMap::new(), "requirements.yaml").unwrap();
 
@@ -408,6 +444,7 @@ fn ask_picto_scope_sources_are_mutually_exclusive() {
   required_scope_from_capability: "mcp.write:*"
   match:
     all_capability: ["mcp.write:*"]
+  reason: "MCP writes require approval"
 "#;
     let error = Policy::from_yaml_string(yaml, &HashMap::new(), "invalid.yaml").unwrap_err();
 
@@ -429,6 +466,7 @@ fn capability_derived_scope_is_only_valid_for_ask_picto() {
   required_scope_from_capability: "mcp.write:*"
   match:
     all_capability: ["mcp.write:*"]
+  reason: "MCP writes require approval"
 "#
         );
         let error = Policy::from_yaml_string(&yaml, &HashMap::new(), "invalid.yaml").unwrap_err();
@@ -455,6 +493,7 @@ fn capability_derived_scope_must_exactly_match_an_all_capability_pattern() {
   required_scope_from_capability: "{selector}"
   match:
     {match_clause}
+  reason: "MCP writes require approval"
 "#
         );
         let error = Policy::from_yaml_string(&yaml, &HashMap::new(), "invalid.yaml").unwrap_err();

@@ -416,7 +416,7 @@ mod tests {
         .unwrap();
         fs::write(
             project.join("10-project.yaml"),
-            "- name: project-ask\n  decision: ask_picto\n  required_scope: project:test\n  match: { any_capability: [\"cap:project\"] }\n",
+            "- name: project-ask\n  decision: ask_picto\n  required_scope: project:test\n  match: { any_capability: [\"cap:project\"] }\n  reason: project capability requires approval\n",
         )
         .unwrap();
         let layout = HomeLayout::at(&td.path().join("home"));

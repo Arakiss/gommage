@@ -136,27 +136,6 @@ impl Authority {
         Ok(changed)
     }
 
-    /// Create one request or return the already-open equivalent request.
-    pub fn create_or_get_request(
-        &mut self,
-        command: &CreateRequestCommand,
-    ) -> Result<CreateRequestResult, AuthorityError> {
-        let prepared = prepare_approval_request(command)?;
-        let ledger_key = self.ledger_key.clone();
-        let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
-        ensure_decision_admitted(&tx, &command.generation)?;
-        let result = create_or_get_request_in_transaction(&tx, &ledger_key, prepared)?;
-        ensure_decision_admitted(&tx, &command.generation)?;
-        tx.commit()?;
-        Ok(result)
-    }
-
     /// Resolve an open request as approved and atomically create its active grant.
     pub fn approve(&mut self, command: &ApproveCommand) -> Result<ApproveResult, AuthorityError> {
         validate_approval_actor(
@@ -212,6 +191,7 @@ impl Authority {
             expires_at,
             required_scope: stored.request.required_scope().into(),
             input_hash: stored.request.input_hash().into(),
+            binding: stored.request.binding(),
             approval_request_id: stored.request.request_id().into(),
             request_hash: stored.request_hash.clone(),
             operator_principal: command.operator_principal.clone(),
@@ -392,184 +372,6 @@ impl Authority {
         Ok(DenyResult::Denied(resolution))
     }
 
-    /// Authorize one observed approval-gated call through one serialized transaction.
-    ///
-    /// This is the runtime-facing Authority v2 boundary. The caller cannot select
-    /// build, policy, generation, timestamp, request identifiers, or decision event
-    /// identifiers. Authority derives or creates them after acquiring the write lock,
-    /// then atomically spends the one exact usable grant or leaves one exact open
-    /// approval request representing the call.
-    pub fn authorize_approval(
-        &mut self,
-        command: &AuthorizeApprovalCommandV2,
-    ) -> Result<AuthorizeApprovalResultV2, AuthorityError> {
-        validate_text("required scope", &command.required_scope, 512, false)?;
-        validate_text("approval reason", &command.reason, 1_024, true)?;
-        let grant_key = self.grant_key.clone();
-        let ledger_key = self.ledger_key.clone();
-        let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
-        let runtime_source = Arc::clone(&self.runtime_source);
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let verification = verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
-        let runtime = load_current_runtime_state(&tx)?;
-        if runtime.maintenance {
-            return Err(AuthorityError::Maintenance);
-        }
-        let generation = runtime.active_generation;
-        let context = AuthorizationContextV2::new(
-            generation.build_identity().into(),
-            command.integration.clone(),
-            command.call.tool.clone(),
-            command.call.input_hash(),
-            generation.policy_identity().into(),
-            command.capabilities.clone(),
-        )?;
-        let authorized_at = authority_now(runtime_source.as_ref())?;
-        let evidence_time_floor = verification
-            .entries
-            .iter()
-            .map(|entry| entry.entry.timestamp())
-            .max()
-            .ok_or_else(|| {
-                AuthorityError::Corrupt("authority ledger has no genesis entry".into())
-            })?;
-        if authorized_at < evidence_time_floor {
-            return Err(AuthorityError::RuntimeSource(format!(
-                "timestamp {authorized_at} predates signed evidence time {evidence_time_floor}"
-            )));
-        }
-        let (selected, not_usable) = select_usable_grant(
-            &tx,
-            &context,
-            &generation,
-            &command.required_scope,
-            authorized_at,
-            &grant_vk,
-        )?;
-        if let Some(selected) = selected {
-            let state_event_id = authority_id(runtime_source.as_ref(), "state_spend")?;
-            let decision_event_id = authority_id(runtime_source.as_ref(), "decision_allow")?;
-            let recorded = spend_grant_and_record_allow(
-                &tx,
-                selected,
-                AllowRecordInput {
-                    context: &context,
-                    generation: &generation,
-                    required_scope: &command.required_scope,
-                    consumed_at: authorized_at,
-                    event_ids: AllowEventIds {
-                        state: &state_event_id,
-                        decision: &decision_event_id,
-                    },
-                },
-                &grant_key,
-                &ledger_key,
-            )?;
-            ensure_decision_admitted(&tx, &generation)?;
-            tx.commit()?;
-            return Ok(AuthorizeApprovalResultV2::Allowed {
-                state: recorded.state,
-                decision_event_id: recorded.decision_event_id,
-            });
-        }
-        if not_usable == GrantNotUsableReason::NotYetValid {
-            return Err(AuthorityError::RuntimeSource(
-                "matching grant validity begins after authoritative time".into(),
-            ));
-        }
-        let request_id = authority_id(runtime_source.as_ref(), "request")?;
-        let event_id = authority_id(runtime_source.as_ref(), "approval_request")?;
-        let prepared = prepare_approval_request(&CreateRequestCommand {
-            request_id,
-            event_id,
-            created_at: authorized_at,
-            context,
-            generation: generation.clone(),
-            required_scope: command.required_scope.clone(),
-            reason: command.reason.clone(),
-        })?;
-        let request = create_or_get_request_in_transaction(&tx, &ledger_key, prepared)?;
-        ensure_decision_admitted(&tx, &generation)?;
-        tx.commit()?;
-        Ok(match request {
-            CreateRequestResult::Created(request) => AuthorizeApprovalResultV2::ApprovalRequired {
-                request: Box::new(request),
-                created: true,
-            },
-            CreateRequestResult::Existing(request) => AuthorizeApprovalResultV2::ApprovalRequired {
-                request: Box::new(request),
-                created: false,
-            },
-        })
-    }
-
-    /// Atomically spend a matching grant and record the final allow evidence.
-    pub fn consume_and_record_allow(
-        &mut self,
-        command: &ConsumeCommand,
-    ) -> Result<ConsumeResult, AuthorityError> {
-        validate_text("required scope", &command.required_scope, 512, false)?;
-        validate_context_generation(&command.context, &command.generation)?;
-        validate_token("state event id", &command.state_event_id, 160)?;
-        validate_token("decision event id", &command.decision_event_id, 160)?;
-        validate_timestamp(command.consumed_at)?;
-        let grant_key = self.grant_key.clone();
-        let ledger_key = self.ledger_key.clone();
-        let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
-        ensure_decision_admitted(&tx, &command.generation)?;
-        let (selected, not_usable) = select_usable_grant(
-            &tx,
-            &command.context,
-            &command.generation,
-            &command.required_scope,
-            command.consumed_at,
-            &grant_vk,
-        )?;
-        let Some(selected) = selected else {
-            ensure_decision_admitted(&tx, &command.generation)?;
-            tx.commit()?;
-            return Ok(ConsumeResult::NotUsable(
-                if not_usable == GrantNotUsableReason::Terminal {
-                    GrantNotUsableReason::Missing
-                } else {
-                    not_usable
-                },
-            ));
-        };
-        let recorded = spend_grant_and_record_allow(
-            &tx,
-            selected,
-            AllowRecordInput {
-                context: &command.context,
-                generation: &command.generation,
-                required_scope: &command.required_scope,
-                consumed_at: command.consumed_at,
-                event_ids: AllowEventIds {
-                    state: &command.state_event_id,
-                    decision: &command.decision_event_id,
-                },
-            },
-            &grant_key,
-            &ledger_key,
-        )?;
-        ensure_decision_admitted(&tx, &command.generation)?;
-        tx.commit()?;
-        Ok(ConsumeResult::Consumed {
-            state: recorded.state,
-            decision_event_id: recorded.decision_event_id,
-        })
-    }
-
     /// Revoke an active grant through the same serialized state boundary.
     pub fn revoke(&mut self, command: &RevokeCommand) -> Result<RevokeResult, AuthorityError> {
         validate_token("grant id", &command.grant_id, 160)?;
@@ -724,6 +526,10 @@ impl Authority {
     }
 
     /// Verify every ledger, request, resolution, claim, state, and cross-link.
+    ///
+    /// Decision verification authenticates Authority's normalized evaluator
+    /// attestation and its internal reduction. It does not replay the policy or
+    /// mapper artifacts identified by the signed generation.
     ///
     /// Without `trusted_checkpoint`, the chain is internally authenticated but
     /// explicitly reported as [`FreshnessVerdict::Unanchored`].

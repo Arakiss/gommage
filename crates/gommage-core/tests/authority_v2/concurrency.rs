@@ -1,21 +1,18 @@
 use super::*;
 
 #[test]
-fn concurrent_identical_requests_share_one_open_slot() {
+fn concurrent_decision_asks_share_one_request_but_record_every_attempt() {
     let (_directory, path, authority) = fixture();
     drop(authority);
     let barrier = Arc::new(Barrier::new(32));
     let handles: Vec<_> = (0..32)
-        .map(|index| {
+        .map(|_| {
             let barrier = Arc::clone(&barrier);
             let path = path.clone();
             thread::spawn(move || {
                 let mut authority = open(&path);
                 barrier.wait();
-                authority.create_or_get_request(&request_command(
-                    &format!("request_{index}"),
-                    &format!("event_request_{index}"),
-                ))
+                authority.commit_decision(&authorize_command())
             })
         })
         .collect();
@@ -26,34 +23,50 @@ fn concurrent_identical_requests_share_one_open_slot() {
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, CreateRequestResult::Created(_)))
+            .filter(|result| matches!(
+                result,
+                CommittedDecisionV2::ApprovalRequired { created: true, .. }
+            ))
             .count(),
         1
     );
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, CreateRequestResult::Existing(_)))
+            .filter(|result| matches!(
+                result,
+                CommittedDecisionV2::ApprovalRequired { created: false, .. }
+            ))
             .count(),
         31
     );
-    let raw = Connection::open(&path).unwrap();
-    let counts: (i64, i64) = raw
-        .query_row(
-            "SELECT
-                (SELECT count(*) FROM approval_requests),
-                (SELECT count(*) FROM open_approvals)",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(counts, (1, 1));
+    let authority = open(&path);
+    let verification = authority.verify_ledger(None).unwrap();
+    assert_eq!(verification.head_seq, "34");
+    assert_eq!(
+        verification
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.event_type() == "approval_requested")
+            .count(),
+        1
+    );
+    assert_eq!(
+        verification
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.event_type() == "decision_recorded")
+            .count(),
+        32
+    );
 }
 
 #[test]
 fn thirty_two_concurrent_approvers_create_exactly_one_grant() {
     let (_directory, path, mut authority) = fixture();
-    create_request(&mut authority);
+    let request = create_request(&mut authority);
+    let request_id = request.request_id().to_owned();
+    let resolved_at = request.created_at();
     drop(authority);
 
     let barrier = Arc::new(Barrier::new(32));
@@ -61,10 +74,14 @@ fn thirty_two_concurrent_approvers_create_exactly_one_grant() {
         .map(|index| {
             let barrier = Arc::clone(&barrier);
             let path = path.clone();
+            let request_id = request_id.clone();
             thread::spawn(move || {
                 let mut authority = open(&path);
                 barrier.wait();
-                authority.approve(&approve_command(index))
+                let mut command = approve_command(index);
+                command.request_id = request_id;
+                command.resolved_at = resolved_at;
+                authority.approve(&command)
             })
         })
         .collect();
@@ -95,21 +112,21 @@ fn thirty_two_concurrent_approvers_create_exactly_one_grant() {
 }
 
 #[test]
-fn one_hundred_concurrent_consumers_yield_one_allow() {
+fn thirty_two_concurrent_decisions_yield_one_allow_and_record_every_retry() {
     let (_directory, path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
+    let request = create_request(&mut authority);
+    approve(&mut authority, &request);
     drop(authority);
 
-    let barrier = Arc::new(Barrier::new(100));
-    let handles: Vec<_> = (0..100)
+    let barrier = Arc::new(Barrier::new(32));
+    let handles: Vec<_> = (0..32)
         .map(|index| {
             let barrier = Arc::clone(&barrier);
             let path = path.clone();
             thread::spawn(move || {
                 let mut authority = open(&path);
                 barrier.wait();
-                authority.consume_and_record_allow(&consume_command(index))
+                authority.commit_decision(&consume_command(index))
             })
         })
         .collect();
@@ -120,21 +137,16 @@ fn one_hundred_concurrent_consumers_yield_one_allow() {
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, ConsumeResult::Consumed { .. }))
+            .filter(|result| matches!(result, CommittedDecisionV2::AllowedByGrant { .. }))
             .count(),
         1
     );
     assert_eq!(
         results
             .iter()
-            .filter(|result| {
-                matches!(
-                    result,
-                    ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
-                )
-            })
+            .filter(|result| matches!(result, CommittedDecisionV2::ApprovalRequired { .. }))
             .count(),
-        99
+        31
     );
     let authority = open(&path);
     let allow_events = authority
@@ -142,19 +154,20 @@ fn one_hundred_concurrent_consumers_yield_one_allow() {
         .unwrap()
         .entries
         .into_iter()
-        .filter(|entry| entry.entry.event_type() == "decision_allow")
+        .filter(|entry| entry.entry.event_type() == "decision_recorded")
         .count();
-    assert_eq!(allow_events, 1);
+    assert_eq!(allow_events, 33);
 }
 
 #[test]
 fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
     let (_directory, path, mut authority) = fixture();
     let command = authorize_command();
-    let request = match authority.authorize_approval(&command).unwrap() {
-        AuthorizeApprovalResultV2::ApprovalRequired {
+    let request = match authority.commit_decision(&command).unwrap() {
+        CommittedDecisionV2::ApprovalRequired {
             request,
             created: true,
+            ..
         } => request,
         other => panic!("expected initial request, got {other:?}"),
     };
@@ -175,7 +188,7 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
             thread::spawn(move || {
                 let mut authority = open(&path);
                 barrier.wait();
-                authority.authorize_approval(&command)
+                authority.commit_decision(&command)
             })
         })
         .collect();
@@ -186,7 +199,7 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, AuthorizeApprovalResultV2::Allowed { .. }))
+            .filter(|result| matches!(result, CommittedDecisionV2::AllowedByGrant { .. }))
             .count(),
         1
     );
@@ -195,7 +208,7 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
             .iter()
             .filter(|result| matches!(
                 result,
-                AuthorizeApprovalResultV2::ApprovalRequired { created: true, .. }
+                CommittedDecisionV2::ApprovalRequired { created: true, .. }
             ))
             .count(),
         1
@@ -205,7 +218,7 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
             .iter()
             .filter(|result| matches!(
                 result,
-                AuthorizeApprovalResultV2::ApprovalRequired { created: false, .. }
+                CommittedDecisionV2::ApprovalRequired { created: false, .. }
             ))
             .count(),
         30
@@ -213,9 +226,7 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
     let request_ids: Vec<_> = results
         .iter()
         .filter_map(|result| match result {
-            AuthorizeApprovalResultV2::ApprovalRequired { request, .. } => {
-                Some(request.request_id())
-            }
+            CommittedDecisionV2::ApprovalRequired { request, .. } => Some(request.request_id()),
             _ => None,
         })
         .collect();
@@ -228,14 +239,14 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
 
     let authority = open(&path);
     let verification = authority.verify_ledger(None).unwrap();
-    assert_eq!(verification.head_seq, "7");
+    assert_eq!(verification.head_seq, "39");
     assert_eq!(
         verification
             .entries
             .iter()
-            .filter(|entry| entry.entry.event_type() == "decision_allow")
+            .filter(|entry| entry.entry.event_type() == "decision_recorded")
             .count(),
-        1
+        33
     );
     let raw = Connection::open(&path).unwrap();
     let counts: (i64, i64, i64) = raw
@@ -254,26 +265,33 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
 #[test]
 fn approve_deny_and_consume_revoke_races_have_one_winner() {
     let (_directory, path, mut authority) = fixture();
-    create_request(&mut authority);
+    let request = create_request(&mut authority);
+    let request_id = request.request_id().to_owned();
+    let resolved_at = request.created_at();
     drop(authority);
     let barrier = Arc::new(Barrier::new(2));
     let approve_handle = {
         let path = path.clone();
         let barrier = Arc::clone(&barrier);
+        let request_id = request_id.clone();
         thread::spawn(move || {
             let mut authority = open(&path);
             barrier.wait();
-            authority.approve(&approve_command(1)).unwrap()
+            let mut command = approve_command(1);
+            command.request_id = request_id;
+            command.resolved_at = resolved_at;
+            authority.approve(&command).unwrap()
         })
     };
     let deny_handle = {
         let path = path.clone();
         let barrier = Arc::clone(&barrier);
+        let request_id = request_id.clone();
         thread::spawn(move || {
             let mut authority = open(&path);
             barrier.wait();
             authority
-                .deny(&deny_command("request_1", 1, 1_700_000_020))
+                .deny(&deny_command(&request_id, 1, resolved_at))
                 .unwrap()
         })
     };
@@ -287,8 +305,8 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
     open(&path).verify_ledger(None).unwrap();
 
     let (_terminal_directory, terminal_path, mut terminal_authority) = fixture();
-    create_request(&mut terminal_authority);
-    approve(&mut terminal_authority);
+    let terminal_request = create_request(&mut terminal_authority);
+    approve(&mut terminal_authority, &terminal_request);
     drop(terminal_authority);
 
     let barrier = Arc::new(Barrier::new(2));
@@ -298,9 +316,7 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
         thread::spawn(move || {
             let mut authority = open(&path);
             barrier.wait();
-            authority
-                .consume_and_record_allow(&consume_command(10))
-                .unwrap()
+            authority.commit_decision(&consume_command(10)).unwrap()
         })
     };
     let revoke_handle = {
@@ -324,8 +340,10 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
     let consume_result = consume_handle.join().unwrap();
     let revoke_result = revoke_handle.join().unwrap();
     assert_eq!(
-        usize::from(matches!(consume_result, ConsumeResult::Consumed { .. }))
-            + usize::from(matches!(revoke_result, RevokeResult::Revoked(_))),
+        usize::from(matches!(
+            consume_result,
+            CommittedDecisionV2::AllowedByGrant { .. }
+        )) + usize::from(matches!(revoke_result, RevokeResult::Revoked(_))),
         1
     );
     open(&terminal_path).verify_ledger(None).unwrap();

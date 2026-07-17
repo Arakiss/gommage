@@ -8,6 +8,7 @@ pub mod approval;
 pub mod approval_webhook;
 pub mod authority;
 pub mod capability;
+mod contracts;
 pub mod crypto_envelope;
 pub mod error;
 pub mod evaluator;
@@ -32,14 +33,15 @@ pub use approval_webhook::{
 };
 pub use authority::{
     ActivateGenerationCommand, ApprovalRequestV2, ApprovalResolutionKindV2, ApprovalResolutionV2,
-    ApproveCommand, ApproveResult, Authority, AuthorityConfig, AuthorityError,
-    AuthorityGenerationV2, AuthorityMetadata, AuthorityRuntimeSource, AuthorityRuntimeStateV2,
-    AuthorizationContextV2, AuthorizeApprovalCommandV2, AuthorizeApprovalResultV2, ConsumeCommand,
-    ConsumeResult, CreateRequestCommand, CreateRequestResult, CutoverStateV2, DenyCommand,
-    DenyResult, FreshnessVerdict, GrantNotUsableReason, LedgerCheckpointV2, LedgerCursorV2,
-    LedgerEntryV2, LedgerPageV2, LedgerPayloadV2, LedgerVerification, MAX_LEDGER_PAGE_ENTRIES,
-    RevokeCommand, RevokeResult, SetMaintenanceCommand, SignedLedgerCheckpointV2,
-    SignedLedgerCursorV2, SystemAuthorityRuntimeSource, VerifiedLedgerEntryV2,
+    ApproveCommand, ApproveResult, Authority, AuthorityConfig, AuthorityDecisionOutcomeV2,
+    AuthorityError, AuthorityGenerationV2, AuthorityMetadata, AuthorityRuntimeSource,
+    AuthorityRuntimeStateV2, AuthorizationContextV2, CommitDecisionCommandV2, CommittedDecisionV2,
+    CutoverStateV2, DecisionContextV2, DenyCommand, DenyResult, FreshnessVerdict,
+    GrantNotUsableReason, LedgerCheckpointV2, LedgerCursorV2, LedgerEntryV2, LedgerPageV2,
+    LedgerPayloadV2, LedgerVerification, MAX_DECISION_RECORD_BYTES, MAX_LEDGER_PAGE_ENTRIES,
+    RecordedCapabilityEvidenceV2, RecordedDecisionV2, RecordedEvaluationV2, RevokeCommand,
+    RevokeResult, SetMaintenanceCommand, SignedLedgerCheckpointV2, SignedLedgerCursorV2,
+    SystemAuthorityRuntimeSource, VerifiedLedgerEntryV2,
 };
 pub use capability::Capability;
 pub use crypto_envelope::{
@@ -61,4 +63,6 @@ pub use picto::{
 };
 pub use policy::{Match, Policy, PolicyLayer, PolicyLayerKind, Rule, RuleDecision, RuleSource};
 pub use shell::shell_write_targets;
-pub use toolcall::ToolCall;
+pub use toolcall::{
+    MAX_CANONICAL_TOOL_CALL_BYTES, MAX_TOOL_CALL_JSON_DEPTH, MAX_TOOL_CALL_JSON_NODES, ToolCall,
+};

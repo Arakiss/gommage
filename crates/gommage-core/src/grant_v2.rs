@@ -1,8 +1,11 @@
-//! Exact-input, single-use grants for the Authority v2 reference profile.
+//! Explicitly bound, single-use grants for the Authority v2 reference profile.
 
-use crate::crypto_envelope::{
-    CryptoEnvelopeError, EnvelopeDomain, KeyBound, SignedJcs, grant_claim_hash, grant_state_hash,
-    sign_payload, verify_payload,
+use crate::{
+    crypto_envelope::{
+        CryptoEnvelopeError, EnvelopeDomain, KeyBound, SignedJcs, grant_claim_hash,
+        grant_state_hash, sign_payload, verify_payload,
+    },
+    picto::PictoBinding,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -21,7 +24,7 @@ const MAX_SCOPE_BYTES: usize = 512;
 const MAX_PRINCIPAL_BYTES: usize = 256;
 const MAX_REASON_BYTES: usize = 1_024;
 
-/// Input fields for a new exact-input grant claim.
+/// Input fields for a new explicitly bound grant claim.
 #[derive(Debug, Clone)]
 pub struct GrantClaimFields {
     /// Stable authority instance identifier.
@@ -40,6 +43,8 @@ pub struct GrantClaimFields {
     pub required_scope: String,
     /// Canonical `sha256:` digest of the complete tool input.
     pub input_hash: String,
+    /// Whether the grant covers its scope or one exact canonical input.
+    pub binding: PictoBinding,
     /// Approval request that authorized this claim.
     pub approval_request_id: String,
     /// Canonical hash of the immutable approval request.
@@ -67,6 +72,8 @@ pub struct GrantClaimV2 {
     max_uses: u8,
     required_scope: String,
     input_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    binding: Option<PictoBinding>,
     approval_request_id: String,
     request_hash: String,
     operator_principal: String,
@@ -89,6 +96,7 @@ impl GrantClaimV2 {
             max_uses: 1,
             required_scope: fields.required_scope,
             input_hash: fields.input_hash,
+            binding: Some(fields.binding),
             approval_request_id: fields.approval_request_id,
             request_hash: fields.request_hash,
             operator_principal: fields.operator_principal,
@@ -139,9 +147,21 @@ impl GrantClaimV2 {
         &self.required_scope
     }
 
-    /// Return the exact canonical input hash.
+    /// Return the canonical input hash that triggered the approval.
     pub fn input_hash(&self) -> &str {
         &self.input_hash
+    }
+
+    /// Return the signed scope-only or exact-input authority boundary.
+    ///
+    /// Claims written before the explicit field existed are exact-input bound
+    /// to their already-signed `input_hash`.
+    pub fn binding(&self) -> PictoBinding {
+        self.binding
+            .clone()
+            .unwrap_or_else(|| PictoBinding::ExactInput {
+                input_hash: self.input_hash.clone(),
+            })
     }
 
     /// Return the authorizing approval request identifier.
@@ -169,10 +189,16 @@ impl GrantClaimV2 {
         &self.grant_key_id
     }
 
-    /// Report whether the exact scope, input, and time satisfy this claim.
+    /// Report whether the scope, signed binding, and time satisfy this claim.
     pub fn is_usable_for(&self, scope: &str, input_hash: &str, now: i64) -> bool {
         self.required_scope == scope
-            && self.input_hash == input_hash
+            && match self.binding.as_ref() {
+                Some(PictoBinding::ScopeOnly) => true,
+                Some(PictoBinding::ExactInput {
+                    input_hash: bound_hash,
+                }) => bound_hash == input_hash,
+                None => self.input_hash == input_hash,
+            }
             && now >= self.not_before
             && now < self.expires_at
     }
@@ -206,6 +232,14 @@ impl GrantClaimV2 {
         }
         validate_text("scope", &self.required_scope, MAX_SCOPE_BYTES, false)?;
         validate_hash("input hash", &self.input_hash)?;
+        if let Some(PictoBinding::ExactInput { input_hash }) = self.binding.as_ref() {
+            validate_hash("exact-input binding hash", input_hash)?;
+            if input_hash != &self.input_hash {
+                return Err(GrantV2Error::InvalidClaim(
+                    "exact-input binding does not match the triggering input hash".into(),
+                ));
+            }
+        }
         validate_token(
             "approval request id",
             &self.approval_request_id,
@@ -319,6 +353,10 @@ impl GrantStateV2 {
         transition_event_id: String,
         transitioned_at: i64,
     ) -> Result<Self, GrantV2Error> {
+        claim.validate()?;
+        validate_hash("claim hash", claim_hash)?;
+        validate_token("transition event id", &transition_event_id, MAX_ID_BYTES)?;
+        validate_safe_timestamp("transitioned_at", transitioned_at)?;
         let state = Self {
             domain: STATE_DOMAIN.into(),
             version: VERSION,
@@ -346,6 +384,10 @@ impl GrantStateV2 {
         transition_event_id: String,
         transitioned_at: i64,
     ) -> Result<Self, GrantV2Error> {
+        previous.validate()?;
+        validate_hash("previous state hash", previous_state_hash)?;
+        validate_token("transition event id", &transition_event_id, MAX_ID_BYTES)?;
+        validate_safe_timestamp("transitioned_at", transitioned_at)?;
         if previous.status != GrantStatusV2::Active || previous.revision != "0" {
             return Err(GrantV2Error::InvalidTransition(
                 "only active revision zero may transition".into(),
@@ -676,7 +718,7 @@ fn validate_key_id(value: &str, purpose: &str) -> Result<(), GrantV2Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto_envelope::{KeyPurpose, canonicalize, key_id};
+    use crate::crypto_envelope::{KeyPurpose, canonicalize, decode_canonical, key_id};
 
     fn key() -> SigningKey {
         SigningKey::from_bytes(&[11; 32])
@@ -693,6 +735,9 @@ mod tests {
             expires_at: 1_600,
             required_scope: "deploy:staging".into(),
             input_hash: format!("sha256:{}", "1".repeat(64)),
+            binding: PictoBinding::ExactInput {
+                input_hash: format!("sha256:{}", "1".repeat(64)),
+            },
             approval_request_id: "request_test".into(),
             request_hash: format!("sha256:{}", "2".repeat(64)),
             operator_principal: "uid:501".into(),
@@ -711,6 +756,12 @@ mod tests {
         let claim = claim();
         let signed_claim = SignedGrantClaimV2::sign(&claim, &key).unwrap();
         assert_eq!(signed_claim.verify(&key.verifying_key()).unwrap(), claim);
+        assert!(claim.binding().is_exact_input());
+        assert!(!claim.is_usable_for(
+            "deploy:staging",
+            &format!("sha256:{}", "9".repeat(64)),
+            1_100,
+        ));
 
         let active = GrantStateV2::active(
             &claim,
@@ -741,6 +792,37 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn scope_only_claim_accepts_another_input_and_signs_the_binding() {
+        let mut fields = claim_fields();
+        fields.binding = PictoBinding::ScopeOnly;
+        let claim = GrantClaimV2::new(fields).unwrap();
+        assert_eq!(claim.binding(), PictoBinding::ScopeOnly);
+        assert!(claim.is_usable_for(
+            "deploy:staging",
+            &format!("sha256:{}", "9".repeat(64)),
+            1_100,
+        ));
+        let canonical = String::from_utf8(canonicalize(&claim).unwrap()).unwrap();
+        assert!(canonical.contains(r#""binding":{"kind":"scope_only"}"#));
+    }
+
+    #[test]
+    fn claim_without_explicit_binding_remains_legacy_exact_input() {
+        let claim = claim();
+        let mut value = serde_json::to_value(&claim).unwrap();
+        value.as_object_mut().unwrap().remove("binding");
+        let legacy_jcs = canonicalize(&value).unwrap();
+        let decoded: GrantClaimV2 = decode_canonical(&legacy_jcs).unwrap();
+        assert_eq!(
+            decoded.binding(),
+            PictoBinding::ExactInput {
+                input_hash: decoded.input_hash().into(),
+            }
+        );
+        assert_eq!(canonicalize(&decoded).unwrap(), legacy_jcs);
     }
 
     #[test]
@@ -789,5 +871,46 @@ mod tests {
         let mut hash = claim_fields();
         hash.input_hash = format!("SHA256:{}", "A".repeat(64));
         assert!(GrantClaimV2::new(hash).is_err());
+
+        let mut binding = claim_fields();
+        binding.binding = PictoBinding::ExactInput {
+            input_hash: "x".repeat(MAX_REASON_BYTES + 1),
+        };
+        assert!(GrantClaimV2::new(binding).is_err());
+    }
+
+    #[test]
+    fn state_constructors_reject_unvalidated_inputs_before_copying_them() {
+        let mut invalid_claim = claim();
+        invalid_claim.authority_instance = "x".repeat(MAX_ID_BYTES + 1);
+        assert!(
+            GrantStateV2::active(
+                &invalid_claim,
+                &format!("sha256:{}", "2".repeat(64)),
+                "event_active".into(),
+                1_001,
+            )
+            .is_err()
+        );
+
+        let valid_claim = claim();
+        let mut invalid_state = GrantStateV2::active(
+            &valid_claim,
+            &format!("sha256:{}", "2".repeat(64)),
+            "event_active".into(),
+            1_001,
+        )
+        .unwrap();
+        invalid_state.authority_instance = "x".repeat(MAX_ID_BYTES + 1);
+        assert!(
+            GrantStateV2::terminal(
+                &invalid_state,
+                &format!("sha256:{}", "3".repeat(64)),
+                GrantStatusV2::Spent,
+                "event_spent".into(),
+                1_002,
+            )
+            .is_err()
+        );
     }
 }

@@ -181,8 +181,10 @@ fn distinct_ask_scopes_require_the_call_to_be_split() {
         panic!("distinct scopes must synthesize a deny");
     };
     assert!(!hard_stop);
-    assert!(reason.contains("scope:X, scope:Y"));
-    assert!(reason.contains("split the call"));
+    assert_eq!(
+        reason,
+        "multiple Picto scopes required (2 distinct scopes); split the call before requesting authorization"
+    );
     assert_eq!(
         result.matched_rule.as_ref().map(|rule| rule.name.as_str()),
         Some("ask-a")

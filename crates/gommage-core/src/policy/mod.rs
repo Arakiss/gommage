@@ -1,4 +1,12 @@
-use crate::{Capability, error::GommageError, picto::validate_picto_scope};
+use crate::{
+    Capability,
+    contracts::{
+        MAX_APPROVAL_REASON_BYTES, MAX_DECISION_REASON_BYTES, MAX_EVIDENCE_LAYER_BYTES,
+        MAX_EVIDENCE_RULE_FILE_BYTES, MAX_EVIDENCE_RULE_NAME_BYTES,
+    },
+    error::GommageError,
+    picto::validate_picto_scope,
+};
 use globset::{Glob, GlobMatcher};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -626,6 +634,34 @@ fn compile_rule(
     source: RuleSource,
     path_normalizer: &PathNormalizer,
 ) -> Result<Rule, GommageError> {
+    validate_evidence_text(&raw.name, "rule name", MAX_EVIDENCE_RULE_NAME_BYTES, false)?;
+    validate_evidence_text(
+        &source.layer,
+        "policy layer",
+        MAX_EVIDENCE_LAYER_BYTES,
+        false,
+    )?;
+    validate_evidence_text(
+        &source.file.to_string_lossy(),
+        "policy file",
+        MAX_EVIDENCE_RULE_FILE_BYTES,
+        false,
+    )?;
+    match raw.decision {
+        RuleDecision::Allow => {}
+        RuleDecision::Gommage => validate_evidence_text(
+            &raw.reason,
+            "gommage reason",
+            MAX_DECISION_REASON_BYTES,
+            true,
+        )?,
+        RuleDecision::AskPicto => validate_evidence_text(
+            &raw.reason,
+            "approval reason",
+            MAX_APPROVAL_REASON_BYTES,
+            true,
+        )?,
+    }
     // Validate decision/field combinations early — a policy with inconsistent
     // fields should fail at load, not at evaluation.
     if raw.required_scope.is_some() && raw.required_scope_from_capability.is_some() {
@@ -729,6 +765,29 @@ fn compile_rule(
         reason: raw.reason,
         source,
     })
+}
+
+fn validate_evidence_text(
+    value: &str,
+    label: &str,
+    max_bytes: usize,
+    allow_newlines: bool,
+) -> Result<(), GommageError> {
+    if value.is_empty() || value.len() > max_bytes {
+        return Err(GommageError::Policy(format!(
+            "{label} is empty or exceeds {max_bytes} bytes"
+        )));
+    }
+    if value.chars().any(|character| {
+        character == '\0'
+            || (character.is_control()
+                && !(allow_newlines && matches!(character, '\n' | '\r' | '\t')))
+    }) {
+        return Err(GommageError::Policy(format!(
+            "{label} contains unsupported control characters"
+        )));
+    }
+    Ok(())
 }
 
 fn compile_globs(

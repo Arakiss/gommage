@@ -1,6 +1,25 @@
 use super::*;
 use proptest::prelude::*;
 
+mod legacy_compat;
+
+#[test]
+fn authorization_context_rejects_raw_capability_fanout_before_normalization() {
+    let capabilities = vec!["duplicate.capability".to_string(); MAX_CAPABILITIES + 1];
+    let error = AuthorizationContextV2::new(
+        "gommage-test-build".into(),
+        "codex".into(),
+        "Bash".into(),
+        format!("sha256:{}", "1".repeat(64)),
+        format!("sha256:{}", "2".repeat(64)),
+        capabilities,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, AuthorityError::InvalidInput(message) if message.contains("input capabilities"))
+    );
+}
+
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 512,
@@ -24,6 +43,9 @@ proptest! {
             capabilities,
         );
         if let Ok(context) = context {
+            let binding = PictoBinding::ExactInput {
+                input_hash: context.input_hash().into(),
+            };
             let command = CreateRequestCommand {
                 request_id: "request_property".into(),
                 event_id: "event_property".into(),
@@ -38,6 +60,7 @@ proptest! {
                 )
                 .unwrap(),
                 context,
+                binding,
                 required_scope: scope,
                 reason,
             };

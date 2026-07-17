@@ -3,24 +3,22 @@ use super::*;
 #[test]
 fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
     let (_directory, _path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
+    let request = create_request(&mut authority);
+    approve(&mut authority, &request);
     authority
         .activate_generation(&activate_command("2", 2, 1_700_000_025))
         .unwrap();
     let head_before = authority.verify_ledger(None).unwrap().head_seq;
 
-    let stale_request = request_command("request_stale", "event_request_stale");
+    let decisions_before = authority
+        .verify_ledger(None)
+        .unwrap()
+        .entries
+        .iter()
+        .filter(|entry| entry.entry.event_type() == "decision_recorded")
+        .count();
     assert!(matches!(
-        authority.create_or_get_request(&stale_request),
-        Err(AuthorityError::StaleGeneration {
-            evaluated_generation_id,
-            active_generation_id,
-        }) if evaluated_generation_id == "1" && active_generation_id == "2"
-    ));
-    assert!(authority.request("request_stale").unwrap().is_none());
-    assert!(matches!(
-        authority.consume_and_record_allow(&consume_command(9)),
+        authority.commit_decision(&consume_command(9)),
         Err(AuthorityError::StaleGeneration { .. })
     ));
     assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
@@ -40,9 +38,9 @@ fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
             .unwrap()
             .entries
             .iter()
-            .filter(|entry| entry.entry.event_type() == "decision_allow")
+            .filter(|entry| entry.entry.event_type() == "decision_recorded")
             .count(),
-        0
+        decisions_before
     );
 }
 
@@ -50,7 +48,7 @@ fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
 fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
     for blocked_by_maintenance in [false, true] {
         let (_directory, _path, mut authority) = fixture();
-        create_request(&mut authority);
+        let request = create_request(&mut authority);
         if blocked_by_maintenance {
             authority
                 .set_maintenance(&maintenance_command(true, 1, 1_700_000_015))
@@ -62,7 +60,7 @@ fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
         }
         let head_before = authority.verify_ledger(None).unwrap().head_seq;
 
-        let result = authority.approve(&approve_command(1));
+        let result = authority.approve(&approval_command(&request, 1));
         if blocked_by_maintenance {
             assert!(matches!(result, Err(AuthorityError::Maintenance)));
         } else {
@@ -75,31 +73,23 @@ fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
             ));
         }
         assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
-        assert!(authority.resolution("request_1").unwrap().is_none());
+        assert!(
+            authority
+                .resolution(request.request_id())
+                .unwrap()
+                .is_none()
+        );
         assert!(authority.grant("grant_1").unwrap().is_none());
-        assert!(authority.request("request_1").unwrap().is_some());
+        assert!(authority.request(request.request_id()).unwrap().is_some());
     }
 }
 
 #[test]
 fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
     let (_directory, _path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
-
-    let mut second = request_command("request_2", "event_request_2");
-    second.context = context_with(
-        "gommage-test-build",
-        "codex",
-        "Bash",
-        '4',
-        '2',
-        &["git.push:refs/heads/main", "proc.exec:git"],
-    );
-    assert!(matches!(
-        authority.create_or_get_request(&second).unwrap(),
-        CreateRequestResult::Created(request) if request.request_id() == "request_2"
-    ));
+    let first = create_request(&mut authority);
+    approve(&mut authority, &first);
+    let second = create_second_request(&mut authority);
     authority
         .activate_generation(&activate_command("2", 2, 1_700_000_025))
         .unwrap();
@@ -109,10 +99,10 @@ fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
 
     assert!(matches!(
         authority
-            .deny(&deny_command("request_2", 2, 1_700_000_030))
+            .deny(&deny_command(second.request_id(), 2, 1_700_000_030))
             .unwrap(),
         DenyResult::Denied(resolution)
-            if resolution.request_id == "request_2"
+            if resolution.request_id == second.request_id()
                 && resolution.kind == gommage_core::ApprovalResolutionKindV2::Denied
     ));
     assert!(matches!(
@@ -145,7 +135,9 @@ fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
 #[test]
 fn generation_activation_linearizes_with_concurrent_approval() {
     let (_directory, path, mut authority) = fixture();
-    create_request(&mut authority);
+    let request = create_request(&mut authority);
+    let request_id = request.request_id().to_owned();
+    let resolved_at = request.created_at();
     drop(authority);
 
     let barrier = Arc::new(Barrier::new(2));
@@ -155,7 +147,10 @@ fn generation_activation_linearizes_with_concurrent_approval() {
         thread::spawn(move || {
             let mut authority = open(&path);
             barrier.wait();
-            authority.approve(&approve_command(1))
+            let mut command = approve_command(1);
+            command.request_id = request_id;
+            command.resolved_at = resolved_at;
+            authority.approve(&command)
         })
     };
     let activate_handle = {
@@ -209,25 +204,17 @@ fn generation_activation_linearizes_with_concurrent_approval() {
 #[test]
 fn maintenance_blocks_decisions_without_mutation_until_signed_exit() {
     let (_directory, _path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
+    let request = create_request(&mut authority);
+    approve(&mut authority, &request);
     authority
         .set_maintenance(&maintenance_command(true, 1, 1_700_000_025))
         .unwrap();
     let head_before = authority.verify_ledger(None).unwrap().head_seq;
 
     assert!(matches!(
-        authority.create_or_get_request(&request_command(
-            "request_maintenance",
-            "event_request_maintenance",
-        )),
+        authority.commit_decision(&consume_command(9)),
         Err(AuthorityError::Maintenance)
     ));
-    assert!(matches!(
-        authority.consume_and_record_allow(&consume_command(9)),
-        Err(AuthorityError::Maintenance)
-    ));
-    assert!(authority.request("request_maintenance").unwrap().is_none());
     assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
     assert_eq!(
         authority
@@ -244,18 +231,16 @@ fn maintenance_blocks_decisions_without_mutation_until_signed_exit() {
         .set_maintenance(&maintenance_command(false, 2, 1_700_000_026))
         .unwrap();
     assert!(matches!(
-        authority
-            .consume_and_record_allow(&consume_command(10))
-            .unwrap(),
-        ConsumeResult::Consumed { .. }
+        authority.commit_decision(&consume_command(10)).unwrap(),
+        CommittedDecisionV2::AllowedByGrant { .. }
     ));
 }
 
 #[test]
 fn generation_activation_linearizes_with_concurrent_allow() {
     let (_directory, path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
+    let request = create_request(&mut authority);
+    approve(&mut authority, &request);
     drop(authority);
 
     let barrier = Arc::new(Barrier::new(2));
@@ -265,7 +250,7 @@ fn generation_activation_linearizes_with_concurrent_allow() {
         thread::spawn(move || {
             let mut authority = open(&path);
             barrier.wait();
-            authority.consume_and_record_allow(&consume_command(20))
+            authority.commit_decision(&consume_command(20))
         })
     };
     let activate_handle = {
@@ -292,11 +277,19 @@ fn generation_activation_linearizes_with_concurrent_allow() {
         .iter()
         .enumerate()
         .filter_map(|(index, entry)| {
-            (entry.entry.event_type() == "decision_allow").then_some(index)
+            matches!(
+                entry.entry.payload(),
+                LedgerPayloadV2::DecisionRecorded { record }
+                    if matches!(
+                        record.outcome(),
+                        AuthorityDecisionOutcomeV2::AllowedByGrant { .. }
+                    )
+            )
+            .then_some(index)
         })
         .collect();
     match consume_result {
-        Ok(ConsumeResult::Consumed { .. }) => {
+        Ok(CommittedDecisionV2::AllowedByGrant { .. }) => {
             assert_eq!(allow_sequences.len(), 1);
             assert!(allow_sequences[0] < activation_seq);
         }
@@ -306,53 +299,61 @@ fn generation_activation_linearizes_with_concurrent_allow() {
 }
 
 #[test]
-fn consumption_requires_the_complete_approved_context_without_spending_on_mismatch() {
+fn failure_between_spend_and_decision_rolls_back_the_whole_transition() {
+    let (_directory, path, mut authority) = fixture();
+    let request = create_request(&mut authority);
+    approve(&mut authority, &request);
+    let mut enter = maintenance_command(true, 91, request.created_at());
+    enter.event_id = "decision_collision".into();
+    authority.set_maintenance(&enter).unwrap();
+    authority
+        .set_maintenance(&maintenance_command(false, 92, request.created_at()))
+        .unwrap();
+    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    drop(authority);
+
+    let mut authority = Authority::open_with_runtime_source(
+        &path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        Arc::new(CollidingDecisionRuntimeSource {
+            identifiers: AtomicU64::new(0),
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        authority.commit_decision(&authorize_command()),
+        Err(AuthorityError::Sqlite(_))
+    ));
+    drop(authority);
+
+    let authority = open(&path);
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    let state = authority
+        .latest_state("grant_1")
+        .unwrap()
+        .unwrap()
+        .verify(&grant_key().verifying_key())
+        .unwrap();
+    assert_eq!(state.status(), GrantStatusV2::Active);
+}
+
+#[test]
+fn exact_binding_requires_the_complete_tool_input_without_spending_on_mismatch() {
     let (_directory, _path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
+    let request = create_request(&mut authority);
+    approve(&mut authority, &request);
 
-    let mismatches = [
-        context_with(
-            "gommage-test-build",
-            "claude-code",
-            "Bash",
-            '1',
-            '2',
-            &["git.push:refs/heads/main", "proc.exec:git"],
-        ),
-        context_with(
-            "gommage-test-build",
-            "codex",
-            "Shell",
-            '1',
-            '2',
-            &["git.push:refs/heads/main", "proc.exec:git"],
-        ),
-        context_with(
-            "gommage-test-build",
-            "codex",
-            "Bash",
-            '9',
-            '2',
-            &["git.push:refs/heads/main", "proc.exec:git"],
-        ),
-        context_with(
-            "gommage-test-build",
-            "codex",
-            "Bash",
-            '1',
-            '2',
-            &["git.push:refs/heads/main"],
-        ),
-    ];
-
-    for (index, context) in mismatches.into_iter().enumerate() {
-        let mut command = consume_command(index + 10);
-        command.context = context;
-        assert_eq!(
-            authority.consume_and_record_allow(&command).unwrap(),
-            ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
-        );
+    let mut tool_mismatch = consume_command(11);
+    tool_mismatch.call.tool = "Shell".into();
+    let mut input_mismatch = consume_command(12);
+    input_mismatch.call.input["command"] = json!("git push origin release");
+    for command in [tool_mismatch, input_mismatch] {
+        assert!(matches!(
+            authority.commit_decision(&command).unwrap(),
+            CommittedDecisionV2::ApprovalRequired { created: true, .. }
+        ));
         let latest = authority
             .latest_state("grant_1")
             .unwrap()
@@ -361,68 +362,63 @@ fn consumption_requires_the_complete_approved_context_without_spending_on_mismat
             .unwrap();
         assert_eq!(latest.status(), GrantStatusV2::Active);
     }
-    for (index, context) in [
-        context_with(
-            "gommage-next-build",
-            "codex",
-            "Bash",
-            '1',
-            '2',
-            &["git.push:refs/heads/main", "proc.exec:git"],
-        ),
-        context_with(
-            "gommage-test-build",
-            "codex",
-            "Bash",
-            '1',
-            '9',
-            &["git.push:refs/heads/main", "proc.exec:git"],
-        ),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let mut command = consume_command(index + 30);
-        command.context = context;
-        assert!(matches!(
-            authority.consume_and_record_allow(&command),
-            Err(AuthorityError::InvalidInput(_))
-        ));
-    }
-    let mut wrong_scope = consume_command(20);
-    wrong_scope.required_scope = "git.push:refs/heads/release".into();
-    assert_eq!(
-        authority.consume_and_record_allow(&wrong_scope).unwrap(),
-        ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
-    );
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "4");
+    let mut stale_build = consume_command(30);
+    stale_build.evaluated_generation = generation("2");
+    stale_build.evaluation = ask_evaluation(&generation("2"));
     assert!(matches!(
-        authority
-            .consume_and_record_allow(&consume_command(99))
-            .unwrap(),
-        ConsumeResult::Consumed { .. }
+        authority.commit_decision(&stale_build),
+        Err(AuthorityError::StaleGeneration { .. })
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "6");
+    let mut policy_mismatch = consume_command(31);
+    policy_mismatch.evaluation.policy_version = hash('9');
+    assert!(matches!(
+        authority.commit_decision(&policy_mismatch),
+        Err(AuthorityError::InvalidInput(_))
+    ));
+    let mut wrong_scope = consume_command(20);
+    wrong_scope.evaluation = resolved_evaluation(
+        &generation("1"),
+        Decision::AskPicto {
+            required_scope: "git.push:refs/heads/release".into(),
+            reason: "Release the reviewed commit".into(),
+            bind_input: true,
+        },
+        &["git.push:refs/heads/main", "proc.exec:git"],
+    );
+    assert!(matches!(
+        authority.commit_decision(&wrong_scope).unwrap(),
+        CommittedDecisionV2::ApprovalRequired { created: true, .. }
+    ));
+    let head_before_allow = authority.verify_ledger(None).unwrap().head_seq;
+    assert!(matches!(
+        authority.commit_decision(&consume_command(99)).unwrap(),
+        CommittedDecisionV2::AllowedByGrant { .. }
+    ));
+    assert_eq!(
+        authority
+            .verify_ledger(None)
+            .unwrap()
+            .head_seq
+            .parse::<usize>()
+            .unwrap(),
+        head_before_allow.parse::<usize>().unwrap() + 2
+    );
 }
 
 #[test]
 fn sequential_grants_select_the_only_currently_usable_exact_match() {
     let (_directory, _path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
+    let first = create_request(&mut authority);
+    approve(&mut authority, &first);
     assert!(matches!(
-        authority
-            .consume_and_record_allow(&consume_command(1))
-            .unwrap(),
-        ConsumeResult::Consumed { .. }
+        authority.commit_decision(&consume_command(1)).unwrap(),
+        CommittedDecisionV2::AllowedByGrant { .. }
     ));
 
-    create_second_request(&mut authority, 1_700_000_040);
-    approve_second_request(&mut authority, 1_700_000_050);
-    let mut command = consume_command(2);
-    command.consumed_at = 1_700_000_060;
-    let state = match authority.consume_and_record_allow(&command).unwrap() {
-        ConsumeResult::Consumed { state, .. } => state,
+    let second = create_request(&mut authority);
+    approve_second_request(&mut authority, &second, second.created_at());
+    let state = match authority.commit_decision(&consume_command(2)).unwrap() {
+        CommittedDecisionV2::AllowedByGrant { state, .. } => state,
         other => panic!("expected the second exact grant to be consumed, got {other:?}"),
     };
     assert_eq!(
@@ -442,39 +438,4 @@ fn sequential_grants_select_the_only_currently_usable_exact_match() {
             .status(),
         GrantStatusV2::Spent
     );
-}
-
-#[test]
-fn duplicate_usable_exact_grants_fail_closed_without_spending_either() {
-    let (_directory, _path, mut authority) = fixture();
-    create_request(&mut authority);
-    approve(&mut authority);
-    create_second_request(&mut authority, 1_700_000_021);
-    approve_second_request(&mut authority, 1_700_000_022);
-
-    assert!(matches!(
-        authority.consume_and_record_allow(&consume_command(1)),
-        Err(AuthorityError::Corrupt(message))
-            if message.contains("multiple usable grants match")
-    ));
-    for grant_id in ["grant_1", "grant_2"] {
-        assert_eq!(
-            authority
-                .latest_state(grant_id)
-                .unwrap()
-                .unwrap()
-                .verify(&grant_key().verifying_key())
-                .unwrap()
-                .status(),
-            GrantStatusV2::Active
-        );
-    }
-    let allow_events = authority
-        .verify_ledger(None)
-        .unwrap()
-        .entries
-        .into_iter()
-        .filter(|entry| entry.entry.event_type() == "decision_allow")
-        .count();
-    assert_eq!(allow_events, 0);
 }

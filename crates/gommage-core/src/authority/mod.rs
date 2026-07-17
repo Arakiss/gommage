@@ -17,7 +17,7 @@ use crate::{
         MAX_GRANT_TTL_SECONDS, SignedGrantClaimV2, SignedGrantStateV2, validate_decimal,
         validate_hash, validate_text, validate_token,
     },
-    toolcall::ToolCall,
+    picto::PictoBinding,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -52,6 +52,9 @@ const CUTOVER_MARKER: &str = "fresh_v2_no_legacy_active_grants";
 
 mod approvals;
 mod common;
+mod decision_types;
+mod decision_verify;
+mod decisions;
 mod grants;
 mod ledger_store;
 mod ledger_types;
@@ -61,11 +64,13 @@ mod schema;
 mod state;
 mod verify;
 
+pub use decision_types::*;
 pub use ledger_types::*;
 pub use model::*;
 
 use approvals::*;
 use common::*;
+use decision_verify::*;
 use grants::*;
 use ledger_store::*;
 use schema::*;
@@ -149,6 +154,13 @@ impl AuthorityRuntimeSource for SystemAuthorityRuntimeSource {
 /// cost is linear in ledger length. This favors a simple fail-closed reference
 /// boundary; long-lived deployments should benchmark and later add verified
 /// checkpoints or incremental proof caching without weakening the invariant.
+///
+/// Approval requests have no public construction command; they are created
+/// only as part of [`Authority::commit_decision`].
+///
+/// ```compile_fail
+/// use gommage_core::CreateRequestCommand;
+/// ```
 pub struct Authority {
     conn: Connection,
     config: AuthorityConfig,

@@ -163,9 +163,9 @@ pub struct AuthorityMetadata {
     pub cutover: CutoverStateV2,
 }
 
-/// Complete immutable fields for one approval request creation attempt.
+/// Internal immutable fields for one approval request creation attempt.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateRequestCommand {
+pub(super) struct CreateRequestCommand {
     /// Caller-generated unique request identifier.
     pub request_id: String,
     /// Caller-generated event identifier for the signed request event.
@@ -174,6 +174,8 @@ pub struct CreateRequestCommand {
     pub created_at: i64,
     /// Complete immutable authorization context observed by the integration.
     pub context: AuthorizationContextV2,
+    /// Scope-only or exact-input authority requested by policy.
+    pub binding: PictoBinding,
     /// Exact active generation against which the decision was evaluated.
     pub generation: AuthorityGenerationV2,
     /// Exact approval scope required by policy.
@@ -204,6 +206,14 @@ impl AuthorizationContextV2 {
         policy_identity: String,
         mut capabilities: Vec<String>,
     ) -> Result<Self, AuthorityError> {
+        if capabilities.len() > MAX_CAPABILITIES {
+            return Err(AuthorityError::InvalidInput(format!(
+                "authorization context exceeds {MAX_CAPABILITIES} input capabilities"
+            )));
+        }
+        for capability in &capabilities {
+            validate_text("capability", capability, MAX_CAPABILITY_BYTES, false)?;
+        }
         capabilities.sort();
         capabilities.dedup();
         let context = Self {
@@ -269,8 +279,7 @@ impl AuthorizationContextV2 {
             MAX_IDENTITY_BYTES,
             false,
         )?;
-        if self.capabilities.is_empty()
-            || self.capabilities.len() > MAX_CAPABILITIES
+        if self.capabilities.len() > MAX_CAPABILITIES
             || self.capabilities.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return Err(AuthorityError::InvalidInput(
@@ -293,6 +302,8 @@ pub struct ApprovalRequestV2 {
     request_id: String,
     created_at: i64,
     context: AuthorizationContextV2,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    binding: Option<PictoBinding>,
     generation: AuthorityGenerationV2,
     required_scope: String,
     reason: String,
@@ -312,6 +323,18 @@ impl ApprovalRequestV2 {
     /// Return the complete immutable authorization context.
     pub fn context(&self) -> &AuthorizationContextV2 {
         &self.context
+    }
+
+    /// Return the signed scope-only or exact-input authority boundary.
+    ///
+    /// Requests written before the explicit field existed are exact-input
+    /// bound to the already-signed observed input hash.
+    pub fn binding(&self) -> PictoBinding {
+        self.binding
+            .clone()
+            .unwrap_or_else(|| PictoBinding::ExactInput {
+                input_hash: self.context.input_hash.clone(),
+            })
     }
 
     /// Return the exact authority generation evaluated for this request.
@@ -366,6 +389,7 @@ impl ApprovalRequestV2 {
             request_id: command.request_id.clone(),
             created_at: command.created_at,
             context: command.context.clone(),
+            binding: Some(command.binding.clone()),
             generation: command.generation.clone(),
             required_scope: command.required_scope.clone(),
             reason: command.reason.clone(),
@@ -383,6 +407,19 @@ impl ApprovalRequestV2 {
         validate_token("request id", &self.request_id, 160)?;
         validate_timestamp(self.created_at)?;
         self.context.validate()?;
+        if let Some(PictoBinding::ExactInput { input_hash }) = self.binding.as_ref() {
+            validate_hash("approval exact-input binding hash", input_hash)?;
+            if input_hash != self.context.input_hash() {
+                return Err(AuthorityError::InvalidInput(
+                    "approval exact-input binding does not match the observed input".into(),
+                ));
+            }
+        }
+        if self.context.capabilities().is_empty() {
+            return Err(AuthorityError::InvalidInput(
+                "approval requests require at least one capability".into(),
+            ));
+        }
         self.generation.validate()?;
         if self.context.build_identity() != self.generation.build_identity()
             || self.context.policy_identity() != self.generation.policy_identity()
@@ -407,9 +444,19 @@ pub(super) struct ApprovalDedupeV2<'a> {
     pub(super) required_scope: &'a str,
 }
 
-/// Result of creating or deduplicating an open approval request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct BoundApprovalDedupeV2<'a> {
+    pub(super) domain: &'static str,
+    pub(super) version: u8,
+    pub(super) generation: &'a AuthorityGenerationV2,
+    pub(super) required_scope: &'a str,
+    pub(super) binding: &'a PictoBinding,
+}
+
+/// Internal result of creating or deduplicating an open approval request.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CreateRequestResult {
+pub(super) enum CreateRequestResult {
     /// A new immutable request and signed ledger event committed.
     Created(ApprovalRequestV2),
     /// An equivalent open request already existed and was returned unchanged.
@@ -513,61 +560,6 @@ pub enum DenyResult {
     AlreadyResolved(ApprovalResolutionV2),
 }
 
-/// Fields required to atomically consume a grant and record an allow decision.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConsumeCommand {
-    /// Exact approval scope required by the current decision.
-    pub required_scope: String,
-    /// Complete current context, which must equal the approved request context.
-    pub context: AuthorizationContextV2,
-    /// Exact active generation against which the decision was evaluated.
-    pub generation: AuthorityGenerationV2,
-    /// State-transition ledger event identifier.
-    pub state_event_id: String,
-    /// Final allow-decision ledger event identifier.
-    pub decision_event_id: String,
-    /// Current Unix timestamp.
-    pub consumed_at: i64,
-}
-
-/// Agent-facing approval authorization input.
-///
-/// The caller supplies only the observed host call and policy-selected scope.
-/// Authority derives build, policy, and generation identity from its active
-/// serialized state and creates all timestamps and identifiers itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuthorizeApprovalCommandV2 {
-    /// Named host integration that observed the call.
-    pub integration: String,
-    /// Complete observed tool call; Authority computes its canonical input hash.
-    pub call: ToolCall,
-    /// Relevant normalized capabilities for the current decision.
-    pub capabilities: Vec<String>,
-    /// Exact approval scope required by current policy.
-    pub required_scope: String,
-    /// Human-readable reason shown to the operator when approval is needed.
-    pub reason: String,
-}
-
-/// Result of one serialized approval authorization attempt.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuthorizeApprovalResultV2 {
-    /// One exact one-use grant was spent and signed allow evidence committed.
-    Allowed {
-        /// Signed terminal spent state.
-        state: SignedGrantStateV2,
-        /// Authority-generated signed decision event identifier.
-        decision_event_id: String,
-    },
-    /// No exact usable grant existed; one exact open request now represents it.
-    ApprovalRequired {
-        /// Immutable approval request returned to the operator plane.
-        request: Box<ApprovalRequestV2>,
-        /// `true` only for the transaction that created the request.
-        created: bool,
-    },
-}
-
 /// Administrative activation of one immutable successor generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivateGenerationCommand {
@@ -646,34 +638,6 @@ pub enum GrantNotUsableReason {
     NotYetValid,
     /// The grant has expired.
     Expired,
-    /// The required scope differs from the approved scope.
-    ScopeMismatch,
-    /// The complete input hash differs from the approved hash.
-    InputMismatch,
-    /// The build identity differs from the build that requested approval.
-    BuildIdentityMismatch,
-    /// The host integration differs from the approved integration.
-    IntegrationMismatch,
-    /// The host tool differs from the approved tool.
-    ToolMismatch,
-    /// The evaluated policy differs from the approved policy identity.
-    PolicyMismatch,
-    /// The normalized relevant capability set differs from the approved set.
-    CapabilityMismatch,
-}
-
-/// Result of a consume-and-record transaction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConsumeResult {
-    /// State revision one and the final allow evidence committed atomically.
-    Consumed {
-        /// Signed terminal spent state.
-        state: SignedGrantStateV2,
-        /// Signed allow-decision event identifier.
-        decision_event_id: String,
-    },
-    /// No authorization occurred and no allow evidence was emitted.
-    NotUsable(GrantNotUsableReason),
 }
 
 /// Fields required to revoke an active grant.

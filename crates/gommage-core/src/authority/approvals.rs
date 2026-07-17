@@ -5,7 +5,50 @@ pub(super) struct PreparedApprovalRequest {
     pub(super) request_jcs: String,
     pub(super) request_hash: String,
     pub(super) dedupe_hash: String,
+    pub(super) lookup_hashes: Vec<String>,
     pub(super) event_id: String,
+}
+
+const BOUND_APPROVAL_DEDUPE_DOMAIN: &str = "gommage.approval.dedupe.bound";
+
+pub(super) fn binding_for_decision(bind_input: bool, input_hash: &str) -> PictoBinding {
+    if bind_input {
+        PictoBinding::ExactInput {
+            input_hash: input_hash.to_string(),
+        }
+    } else {
+        PictoBinding::ScopeOnly
+    }
+}
+
+pub(super) fn approval_dedupe_hashes(
+    context: &AuthorizationContextV2,
+    generation: &AuthorityGenerationV2,
+    required_scope: &str,
+    binding: &PictoBinding,
+) -> Result<Vec<String>, AuthorityError> {
+    let bounded_jcs = canonicalize(&BoundApprovalDedupeV2 {
+        domain: BOUND_APPROVAL_DEDUPE_DOMAIN,
+        version: FORMAT_VERSION,
+        generation,
+        required_scope,
+        binding,
+    })?;
+    let mut hashes = vec![approval_dedupe_hash(&bounded_jcs)];
+    if matches!(binding, PictoBinding::ExactInput { .. }) {
+        let legacy_jcs = canonicalize(&ApprovalDedupeV2 {
+            domain: "gommage.approval.dedupe",
+            version: FORMAT_VERSION,
+            context,
+            generation,
+            required_scope,
+        })?;
+        let legacy_hash = approval_dedupe_hash(&legacy_jcs);
+        if legacy_hash != hashes[0] {
+            hashes.push(legacy_hash);
+        }
+    }
+    Ok(hashes)
 }
 
 pub(super) fn prepare_approval_request(
@@ -17,14 +60,13 @@ pub(super) fn prepare_approval_request(
     let request = ApprovalRequestV2::from_command(command)?;
     let request_jcs = canonicalize(&request)?;
     let request_hash = approval_request_hash(&request_jcs);
-    let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
-        domain: "gommage.approval.dedupe",
-        version: FORMAT_VERSION,
-        context: request.context(),
-        generation: request.generation(),
-        required_scope: request.required_scope(),
-    })?;
-    let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
+    let lookup_hashes = approval_dedupe_hashes(
+        request.context(),
+        request.generation(),
+        request.required_scope(),
+        &request.binding(),
+    )?;
+    let dedupe_hash = lookup_hashes[0].clone();
     Ok(PreparedApprovalRequest {
         request,
         request_jcs: String::from_utf8(request_jcs).map_err(|error| {
@@ -32,6 +74,7 @@ pub(super) fn prepare_approval_request(
         })?,
         request_hash,
         dedupe_hash,
+        lookup_hashes,
         event_id: command.event_id.clone(),
     })
 }
@@ -46,20 +89,35 @@ pub(super) fn create_or_get_request_in_transaction(
         request_jcs,
         request_hash,
         dedupe_hash,
+        lookup_hashes,
         event_id,
     } = prepared;
-    let existing_request_id = conn
-        .query_row(
-            "SELECT request_id FROM open_approvals WHERE dedupe_hash = ?1",
-            [&dedupe_hash],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    if let Some(existing_request_id) = existing_request_id {
+    let mut existing_request_ids = Vec::new();
+    for lookup_hash in &lookup_hashes {
+        let existing_request_id = conn
+            .query_row(
+                "SELECT request_id FROM open_approvals WHERE dedupe_hash = ?1",
+                [lookup_hash],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if let Some(existing_request_id) = existing_request_id
+            && !existing_request_ids.contains(&existing_request_id)
+        {
+            existing_request_ids.push(existing_request_id);
+        }
+    }
+    if existing_request_ids.len() > 1 {
+        return Err(AuthorityError::Corrupt(
+            "multiple open approvals match one authorization boundary".into(),
+        ));
+    }
+    if let Some(existing_request_id) = existing_request_ids.pop() {
         let existing = load_request(conn, &existing_request_id)?.ok_or_else(|| {
             AuthorityError::Corrupt("open approval points to a missing request".into())
         })?;
         ensure_request_is_open(conn, &existing)?;
+        ensure_approval_attempt_matches(&existing.request, &request)?;
         return Ok(CreateRequestResult::Existing(existing.request));
     }
     conn.execute(
@@ -133,14 +191,13 @@ pub(super) fn load_request(
             validate_hash("request hash", &request_hash)?;
             validate_hash("approval dedupe hash", &dedupe_hash)?;
             validate_token("request event id", &event_id, 160)?;
-            let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
-                domain: "gommage.approval.dedupe",
-                version: FORMAT_VERSION,
-                context: request.context(),
-                generation: request.generation(),
-                required_scope: request.required_scope(),
-            })?;
-            if approval_dedupe_hash(&dedupe_jcs) != dedupe_hash {
+            let expected_hashes = approval_dedupe_hashes(
+                request.context(),
+                request.generation(),
+                request.required_scope(),
+                &request.binding(),
+            )?;
+            if !expected_hashes.contains(&dedupe_hash) {
                 return Err(AuthorityError::Corrupt(
                     "approval request dedupe hash mismatch".into(),
                 ));
@@ -154,6 +211,26 @@ pub(super) fn load_request(
         },
     )
     .transpose()
+}
+
+fn ensure_approval_attempt_matches(
+    existing: &ApprovalRequestV2,
+    attempted: &ApprovalRequestV2,
+) -> Result<(), AuthorityError> {
+    if existing.generation() != attempted.generation()
+        || existing.required_scope() != attempted.required_scope()
+        || existing.binding() != attempted.binding()
+    {
+        return Err(AuthorityError::Corrupt(
+            "deduplicated approval does not match its authorization boundary".into(),
+        ));
+    }
+    if existing.reason() != attempted.reason() {
+        return Err(AuthorityError::InvalidInput(
+            "matching approval boundary has a different policy reason".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn load_resolution(

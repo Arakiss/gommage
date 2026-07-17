@@ -3,6 +3,7 @@ use super::*;
 /// Typed payloads committed by the signed append-only authority ledger.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
 pub enum LedgerPayloadV2 {
     /// Binds the database, schema, keys, build, and cutover boundary.
     Genesis {
@@ -105,6 +106,11 @@ pub enum LedgerPayloadV2 {
         /// Signed spent-state hash.
         state_hash: String,
     },
+    /// Commits one normalized result under the exact evaluated generation.
+    DecisionRecorded {
+        /// Self-contained normalized evaluation and final Authority outcome.
+        record: RecordedDecisionV2,
+    },
 }
 
 impl LedgerPayloadV2 {
@@ -129,6 +135,7 @@ impl LedgerPayloadV2 {
                 ..
             } => "grant_revoked",
             Self::DecisionAllow { .. } => "decision_allow",
+            Self::DecisionRecorded { .. } => "decision_recorded",
         }
     }
 
@@ -142,6 +149,7 @@ impl LedgerPayloadV2 {
             Self::GrantStateChanged { grant_id, .. } | Self::DecisionAllow { grant_id, .. } => {
                 grant_id
             }
+            Self::DecisionRecorded { record } => record.context().input_hash(),
         }
     }
 
@@ -157,6 +165,10 @@ impl LedgerPayloadV2 {
             | Self::DecisionAllow { generation, .. } => {
                 build_identity == Some(generation.build_identity())
                     && policy_identity == Some(generation.policy_identity())
+            }
+            Self::DecisionRecorded { record } => {
+                build_identity == Some(record.generation().build_identity())
+                    && policy_identity == Some(record.generation().policy_identity())
             }
             Self::ApprovalRequested { .. } | Self::ApprovalResolved { .. } => {
                 build_identity.is_some() && policy_identity.is_some()
@@ -280,6 +292,9 @@ impl LedgerEntryV2 {
             | LedgerPayloadV2::GenerationActivated { generation, .. }
             | LedgerPayloadV2::MaintenanceChanged { generation, .. }
             | LedgerPayloadV2::DecisionAllow { generation, .. } => generation.validate()?,
+            LedgerPayloadV2::DecisionRecorded { record } => {
+                record.validated_evaluation()?;
+            }
             LedgerPayloadV2::ApprovalRequested { .. }
             | LedgerPayloadV2::ApprovalResolved { .. }
             | LedgerPayloadV2::GrantStateChanged { .. } => {}

@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn signed_claim_and_state_field_tampering_fails_closed() {
     let (_directory, _path, mut authority) = fixture();
-    create_request(&mut authority);
-    let (claim, active) = approve(&mut authority);
+    let request = create_request(&mut authority);
+    let (claim, active) = approve(&mut authority, &request);
     let claim_fields = [
         ("expires_at", serde_json::json!(1_700_000_021)),
         ("input_hash", serde_json::json!(hash('8'))),
@@ -56,7 +56,8 @@ fn signed_claim_and_state_field_tampering_fails_closed() {
 #[test]
 fn append_only_triggers_and_full_verification_reject_row_tampering() {
     let (_directory, path, mut authority) = fixture();
-    create_request(&mut authority);
+    let request = create_request(&mut authority);
+    let request_id = request.request_id().to_owned();
     drop(authority);
     let raw = Connection::open(&path).unwrap();
     assert!(
@@ -65,8 +66,8 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
     );
     assert!(
         raw.execute(
-            "UPDATE approval_requests SET request_hash = ?1 WHERE request_id = 'request_1'",
-            [hash('9')],
+            "UPDATE approval_requests SET request_hash = ?1 WHERE request_id = ?2",
+            rusqlite::params![hash('9'), request_id],
         )
         .is_err()
     );
@@ -76,7 +77,8 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("tampered.sqlite3");
         let mut authority = open(&path);
-        create_request(&mut authority);
+        let request = create_request(&mut authority);
+        let request_id = request.request_id().to_owned();
         drop(authority);
         let raw = Connection::open(&path).unwrap();
         match mutation {
@@ -100,13 +102,13 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
                 raw.execute(
                     "INSERT INTO ledger_entries (
                         seq, event_id, entry_jcs, signature_b64, entry_hash
-                     ) SELECT 3, 'event_forged', entry_jcs, signature_b64, ?1
+                     ) SELECT 4, 'event_forged', entry_jcs, signature_b64, ?1
                        FROM ledger_entries WHERE seq = 1",
                     [hash('f')],
                 )
                 .unwrap();
                 raw.execute(
-                    "UPDATE authority_meta SET head_seq = 3, head_hash = ?1 WHERE singleton = 1",
+                    "UPDATE authority_meta SET head_seq = 4, head_hash = ?1 WHERE singleton = 1",
                     [hash('f')],
                 )
                 .unwrap();
@@ -115,8 +117,8 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
                 raw.execute_batch("DROP TRIGGER approval_requests_no_update;")
                     .unwrap();
                 raw.execute(
-                    "UPDATE approval_requests SET request_hash = ?1 WHERE request_id = 'request_1'",
-                    [hash('9')],
+                    "UPDATE approval_requests SET request_hash = ?1 WHERE request_id = ?2",
+                    rusqlite::params![hash('9'), request_id],
                 )
                 .unwrap();
             }
@@ -134,18 +136,23 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
         .path()
         .join("resolution-tampered.sqlite3");
     let mut authority = open(&resolution_path);
-    create_request(&mut authority);
+    let request = create_request(&mut authority);
     authority
-        .deny(&deny_command("request_1", 99, 1_700_000_020))
+        .deny(&deny_command(
+            request.request_id(),
+            99,
+            request.created_at(),
+        ))
         .unwrap();
+    let request_id = request.request_id().to_owned();
     drop(authority);
     let raw = Connection::open(&resolution_path).unwrap();
     raw.execute_batch("DROP TRIGGER approval_resolutions_no_update;")
         .unwrap();
     raw.execute(
         "UPDATE approval_resolutions SET operator_principal = 'uid:999'
-         WHERE request_id = 'request_1'",
-        [],
+         WHERE request_id = ?1",
+        [request_id],
     )
     .unwrap();
     drop(raw);
@@ -162,24 +169,28 @@ fn full_verification_rejects_signed_resolution_and_activation_build_rebinding() 
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join(format!("{mutation}.sqlite3"));
         let mut authority = open(&path);
-        create_request(&mut authority);
+        let request = create_request(&mut authority);
         match mutation {
             "denied_resolution" => {
                 authority
-                    .deny(&deny_command("request_1", 50, 1_700_000_020))
+                    .deny(&deny_command(
+                        request.request_id(),
+                        50,
+                        request.created_at(),
+                    ))
                     .unwrap();
             }
             "approved_activation" | "approved_resolution_and_activation" => {
-                approve(&mut authority);
+                approve(&mut authority, &request);
             }
             _ => unreachable!(),
         }
         drop(authority);
 
         let first_rebound_seq = if mutation == "approved_activation" {
-            4
+            5
         } else {
-            3
+            4
         };
         resign_ledger_suffix_with_build(&path, first_rebound_seq, "forged-signed-build");
         match Authority::open(&path, config(), grant_key(), ledger_key()) {
@@ -242,6 +253,87 @@ fn full_verification_rejects_generation_and_runtime_state_tampering() {
 }
 
 #[test]
+fn resigned_decision_record_tampering_fails_closed() {
+    for mutation in ["outcome", "semantics", "provenance", "generation"] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory
+            .path()
+            .join(format!("decision-{mutation}.sqlite3"));
+        let mut authority = open(&path);
+        let command = CommitDecisionCommandV2 {
+            evaluated_generation: generation("1"),
+            integration: "codex".into(),
+            call: observed_call(),
+            evaluation: resolved_evaluation(&generation("1"), Decision::Allow, &["test.allow"]),
+        };
+        authority.commit_decision(&command).unwrap();
+        drop(authority);
+
+        resign_ledger_suffix(&path, 2, |seq, entry| {
+            if seq != 2 {
+                return;
+            }
+            let record = &mut entry["payload"]["record"];
+            match mutation {
+                "outcome" => record["outcome"]["kind"] = json!("denied"),
+                "semantics" => {
+                    record["evaluation"]["semantics"] = json!("forged.reducer.v99");
+                }
+                "provenance" => {
+                    record["evaluation"]["provenance"][0]["status"] = json!("unresolved");
+                }
+                "generation" => record["generation"]["generation_id"] = json!("2"),
+                _ => unreachable!(),
+            }
+        });
+        assert!(
+            Authority::open(&path, config(), grant_key(), ledger_key()).is_err(),
+            "re-signed decision {mutation} tampering must fail"
+        );
+    }
+}
+
+#[test]
+fn resigned_request_and_spent_state_links_fail_closed() {
+    let request_directory = tempfile::tempdir().unwrap();
+    let request_path = request_directory.path().join("request-hash.sqlite3");
+    let mut authority = open(&request_path);
+    authority.commit_decision(&authorize_command()).unwrap();
+    drop(authority);
+    resign_ledger_suffix(&request_path, 3, |seq, entry| {
+        if seq == 3 {
+            entry["payload"]["record"]["outcome"]["request_hash"] = json!(hash('9'));
+        }
+    });
+    assert!(Authority::open(&request_path, config(), grant_key(), ledger_key()).is_err());
+
+    let state_directory = tempfile::tempdir().unwrap();
+    let state_path = state_directory.path().join("state-hash.sqlite3");
+    let mut authority = open(&state_path);
+    let request = match authority.commit_decision(&authorize_command()).unwrap() {
+        CommittedDecisionV2::ApprovalRequired { request, .. } => request,
+        other => panic!("expected request, got {other:?}"),
+    };
+    approve_request_at(
+        &mut authority,
+        request.request_id(),
+        request.created_at(),
+        77,
+    );
+    assert!(matches!(
+        authority.commit_decision(&authorize_command()).unwrap(),
+        CommittedDecisionV2::AllowedByGrant { .. }
+    ));
+    drop(authority);
+    resign_ledger_suffix(&state_path, 7, |seq, entry| {
+        if seq == 7 {
+            entry["payload"]["record"]["outcome"]["state_hash"] = json!(hash('8'));
+        }
+    });
+    assert!(Authority::open(&state_path, config(), grant_key(), ledger_key()).is_err());
+}
+
+#[test]
 fn trusted_checkpoint_detects_whole_store_rollback() {
     let older_directory = tempfile::tempdir().unwrap();
     let older_path = older_directory.path().join("older.sqlite3");
@@ -255,7 +347,7 @@ fn trusted_checkpoint_detects_whole_store_rollback() {
     let checkpoint = newer.checkpoint("checkpoint_newer", 1_700_000_020).unwrap();
     assert_eq!(
         newer.verify_ledger(Some(&checkpoint)).unwrap().head_seq,
-        "2"
+        "3"
     );
 
     assert!(matches!(
@@ -271,12 +363,20 @@ fn trusted_checkpoint_detects_whole_store_rollback() {
 #[test]
 fn fixed_commands_produce_byte_identical_signed_artifacts_and_order() {
     fn build(path: &Path) -> Vec<(String, String, String)> {
-        let mut authority = open(path);
-        create_request(&mut authority);
-        approve(&mut authority);
-        authority
-            .consume_and_record_allow(&consume_command(1))
-            .unwrap();
+        let mut authority = Authority::open_with_runtime_source(
+            path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Arc::new(FixedRuntimeSource {
+                timestamp: AtomicI64::new(1_700_000_030),
+                next_nonce: AtomicU64::new(1),
+            }),
+        )
+        .unwrap();
+        let request = create_request(&mut authority);
+        approve(&mut authority, &request);
+        authority.commit_decision(&consume_command(1)).unwrap();
         drop(authority);
         let raw = Connection::open(path).unwrap();
         let mut statement = raw

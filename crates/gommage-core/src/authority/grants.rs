@@ -121,55 +121,75 @@ pub(super) fn status_string(status: GrantStatusV2) -> &'static str {
 
 pub(super) struct SelectedGrant {
     pub(super) grant_id: String,
+    pub(super) request_id: String,
     pub(super) signed_claim: SignedGrantClaimV2,
     pub(super) signed_previous: SignedGrantStateV2,
     pub(super) previous: GrantStateV2,
 }
 
+pub(super) struct GrantSelectionInput<'a> {
+    pub(super) context: &'a AuthorizationContextV2,
+    pub(super) generation: &'a AuthorityGenerationV2,
+    pub(super) required_scope: &'a str,
+    pub(super) binding: &'a PictoBinding,
+    pub(super) reason: &'a str,
+    pub(super) at: i64,
+}
+
 pub(super) fn select_usable_grant(
     conn: &Connection,
-    context: &AuthorizationContextV2,
-    generation: &AuthorityGenerationV2,
-    required_scope: &str,
-    at: i64,
+    input: GrantSelectionInput<'_>,
     grant_key: &VerifyingKey,
 ) -> Result<(Option<SelectedGrant>, GrantNotUsableReason), AuthorityError> {
-    let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
-        domain: "gommage.approval.dedupe",
-        version: FORMAT_VERSION,
+    let GrantSelectionInput {
         context,
         generation,
         required_scope,
+        binding,
+        reason,
+        at,
+    } = input;
+    let dedupe_hashes = approval_dedupe_hashes(context, generation, required_scope, binding)?;
+    let primary_hash = dedupe_hashes.first().ok_or_else(|| {
+        AuthorityError::Corrupt("approval lookup produced no deduplication hash".into())
     })?;
-    let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
-    let candidate_ids = {
-        let mut statement = conn.prepare(
-            "SELECT grant_claims.grant_id
-             FROM grant_claims
-             JOIN approval_requests
-               ON approval_requests.request_id = grant_claims.request_id
-             WHERE approval_requests.dedupe_hash = ?1
-             ORDER BY grant_claims.grant_id",
-        )?;
-        statement
-            .query_map([dedupe_hash], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    let mut usable = Vec::new();
+    let compatibility_hash = dedupe_hashes.get(1).unwrap_or(primary_hash);
+    let mut statement = conn.prepare(
+        "SELECT grant_claims.grant_id
+         FROM grant_claims
+         JOIN approval_requests
+           ON approval_requests.request_id = grant_claims.request_id
+         WHERE approval_requests.dedupe_hash IN (?1, ?2)",
+    )?;
+    let mut candidates = statement.query(params![primary_hash, compatibility_hash])?;
+    let mut usable = None;
     let mut saw_terminal = false;
     let mut saw_not_yet_valid = false;
     let mut saw_expired = false;
-    for grant_id in candidate_ids {
+    while let Some(row) = candidates.next()? {
+        let grant_id = row.get::<_, String>(0)?;
         let (signed_claim, claim) = load_claim(conn, &grant_id, grant_key)?
             .ok_or_else(|| AuthorityError::Corrupt("matching grant claim disappeared".into()))?;
         let stored_request = load_request(conn, claim.approval_request_id())?.ok_or_else(|| {
             AuthorityError::Corrupt("grant claim approval request is missing".into())
         })?;
-        if stored_request.request.context() != context
-            || stored_request.request.generation() != generation
+        if stored_request.request.generation() != generation
             || stored_request.request.required_scope() != required_scope
+            || stored_request.request.binding() != *binding
         {
-            continue;
+            return Err(AuthorityError::Corrupt(
+                "matching grant request contradicts its authorization boundary".into(),
+            ));
+        }
+        if stored_request.request.reason() != reason {
+            return Err(AuthorityError::InvalidInput(
+                "matching grant request has a different policy reason".into(),
+            ));
+        }
+        if claim.required_scope() != required_scope || claim.binding() != *binding {
+            return Err(AuthorityError::Corrupt(
+                "matching grant claim contradicts its signed approval binding".into(),
+            ));
         }
         let (signed_previous, previous) = load_latest_state(conn, &grant_id, grant_key)?
             .ok_or_else(|| AuthorityError::Corrupt("grant claim has no signed state".into()))?;
@@ -183,18 +203,23 @@ pub(super) fn select_usable_grant(
         } else if at >= claim.expires_at() {
             saw_expired = true;
             continue;
+        } else if !claim.is_usable_for(required_scope, context.input_hash(), at) {
+            return Err(AuthorityError::Corrupt(
+                "matching grant is not usable for its indexed authorization boundary".into(),
+            ));
         }
-        usable.push(SelectedGrant {
+        if usable.is_some() {
+            return Err(AuthorityError::Corrupt(
+                "multiple usable grants match the exact authorization context and scope".into(),
+            ));
+        }
+        usable = Some(SelectedGrant {
             grant_id,
+            request_id: claim.approval_request_id().to_string(),
             signed_claim,
             signed_previous,
             previous,
         });
-    }
-    if usable.len() > 1 {
-        return Err(AuthorityError::Corrupt(
-            "multiple usable grants match the exact authorization context and scope".into(),
-        ));
     }
     let not_usable = if saw_not_yet_valid {
         GrantNotUsableReason::NotYetValid
@@ -205,38 +230,32 @@ pub(super) fn select_usable_grant(
     } else {
         GrantNotUsableReason::Missing
     };
-    Ok((usable.pop(), not_usable))
+    Ok((usable, not_usable))
 }
 
-pub(super) struct RecordedAllow {
+pub(super) struct RecordedSpend {
     pub(super) state: SignedGrantStateV2,
-    pub(super) decision_event_id: String,
+    pub(super) grant_id: String,
+    pub(super) request_id: String,
 }
 
-pub(super) struct AllowEventIds<'a> {
-    pub(super) state: &'a str,
-    pub(super) decision: &'a str,
-}
-
-pub(super) struct AllowRecordInput<'a> {
+pub(super) struct SpendGrantInput<'a> {
     pub(super) context: &'a AuthorizationContextV2,
-    pub(super) generation: &'a AuthorityGenerationV2,
-    pub(super) required_scope: &'a str,
     pub(super) consumed_at: i64,
-    pub(super) event_ids: AllowEventIds<'a>,
+    pub(super) state_event_id: &'a str,
 }
 
-pub(super) fn spend_grant_and_record_allow(
+pub(super) fn spend_grant(
     conn: &Connection,
     selected: SelectedGrant,
-    input: AllowRecordInput<'_>,
+    input: SpendGrantInput<'_>,
     grant_key: &SigningKey,
     ledger_key: &SigningKey,
-) -> Result<RecordedAllow, AuthorityError> {
-    validate_token("state event id", input.event_ids.state, 160)?;
-    validate_token("decision event id", input.event_ids.decision, 160)?;
+) -> Result<RecordedSpend, AuthorityError> {
+    validate_token("state event id", input.state_event_id, 160)?;
     let SelectedGrant {
         grant_id,
+        request_id,
         signed_claim,
         signed_previous,
         previous,
@@ -245,7 +264,7 @@ pub(super) fn spend_grant_and_record_allow(
         &previous,
         signed_previous.state_hash(),
         GrantStatusV2::Spent,
-        input.event_ids.state.into(),
+        input.state_event_id.into(),
         input.consumed_at,
     )?;
     let signed_spent = SignedGrantStateV2::sign(&spent, grant_key)?;
@@ -254,7 +273,7 @@ pub(super) fn spend_grant_and_record_allow(
         conn,
         ledger_key,
         LedgerEventDraft {
-            event_id: input.event_ids.state.into(),
+            event_id: input.state_event_id.into(),
             subject: grant_id.clone(),
             timestamp: input.consumed_at,
             build_identity: Some(input.context.build_identity().into()),
@@ -270,28 +289,10 @@ pub(super) fn spend_grant_and_record_allow(
             },
         },
     )?;
-    append_ledger_entry(
-        conn,
-        ledger_key,
-        LedgerEventDraft {
-            event_id: input.event_ids.decision.into(),
-            subject: grant_id.clone(),
-            timestamp: input.consumed_at,
-            build_identity: Some(input.context.build_identity().into()),
-            policy_identity: Some(input.context.policy_identity().into()),
-            payload: LedgerPayloadV2::DecisionAllow {
-                grant_id,
-                required_scope: input.required_scope.into(),
-                input_hash: input.context.input_hash().into(),
-                context: input.context.clone(),
-                generation: input.generation.clone(),
-                state_hash: signed_spent.state_hash().into(),
-            },
-        },
-    )?;
-    Ok(RecordedAllow {
+    Ok(RecordedSpend {
         state: signed_spent,
-        decision_event_id: input.event_ids.decision.into(),
+        grant_id,
+        request_id,
     })
 }
 
