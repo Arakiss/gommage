@@ -653,8 +653,8 @@ jobs:
         with:
           subject-path: dist/gommage-${{ env.UPLOAD_TAG }}.cdx.json
 
-  publish-crates:
-    name: publish crates.io
+  build-crates-publish-bundles:
+    name: build crates.io publish bundles
     if: >
       vars.GOMMAGE_RELEASE_HOLD != 'true'
       && vars.GOMMAGE_CRATES_IO_PUBLISH == 'true'
@@ -693,22 +693,316 @@ jobs:
             exit 1
           fi
           echo "UPLOAD_TAG=${upload_tag}" >> "$GITHUB_ENV"
-      - name: Verify crates.io token
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        shell: bash
-        run: |
-          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
-            echo "::error::CARGO_REGISTRY_TOKEN is required when GOMMAGE_CRATES_IO_PUBLISH=true."
-            exit 1
-          fi
-      - name: Verify release assets before registry publish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh scripts/check-release-assets.sh --tag "$UPLOAD_TAG" --require-sbom
+      - name: Verify internal workspace dependency pins
+        run: sh scripts/sync-workspace-internal-deps.sh --check
       - name: Verify crates.io publish readiness
         run: sh scripts/check-crates-publish-readiness.sh
-      - name: Publish crates in dependency order
+      - name: Build sealed crates.io publish bundles
+        run: >-
+          node scripts/prepare-crates-publish-bundles.mjs
+          --output dist/crates-publish
+          --source-sha "${GITHUB_SHA}"
+          --cli-tag "${UPLOAD_TAG}"
+      - name: Upload sealed crates.io publish bundles
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: crates-publish-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 1
+          path: dist/crates-publish
+
+  # This job receives only a short-lived crates.io token. It has no checkout,
+  # Rust toolchain, Cargo invocation, or repository script execution. The only
+  # authorized mutation is uploading request bodies sealed by the build job.
+  publish-crates:
+    name: publish crates.io
+    if: >
+      vars.GOMMAGE_RELEASE_HOLD != 'true'
+      && vars.GOMMAGE_CRATES_IO_PUBLISH == 'true'
+      && (
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/gommage-cli-v'))
+        || github.event_name == 'workflow_dispatch'
+      )
+    needs: build-crates-publish-bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      id-token: write
+    env:
+      UPLOAD_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Resolve and validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_ref="refs/tags/${UPLOAD_TAG}"
+          if [[ "${GITHUB_REF}" != "${expected_ref}" ]]; then
+            echo "::error::crates.io publishing is tied to ${expected_ref}, but this run identity is ${GITHUB_REF}. Re-run workflow_dispatch from the tag ref."
+            exit 1
+          fi
+      - name: Download sealed crates.io publish bundles
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: crates-publish-${{ github.sha }}
+          path: publish-bundles
+      - name: Validate sealed publish inventory and framing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected_names=(
+            gommage-stdlib
+            gommage-core
+            gommage-audit
+            gommage-cli
+            gommage-daemon
+            gommage-mcp
+          )
+
+          if find publish-bundles -mindepth 1 -type l -print -quit | grep -q .; then
+            echo "::error::Publish bundle contains a symbolic link."
+            exit 1
+          fi
+          if find publish-bundles -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q .; then
+            echo "::error::Publish bundle root contains a non-file entry."
+            exit 1
+          fi
+          actual_count="$(find publish-bundles -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          if [[ "${actual_count}" != "20" ]]; then
+            echo "::error::Expected 20 sealed publish files, found ${actual_count}."
+            find publish-bundles -mindepth 1 -maxdepth 1 -print
+            exit 1
+          fi
+
+          (
+            cd publish-bundles
+            sha256sum --check --strict manifest.sha256
+          )
+          jq -e \
+            --arg sha "${GITHUB_SHA}" \
+            --arg tag "${UPLOAD_TAG}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            '.format == "cargo-registry-publish-bundle-v1"
+             and .registry_api == "https://crates.io/api/v1/crates/new"
+             and .repository == $repository
+             and .source_sha == $sha
+             and .release_tag == $tag
+             and .dirty == false
+             and (.packages | length) == 6
+             and (.packages | map(.order)) == [0, 1, 2, 3, 4, 5]' \
+            publish-bundles/manifest.json >/dev/null
+          jq -e \
+            '.packages | map(.name) == [
+              "gommage-stdlib",
+              "gommage-core",
+              "gommage-audit",
+              "gommage-cli",
+              "gommage-daemon",
+              "gommage-mcp"
+            ]' \
+            publish-bundles/manifest.json >/dev/null
+
+          for index in "${!expected_names[@]}"; do
+            entry="$(jq -c ".packages[${index}]" publish-bundles/manifest.json)"
+            name="$(jq -r .name <<<"${entry}")"
+            version="$(jq -r .version <<<"${entry}")"
+            if [[ "${name}" != "${expected_names[${index}]}" ]]; then
+              echo "::error::Unexpected package at publish position ${index}: ${name}."
+              exit 1
+            fi
+            if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Invalid package version in publish inventory: ${version}."
+              exit 1
+            fi
+
+            prefix="${name}-${version}"
+            crate_file="$(jq -r .crate_file <<<"${entry}")"
+            metadata_file="$(jq -r .metadata_file <<<"${entry}")"
+            request_file="$(jq -r .request_file <<<"${entry}")"
+            [[ "${crate_file}" == "${prefix}.crate" ]]
+            [[ "${metadata_file}" == "${prefix}.metadata.json" ]]
+            [[ "${request_file}" == "${prefix}.publish" ]]
+
+            crate_path="publish-bundles/${crate_file}"
+            metadata_path="publish-bundles/${metadata_file}"
+            request_path="publish-bundles/${request_file}"
+            for artifact in crate metadata request; do
+              file_var="${artifact}_path"
+              sha_var="${artifact}_sha256"
+              size_var="${artifact}_size"
+              artifact_path="${!file_var}"
+              artifact_sha="$(jq -r ".${sha_var}" <<<"${entry}")"
+              artifact_size="$(jq -r ".${size_var}" <<<"${entry}")"
+              printf '%s  %s\n' "${artifact_sha}" "${artifact_path}" | sha256sum --check --strict -
+              [[ "$(stat -c %s "${artifact_path}")" == "${artifact_size}" ]]
+            done
+
+            jq -e --arg name "${name}" --arg version "${version}" \
+              '.name == $name and .vers == $version' \
+              "${metadata_path}" >/dev/null
+
+            metadata_size="$(stat -c %s "${metadata_path}")"
+            encoded_metadata_size="$(od -An -tu4 -N4 "${request_path}" | tr -d ' ')"
+            [[ "${encoded_metadata_size}" == "${metadata_size}" ]]
+            dd if="${request_path}" bs=1 skip=4 count="${metadata_size}" status=none \
+              | cmp -s - "${metadata_path}"
+
+            crate_size_offset=$((4 + metadata_size))
+            encoded_crate_size="$(
+              dd if="${request_path}" bs=1 skip="${crate_size_offset}" count=4 status=none \
+                | od -An -tu4 \
+                | tr -d ' '
+            )"
+            crate_size="$(stat -c %s "${crate_path}")"
+            [[ "${encoded_crate_size}" == "${crate_size}" ]]
+            crate_offset=$((crate_size_offset + 4))
+            [[ "$(stat -c %s "${request_path}")" == "$((crate_offset + crate_size))" ]]
+            tail -c "+$((crate_offset + 1))" "${request_path}" | cmp -s - "${crate_path}"
+          done
+
+          cli_version="$(
+            jq -r '.packages[] | select(.name == "gommage-cli") | .version' \
+              publish-bundles/manifest.json
+          )"
+          [[ "${UPLOAD_TAG}" == "gommage-cli-v${cli_version}" ]]
+      - name: Plan idempotent registry mutations
+        id: registry-plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          pending=false
+          while IFS=$'\t' read -r name version crate_sha; do
+            status="$(
+              curl --silent --show-error \
+                --user-agent 'gommage-crates-publish/1 (+https://github.com/Arakiss/gommage)' \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                "https://crates.io/api/v1/crates/${name}/${version}"
+            )"
+            case "${status}" in
+              200)
+                published_crate="$(mktemp)"
+                curl --fail --silent --show-error --location \
+                  --user-agent 'gommage-crates-publish/1 (+https://github.com/Arakiss/gommage)' \
+                  --output "${published_crate}" \
+                  "https://crates.io/api/v1/crates/${name}/${version}/download"
+                printf '%s  %s\n' "${crate_sha}" "${published_crate}" | sha256sum --check --strict -
+                rm -f "${published_crate}"
+                echo "skip ${name} ${version}: identical crate already published"
+                ;;
+              404)
+                pending=true
+                echo "publish ${name} ${version}: version is not present"
+                ;;
+              *)
+                echo "::error::Unexpected crates.io status for ${name} ${version}: ${status:-000}."
+                exit 1
+                ;;
+            esac
+          done < <(
+            jq -r '.packages[] | [.name, .version, .crate_sha256] | @tsv' \
+              publish-bundles/manifest.json
+          )
+          echo "pending=${pending}" >> "${GITHUB_OUTPUT}"
+      - name: Obtain short-lived crates.io token
+        if: ${{ steps.registry-plan.outputs.pending == 'true' }}
+        id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+      - name: Upload only sealed registry request bodies
+        if: ${{ steps.registry-plan.outputs.pending == 'true' }}
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: sh scripts/publish-crates.sh --execute
+          CRATES_IO_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          auth_header="$(mktemp)"
+          response_file="$(mktemp)"
+          published_crate="$(mktemp)"
+          trap 'rm -f "${auth_header}" "${response_file}" "${published_crate}"' EXIT
+          printf 'Authorization: %s\n' "${CRATES_IO_TOKEN}" > "${auth_header}"
+          unset CRATES_IO_TOKEN
+
+          while IFS=$'\t' read -r name version request_file request_sha crate_sha; do
+            request_path="publish-bundles/${request_file}"
+            printf '%s  %s\n' "${request_sha}" "${request_path}" | sha256sum --check --strict -
+
+            status="$(
+              curl --silent --show-error \
+                --user-agent 'gommage-crates-publish/1 (+https://github.com/Arakiss/gommage)' \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                "https://crates.io/api/v1/crates/${name}/${version}"
+            )"
+            if [[ "${status}" == "200" ]]; then
+              echo "skip ${name} ${version}: version became visible before upload"
+            elif [[ "${status}" == "404" ]]; then
+              upload_status="$(
+                curl --silent --show-error \
+                  --retry 5 \
+                  --retry-all-errors \
+                  --retry-max-time 600 \
+                  --request PUT \
+                  --header "@${auth_header}" \
+                  --header 'Accept: application/json' \
+                  --header 'Content-Type: application/octet-stream' \
+                  --user-agent 'gommage-crates-publish/1 (+https://github.com/Arakiss/gommage)' \
+                  --data-binary "@${request_path}" \
+                  --output "${response_file}" \
+                  --write-out '%{http_code}' \
+                  'https://crates.io/api/v1/crates/new'
+              )"
+              if [[ ! "${upload_status}" =~ ^2[0-9][0-9]$ ]]; then
+                echo "::error::crates.io rejected ${name} ${version} with HTTP ${upload_status:-000}."
+                jq -c . "${response_file}" 2>/dev/null || sed -n '1,20p' "${response_file}"
+                exit 1
+              fi
+              if ! jq -e 'type == "object"' "${response_file}" >/dev/null 2>&1; then
+                echo "::error::crates.io returned a non-JSON success body for ${name} ${version}."
+                sed -n '1,20p' "${response_file}"
+                exit 1
+              fi
+              if jq -e '.errors and (.errors | length > 0)' "${response_file}" >/dev/null 2>&1; then
+                echo "::error::crates.io returned API errors for ${name} ${version}."
+                jq -c .errors "${response_file}"
+                exit 1
+              fi
+              echo "uploaded ${name} ${version}"
+            else
+              echo "::error::Unexpected crates.io status for ${name} ${version}: ${status:-000}."
+              exit 1
+            fi
+
+            visible=false
+            for attempt in $(seq 1 30); do
+              status="$(
+                curl --silent --show-error \
+                  --user-agent 'gommage-crates-publish/1 (+https://github.com/Arakiss/gommage)' \
+                  --output /dev/null \
+                  --write-out '%{http_code}' \
+                  "https://crates.io/api/v1/crates/${name}/${version}"
+              )"
+              if [[ "${status}" == "200" ]]; then
+                visible=true
+                break
+              fi
+              [[ "${status}" == "404" ]]
+              echo "wait ${name} ${version}: registry visibility attempt ${attempt}/30"
+              sleep 10
+            done
+            if [[ "${visible}" != "true" ]]; then
+              echo "::error::Timed out waiting for ${name} ${version} on crates.io."
+              exit 1
+            fi
+
+            curl --fail --silent --show-error --location \
+              --user-agent 'gommage-crates-publish/1 (+https://github.com/Arakiss/gommage)' \
+              --output "${published_crate}" \
+              "https://crates.io/api/v1/crates/${name}/${version}/download"
+            printf '%s  %s\n' "${crate_sha}" "${published_crate}" | sha256sum --check --strict -
+            echo "verified ${name} ${version}: registry bytes match sealed crate"
+          done < <(
+            jq -r '.packages[] | [.name, .version, .request_file, .request_sha256, .crate_sha256] | @tsv' \
+              publish-bundles/manifest.json
+          )

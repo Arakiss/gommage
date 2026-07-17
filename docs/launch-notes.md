@@ -48,12 +48,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 sh scripts/check-agent-command-contracts.sh
 sh scripts/check-doc-release-refs.sh
+sh scripts/check-release-authority-boundaries.sh
 sh scripts/launch-demo.sh
 ```
 
 Also record the exact release PR head SHA, successful `ci.yml`, `audit.yml`,
 `codeql.yml`, and `fuzz.yml` runs for that SHA, plus a fresh snapshot of required
 branch checks. A workflow dispatch is not a successful check by itself.
+Before enabling crates.io publication, verify that all six crate settings bind
+Trusted Publishing to `Arakiss/gommage` and workflow `release.yml`; the release
+workflow deliberately has no stored registry-token fallback.
 
 After the beta tag exists:
 

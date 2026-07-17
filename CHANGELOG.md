@@ -13,6 +13,13 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Security
 
+- crates.io publication no longer exposes a stored registry token to Cargo,
+  package verification, repository scripts, or crate build scripts. A
+  credential-free job packages and seals the exact registry request bodies;
+  a separate no-checkout job validates their inventory and binary framing,
+  obtains a 30-minute token through crates.io Trusted Publishing, and can only
+  upload those checksum-bound bytes. Idempotent reruns also require an existing
+  registry archive to match the sealed crate byte for byte.
 - GitHub pull-request merge authority now binds to an explicit
   `HOST/OWNER/REPOSITORY#PR` identity. Numeric targets without a host, compound
   merge programs, decoy-plus-admin payloads, repeating dispatchers, and option

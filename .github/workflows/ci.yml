@@ -152,6 +152,21 @@ jobs:
         run: sh scripts/sync-workspace-internal-deps.sh --check
       - name: Verify crates.io publish readiness
         run: sh scripts/check-crates-publish-readiness.sh
+      - name: Verify sealed crates.io publish bundle generation
+        run: |
+          cli_version="$(
+            cargo metadata --format-version 1 --no-deps --locked \
+              | jq -r '.packages[] | select(.name == "gommage-cli") | .version'
+          )"
+          node scripts/prepare-crates-publish-bundles.mjs \
+            --output "${RUNNER_TEMP}/crates-publish" \
+            --source-sha "${GITHUB_SHA}" \
+            --cli-tag "gommage-cli-v${cli_version}"
+          jq -e \
+            '.dirty == false
+             and (.packages | length) == 6
+             and ([.packages[] | .request_size == (.metadata_size + .crate_size + 8)] | all)' \
+            "${RUNNER_TEMP}/crates-publish/manifest.json" >/dev/null
       - name: Verify living docs avoid pinned release drift
         run: sh scripts/check-doc-release-refs.sh
       - name: Verify local-only agent files are not tracked
@@ -159,7 +174,9 @@ jobs:
       - name: Verify immutable GitHub Action pins
         run: sh scripts/check-workflow-action-pins.sh
       - name: Verify release authority boundaries
-        run: sh scripts/check-release-authority-boundaries.sh
+        run: |
+          sh scripts/check-release-authority-boundaries.sh
+          node --check scripts/prepare-crates-publish-bundles.mjs
       - name: Verify SemVer workflow is not a no-op
         run: |
           sh scripts/check-semver-workflow.sh

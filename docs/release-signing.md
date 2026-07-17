@@ -134,6 +134,13 @@ authority. The resulting evidence authenticates the transferred digest and
 workflow identity; it cannot retroactively establish how every build process
 produced that digest.
 
+crates.io follows the same authority split with a narrower mutation lane. A
+credential-free job packages the crates and seals complete registry upload
+request bodies. The registry job has no checkout, Cargo, Rust toolchain, or
+repository script; after validating inventory, framing, commit, and tag, it
+uses crates.io Trusted Publishing to obtain a short-lived OIDC token and sends
+only those sealed bytes. No long-lived crates.io token is stored in GitHub.
+
 Linux aarch64 is cross-compiled on an x86_64 Linux runner, and the release
 workflow does not natively execute all four packaged archives. Archive presence
 must not be presented as native runtime evidence; record a smoke test for the

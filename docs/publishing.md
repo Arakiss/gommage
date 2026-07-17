@@ -122,8 +122,21 @@ to build from source.
 Publishing remains an explicit registry mutation. Locally,
 `scripts/publish-crates.sh --execute` is mapped to `pkg.cargo:publish` and
 requires the same Gommage approval as `cargo publish`. In CI, crates.io publish
-is off unless the repository variable `GOMMAGE_CRATES_IO_PUBLISH=true` is set
-and the `CARGO_REGISTRY_TOKEN` secret is present.
+is off unless the repository variable `GOMMAGE_CRATES_IO_PUBLISH=true` is set.
+CI uses crates.io Trusted Publishing rather than a stored API token. The six
+published crates must authorize GitHub repository `Arakiss/gommage` and
+workflow filename `release.yml` in their crates.io Trusted Publishing
+settings.
+
+The release workflow never runs Cargo with registry authority. Its read-only
+build job packages each crate, constructs the Cargo registry upload frame, and
+seals the archive, metadata, and complete request body with SHA-256 under the
+exact release commit and tag. A separate job has no checkout, Rust toolchain,
+Cargo command, or repository script. It validates the transferred inventory
+and framing before requesting a 30-minute OIDC token, uploads only the sealed
+request bytes, waits for each crate in dependency order, and verifies the
+downloaded registry archive byte for byte. If an exact version already exists,
+an idempotent rerun succeeds only when its published archive matches.
 
 Refresh the evidence with:
 
@@ -290,12 +303,25 @@ The helper automates that ordering:
 sh scripts/publish-crates.sh --execute
 ```
 
-For CI publication after a release, configure:
+For CI publication after a release, configure Trusted Publishing separately on
+each of the six `gommage-*` crate settings pages with:
+
+- GitHub owner: `Arakiss`
+- repository: `gommage`
+- workflow filename: `release.yml`
+- environment: empty, unless the workflow is deliberately moved behind a
+  matching protected GitHub environment
+
+Then enable the explicit release switch:
 
 ```sh
-gh secret set CARGO_REGISTRY_TOKEN
 gh variable set GOMMAGE_CRATES_IO_PUBLISH --body true
 ```
+
+Do not add a `CARGO_REGISTRY_TOKEN` repository secret. The pinned official
+`rust-lang/crates-io-auth-action` exchanges the workflow OIDC identity for a
+short-lived token only after the sealed artifact has passed validation, and
+revokes it when the job ends.
 
 The release workflow publishes crates only after:
 
@@ -330,3 +356,6 @@ The target state is:
 - Release automation publishes crates only after the binary release, SBOM,
   Sigstore, and GitHub artifact attestation checks are green, and only when the
   explicit CI publish variable is enabled.
+- crates.io authority is obtained through Trusted Publishing in a no-checkout
+  job and is used only to upload sealed registry request bodies prepared by a
+  credential-free job.

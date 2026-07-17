@@ -46,6 +46,7 @@ issue:
 | Native release smoke | Each advertised OS/architecture archive is executed on that native architecture, and the evidence records the exact released asset digest. Cross-compilation or archive availability alone does not close this gate. |
 | Release PR head | `ci.yml`, `audit.yml`, `codeql.yml`, and `fuzz.yml` have successful runs whose `headSha` equals the release PR's current head after the last automated repair. The dispatcher only proves run creation; record the completed runs separately. |
 | Branch protection | A fresh branch-protection query records strictness, exact required-check contexts, admin enforcement, signed-commit policy, and force/delete settings. Any dispatched security workflow that is not a required context must still be manually gated on the exact release head. |
+| Registry authority | `sh scripts/check-release-authority-boundaries.sh` passes; all six crate settings bind Trusted Publishing to `Arakiss/gommage` and `release.yml`; the build job seals complete publish requests without credentials; and the no-checkout upload job obtains only a short-lived OIDC token after validation. |
 | Binary introspection | `gommage`, `gommage-daemon`, and `gommage-mcp` all support `--version`. |
 | Home setup | `gommage init` and `gommage policy init --stdlib` succeed in a clean home. |
 | Beta gate | `gommage beta check --json --policy-test examples/policy-fixtures.yaml` exits with `pass` or documented `warn` and includes actionable `next` entries. |
@@ -70,7 +71,7 @@ issue:
 | Host smoke | `scripts/host-smoke.sh` temp-home evidence exists for macOS and a systemd Linux host, including companion versions, selected-agent beta check, repair dry-runs, bounded TUI captures, report bundle, and rollback dry-run. |
 | CI | `ci`, `audit`, `codeql`, and `fuzz` are green on the exact release commit; `scorecard` has a current successful run for its configured trigger. `release` is green for publication commits, or intentionally skipped when `GOMMAGE_RELEASE_HOLD=true` is active during repository maintenance. |
 | Docs | README, beta contract, existing-setups, diagnostics, agent compatibility, publishing, release-signing docs, examples, and the `skills/gommage` agent skill match the current CLI. |
-| Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; unpublished crates have an explicit reason. |
+| Packaging | crates.io status is current via `sh scripts/check-crates-publish-readiness.sh`; sealed request generation passes in CI; and unpublished crates have an explicit reason. |
 
 ## Blocking issues
 
@@ -86,6 +87,9 @@ Treat these as beta blockers:
   release PR's exact current head, including after automated version-pin repair.
 - Current branch-protection settings and required-check contexts have not been
   captured and reviewed for the release head.
+- Any published Gommage crate lacks the exact crates.io Trusted Publishing
+  binding for `Arakiss/gommage` and `release.yml`, or release automation still
+  depends on a stored registry token.
 - `GOMMAGE_RELEASE_HOLD=true` is still active when the goal is to publish a new
   release instead of maintaining repository state.
 - `gommage verify --json` cannot distinguish warning from failure.
