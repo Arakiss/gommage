@@ -21,18 +21,13 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  module-size:
-    name: Rust module size
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - run: scripts/check-rust-module-size.sh
-
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Enforce Rust module size
+        run: scripts/check-rust-module-size.sh
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: rustfmt
