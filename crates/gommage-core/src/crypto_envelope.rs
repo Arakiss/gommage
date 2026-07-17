@@ -22,6 +22,7 @@ const GRANT_CLAIM_DOMAIN: &[u8] = b"GOMMAGE\0GRANT_CLAIM\0V2\0";
 const GRANT_STATE_DOMAIN: &[u8] = b"GOMMAGE\0GRANT_STATE\0V2\0";
 const LEDGER_ENTRY_DOMAIN: &[u8] = b"GOMMAGE\0LEDGER_ENTRY\0V2\0";
 const LEDGER_CHECKPOINT_DOMAIN: &[u8] = b"GOMMAGE\0LEDGER_CHECKPOINT\0V2\0";
+const LEDGER_CURSOR_DOMAIN: &[u8] = b"GOMMAGE\0LEDGER_CURSOR\0V2\0";
 
 const GRANT_CLAIM_HASH_DOMAIN: &[u8] = b"GOMMAGE\0GRANT_CLAIM_HASH\0V2\0";
 const GRANT_STATE_HASH_DOMAIN: &[u8] = b"GOMMAGE\0GRANT_STATE_HASH\0V2\0";
@@ -58,6 +59,8 @@ pub enum EnvelopeDomain {
     LedgerEntry,
     /// A ledger checkpoint intended for an external trust store.
     LedgerCheckpoint,
+    /// A bounded ledger-page cursor tied to one verified snapshot head.
+    LedgerCursor,
 }
 
 impl EnvelopeDomain {
@@ -67,13 +70,14 @@ impl EnvelopeDomain {
             Self::GrantState => GRANT_STATE_DOMAIN,
             Self::LedgerEntry => LEDGER_ENTRY_DOMAIN,
             Self::LedgerCheckpoint => LEDGER_CHECKPOINT_DOMAIN,
+            Self::LedgerCursor => LEDGER_CURSOR_DOMAIN,
         }
     }
 
     fn purpose(self) -> KeyPurpose {
         match self {
             Self::GrantClaim | Self::GrantState => KeyPurpose::Grant,
-            Self::LedgerEntry | Self::LedgerCheckpoint => KeyPurpose::Ledger,
+            Self::LedgerEntry | Self::LedgerCheckpoint | Self::LedgerCursor => KeyPurpose::Ledger,
         }
     }
 }

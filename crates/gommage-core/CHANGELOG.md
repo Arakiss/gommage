@@ -204,6 +204,10 @@ enforced by `cargo-semver-checks` in CI.
   build/integration/tool/input/policy/capability context, signed state
   revisions, atomic allow evidence, and externally anchorable checkpoints. The
   API deliberately cannot import active or pending v1 grants.
+- Bounded Authority v2 ledger pages with ledger-key-signed continuation
+  cursors. Each cursor binds the authority instance and epoch, one immutable
+  verified snapshot head, and the exact next sequence so concurrent appends do
+  not change an in-progress evidence traversal.
 - `PictoLookup` and `PictoConsume` result types for verified picto lookup and
   verified transactional consumption.
 - Capability mapper stdlib now maps Claude Code `MultiEdit` calls to

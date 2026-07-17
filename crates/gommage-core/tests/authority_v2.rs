@@ -5,8 +5,9 @@ use gommage_core::{
     AuthorityError, AuthorityGenerationV2, AuthorityRuntimeSource, AuthorizationContextV2,
     AuthorizeApprovalCommandV2, AuthorizeApprovalResultV2, ConsumeCommand, ConsumeResult,
     CreateRequestCommand, CreateRequestResult, DenyCommand, DenyResult, FreshnessVerdict,
-    GrantNotUsableReason, GrantStatusV2, RevokeCommand, RevokeResult, SetMaintenanceCommand,
-    SignedGrantClaimV2, SignedGrantStateV2, SignedJcs, ToolCall,
+    GrantNotUsableReason, GrantStatusV2, MAX_LEDGER_PAGE_ENTRIES, RevokeCommand, RevokeResult,
+    SetMaintenanceCommand, SignedGrantClaimV2, SignedGrantStateV2, SignedJcs, SignedLedgerCursorV2,
+    ToolCall,
 };
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -567,6 +568,111 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
     assert_eq!(journal.to_ascii_lowercase(), "wal");
     assert_eq!(application_id, 0x474f_4d32);
     assert_eq!(user_version, 2);
+}
+
+#[test]
+fn signed_ledger_pages_are_bounded_and_keep_one_snapshot_head() {
+    let (_directory, _path, mut authority) = fixture();
+    create_request(&mut authority);
+    approve(&mut authority);
+    assert!(matches!(
+        authority
+            .consume_and_record_allow(&consume_command(1))
+            .unwrap(),
+        ConsumeResult::Consumed { .. }
+    ));
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "6");
+
+    let first = authority.ledger_page(None, 2, None).unwrap();
+    assert_eq!(first.entries.len(), 2);
+    assert_eq!(first.entries[0].entry.seq(), "1");
+    assert_eq!(first.entries[1].entry.seq(), "2");
+    assert_eq!(first.snapshot_head_seq, "6");
+    assert_eq!(first.freshness, FreshnessVerdict::Unanchored);
+    let first_cursor = first.next_cursor.unwrap();
+    let verified_cursor = first_cursor.verify(&ledger_key().verifying_key()).unwrap();
+    assert_eq!(verified_cursor.snapshot_head_seq(), "6");
+    assert_eq!(verified_cursor.next_seq(), "3");
+
+    let mut later = request_command("request_later", "event_request_later");
+    later.context = context_with(
+        "gommage-test-build",
+        "codex",
+        "Bash",
+        '8',
+        '2',
+        &["git.push:refs/heads/main", "proc.exec:git"],
+    );
+    assert!(matches!(
+        authority.create_or_get_request(&later).unwrap(),
+        CreateRequestResult::Created(_)
+    ));
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "7");
+
+    let second = authority.ledger_page(Some(&first_cursor), 2, None).unwrap();
+    assert_eq!(second.snapshot_head_seq, "6");
+    assert_eq!(second.entries[0].entry.seq(), "3");
+    assert_eq!(second.entries[1].entry.seq(), "4");
+    let second_cursor = second.next_cursor.unwrap();
+    let third = authority
+        .ledger_page(Some(&second_cursor), 2, None)
+        .unwrap();
+    assert_eq!(third.snapshot_head_seq, "6");
+    assert_eq!(third.entries[0].entry.seq(), "5");
+    assert_eq!(third.entries[1].entry.seq(), "6");
+    assert!(third.next_cursor.is_none());
+    assert!(third.entries.iter().all(|entry| entry.entry.seq() != "7"));
+
+    assert!(matches!(
+        authority.ledger_page(None, 0, None),
+        Err(AuthorityError::InvalidInput(_))
+    ));
+    assert!(matches!(
+        authority.ledger_page(None, MAX_LEDGER_PAGE_ENTRIES + 1, None),
+        Err(AuthorityError::InvalidInput(_))
+    ));
+
+    let tampered = SignedLedgerCursorV2::from_stored(SignedJcs::from_stored(
+        format!("{} ", first_cursor.envelope().jcs()),
+        first_cursor.envelope().signature_b64().to_owned(),
+    ));
+    assert!(authority.ledger_page(Some(&tampered), 2, None).is_err());
+}
+
+#[test]
+fn ledger_cursor_issuance_rejects_runtime_clock_regression() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    let source = Arc::new(FixedRuntimeSource {
+        timestamp: AtomicI64::new(1_800_000_000),
+        next_nonce: AtomicU64::new(1),
+    });
+    let mut authority = Authority::open_with_runtime_source(
+        &path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        source.clone(),
+    )
+    .unwrap();
+    create_request(&mut authority);
+    approve(&mut authority);
+
+    let first = authority.ledger_page(None, 1, None).unwrap();
+    let cursor = first.next_cursor.unwrap();
+    assert_eq!(
+        cursor
+            .verify(&ledger_key().verifying_key())
+            .unwrap()
+            .issued_at(),
+        1_800_000_000
+    );
+    source.timestamp.store(1_799_999_999, Ordering::SeqCst);
+    assert!(matches!(
+        authority.ledger_page(Some(&cursor), 1, None),
+        Err(AuthorityError::RuntimeSource(message))
+            if message.contains("predates signed evidence time")
+    ));
 }
 
 #[test]

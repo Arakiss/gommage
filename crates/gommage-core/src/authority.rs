@@ -39,12 +39,15 @@ const REQUEST_DOMAIN: &str = "gommage.approval.request";
 const GENERATION_DOMAIN: &str = "gommage.authority.generation";
 const LEDGER_DOMAIN: &str = "gommage.ledger.entry";
 const CHECKPOINT_DOMAIN: &str = "gommage.ledger.checkpoint";
+const CURSOR_DOMAIN: &str = "gommage.ledger.cursor";
 const FORMAT_VERSION: u8 = 2;
 const MAX_INTEGRATION_BYTES: usize = 128;
 const MAX_TOOL_BYTES: usize = 256;
 const MAX_IDENTITY_BYTES: usize = 256;
 const MAX_CAPABILITY_BYTES: usize = 1_024;
 const MAX_CAPABILITIES: usize = 512;
+/// Maximum number of verified ledger entries returned by one online page.
+pub const MAX_LEDGER_PAGE_ENTRIES: usize = 100;
 const CUTOVER_MARKER: &str = "fresh_v2_no_legacy_active_grants";
 
 /// Immutable identities selected together as one authority generation.
@@ -1179,6 +1182,134 @@ impl SignedLedgerCheckpointV2 {
         checkpoint.validate()?;
         Ok(checkpoint)
     }
+}
+
+/// Signed pagination position bound to one verified authority-ledger snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LedgerCursorV2 {
+    domain: String,
+    version: u8,
+    authority_instance: String,
+    authority_epoch: String,
+    issued_at: i64,
+    snapshot_head_seq: String,
+    snapshot_head_hash: String,
+    next_seq: String,
+    ledger_key_id: String,
+}
+
+impl LedgerCursorV2 {
+    /// Return the authority instance that issued this cursor.
+    pub fn authority_instance(&self) -> &str {
+        &self.authority_instance
+    }
+
+    /// Return the authority epoch that issued this cursor.
+    pub fn authority_epoch(&self) -> &str {
+        &self.authority_epoch
+    }
+
+    /// Return when the authority issued this cursor.
+    pub fn issued_at(&self) -> i64 {
+        self.issued_at
+    }
+
+    /// Return the immutable snapshot head sequence.
+    pub fn snapshot_head_seq(&self) -> &str {
+        &self.snapshot_head_seq
+    }
+
+    /// Return the immutable snapshot head hash.
+    pub fn snapshot_head_hash(&self) -> &str {
+        &self.snapshot_head_hash
+    }
+
+    /// Return the first sequence requested by the next page.
+    pub fn next_seq(&self) -> &str {
+        &self.next_seq
+    }
+
+    /// Return the purpose-qualified ledger key identifier.
+    pub fn ledger_key_id(&self) -> &str {
+        &self.ledger_key_id
+    }
+
+    fn validate(&self) -> Result<(), AuthorityError> {
+        if self.domain != CURSOR_DOMAIN || self.version != FORMAT_VERSION {
+            return Err(AuthorityError::Corrupt(
+                "incorrect ledger cursor domain or version".into(),
+            ));
+        }
+        validate_token("authority instance", &self.authority_instance, 160)?;
+        validate_decimal("authority epoch", &self.authority_epoch)?;
+        validate_timestamp(self.issued_at)?;
+        validate_decimal("cursor snapshot head sequence", &self.snapshot_head_seq)?;
+        validate_hash("cursor snapshot head hash", &self.snapshot_head_hash)?;
+        validate_decimal("cursor next sequence", &self.next_seq)?;
+        validate_key_identifier(&self.ledger_key_id, "ledger")?;
+        let head = self.snapshot_head_seq.parse::<u64>().map_err(|_| {
+            AuthorityError::Corrupt("cursor snapshot head sequence overflow".into())
+        })?;
+        let next = self
+            .next_seq
+            .parse::<u64>()
+            .map_err(|_| AuthorityError::Corrupt("cursor next sequence overflow".into()))?;
+        if head == 0 || next == 0 || next > head {
+            return Err(AuthorityError::Corrupt(
+                "cursor sequence range is invalid".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl KeyBound for LedgerCursorV2 {
+    fn key_id(&self) -> &str {
+        &self.ledger_key_id
+    }
+}
+
+/// Canonical ledger cursor plus its ledger-purpose signature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignedLedgerCursorV2 {
+    envelope: SignedJcs,
+}
+
+impl SignedLedgerCursorV2 {
+    /// Return the canonical signed cursor envelope.
+    pub fn envelope(&self) -> &SignedJcs {
+        &self.envelope
+    }
+
+    /// Reconstruct a stored cursor before verification.
+    pub fn from_stored(envelope: SignedJcs) -> Self {
+        Self { envelope }
+    }
+
+    /// Verify canonical bytes, ledger-key purpose, signature, and cursor fields.
+    pub fn verify(&self, key: &VerifyingKey) -> Result<LedgerCursorV2, AuthorityError> {
+        let cursor: LedgerCursorV2 =
+            verify_payload(EnvelopeDomain::LedgerCursor, &self.envelope, key)?;
+        cursor.validate()?;
+        Ok(cursor)
+    }
+}
+
+/// Bounded, verified page from one immutable ledger snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LedgerPageV2 {
+    /// Verified entries in increasing sequence order, never above the page limit.
+    pub entries: Vec<VerifiedLedgerEntryV2>,
+    /// Snapshot head sequence shared by every page in this traversal.
+    pub snapshot_head_seq: String,
+    /// Snapshot head hash shared by every page in this traversal.
+    pub snapshot_head_hash: String,
+    /// Local-only or externally anchored freshness verdict for the current store.
+    pub freshness: FreshnessVerdict,
+    /// Signed continuation cursor, absent when the snapshot is exhausted.
+    pub next_cursor: Option<SignedLedgerCursorV2>,
 }
 
 /// Integrity, schema, cryptographic, and invalid-command failures.
@@ -4181,6 +4312,117 @@ impl Authority {
         )?;
         tx.commit()?;
         Ok(verification)
+    }
+
+    /// Return one bounded page from a signature-bound ledger snapshot.
+    ///
+    /// The first call omits `cursor` and fixes the current verified head as the
+    /// traversal snapshot. Every continuation cursor is signed with the ledger
+    /// key and commits that head plus the next sequence. A later append may grow
+    /// the live ledger, but it cannot change the snapshot traversed by the cursor.
+    /// Rollback or replacement of any snapshot prefix is rejected. Verification
+    /// still walks the complete retained history; this method bounds response
+    /// materialization, not the current reference verifier's linear work.
+    pub fn ledger_page(
+        &self,
+        cursor: Option<&SignedLedgerCursorV2>,
+        limit: usize,
+        trusted_checkpoint: Option<&SignedLedgerCheckpointV2>,
+    ) -> Result<LedgerPageV2, AuthorityError> {
+        if limit == 0 || limit > MAX_LEDGER_PAGE_ENTRIES {
+            return Err(AuthorityError::InvalidInput(format!(
+                "ledger page limit must be between 1 and {MAX_LEDGER_PAGE_ENTRIES}"
+            )));
+        }
+        let verification = self.verify_ledger(trusted_checkpoint)?;
+        let (snapshot_head_seq, snapshot_head_hash, start_seq, cursor_time_floor) = match cursor {
+            Some(signed) => {
+                let cursor = signed.verify(&self.ledger_key.verifying_key())?;
+                if cursor.authority_instance != self.config.instance_id
+                    || cursor.authority_epoch != self.config.epoch
+                    || cursor.ledger_key_id != self.ledger_key_id
+                {
+                    return Err(AuthorityError::InvalidInput(
+                        "ledger cursor belongs to another authority".into(),
+                    ));
+                }
+                let snapshot_head = cursor.snapshot_head_seq.parse::<usize>().map_err(|_| {
+                    AuthorityError::Corrupt("cursor snapshot head sequence overflow".into())
+                })?;
+                let Some(snapshot_entry) = verification.entries.get(snapshot_head - 1) else {
+                    return Err(AuthorityError::RollbackDetected(format!(
+                        "database head {} predates cursor snapshot {}",
+                        verification.head_seq, cursor.snapshot_head_seq
+                    )));
+                };
+                if snapshot_entry.entry_hash != cursor.snapshot_head_hash {
+                    return Err(AuthorityError::RollbackDetected(
+                        "database chain contradicts the signed cursor snapshot".into(),
+                    ));
+                }
+                (
+                    cursor.snapshot_head_seq,
+                    cursor.snapshot_head_hash,
+                    cursor.next_seq.parse::<usize>().map_err(|_| {
+                        AuthorityError::Corrupt("cursor next sequence overflow".into())
+                    })?,
+                    cursor.issued_at,
+                )
+            }
+            None => (
+                verification.head_seq.clone(),
+                verification.head_hash.clone(),
+                1,
+                0,
+            ),
+        };
+        let snapshot_head = snapshot_head_seq.parse::<usize>().map_err(|_| {
+            AuthorityError::Corrupt("ledger snapshot head sequence overflow".into())
+        })?;
+        let start_index = start_seq - 1;
+        let end_index = start_index.saturating_add(limit).min(snapshot_head);
+        let entries = verification.entries[start_index..end_index].to_vec();
+        let next_cursor = if end_index < snapshot_head {
+            let issued_at = authority_now(self.runtime_source.as_ref())?;
+            let evidence_time_floor = verification
+                .entries
+                .iter()
+                .map(|entry| entry.entry.timestamp())
+                .max()
+                .ok_or_else(|| {
+                    AuthorityError::Corrupt("authority ledger has no genesis entry".into())
+                })?;
+            let required_time_floor = evidence_time_floor.max(cursor_time_floor);
+            if issued_at < required_time_floor {
+                return Err(AuthorityError::RuntimeSource(format!(
+                    "timestamp {issued_at} predates signed evidence time {required_time_floor}"
+                )));
+            }
+            let cursor = LedgerCursorV2 {
+                domain: CURSOR_DOMAIN.into(),
+                version: FORMAT_VERSION,
+                authority_instance: self.config.instance_id.clone(),
+                authority_epoch: self.config.epoch.clone(),
+                issued_at,
+                snapshot_head_seq: snapshot_head_seq.clone(),
+                snapshot_head_hash: snapshot_head_hash.clone(),
+                next_seq: (end_index + 1).to_string(),
+                ledger_key_id: self.ledger_key_id.clone(),
+            };
+            cursor.validate()?;
+            Some(SignedLedgerCursorV2 {
+                envelope: sign_payload(EnvelopeDomain::LedgerCursor, &cursor, &self.ledger_key)?,
+            })
+        } else {
+            None
+        };
+        Ok(LedgerPageV2 {
+            entries,
+            snapshot_head_seq,
+            snapshot_head_hash,
+            freshness: verification.freshness,
+            next_cursor,
+        })
     }
 
     /// Produce a ledger-purpose signed checkpoint for an external trust store.
