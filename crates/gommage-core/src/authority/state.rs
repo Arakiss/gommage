@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug)]
 pub(super) struct StoredRequest {
     pub(super) request: ApprovalRequestV2,
     pub(super) request_hash: String,
