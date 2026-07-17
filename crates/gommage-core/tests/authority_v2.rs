@@ -1,12 +1,15 @@
-use ed25519_dalek::SigningKey;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use ed25519_dalek::{Signer as _, SigningKey};
 use gommage_core::{
-    ApproveCommand, ApproveResult, Authority, AuthorityConfig, AuthorityError,
-    AuthorizationContextV2, ConsumeCommand, ConsumeResult, CreateRequestCommand,
-    CreateRequestResult, DenyCommand, DenyResult, FreshnessVerdict, GrantNotUsableReason,
-    GrantStatusV2, RevokeCommand, RevokeResult, SignedGrantClaimV2, SignedGrantStateV2, SignedJcs,
+    ActivateGenerationCommand, ApproveCommand, ApproveResult, Authority, AuthorityConfig,
+    AuthorityError, AuthorityGenerationV2, AuthorizationContextV2, ConsumeCommand, ConsumeResult,
+    CreateRequestCommand, CreateRequestResult, DenyCommand, DenyResult, FreshnessVerdict,
+    GrantNotUsableReason, GrantStatusV2, RevokeCommand, RevokeResult, SetMaintenanceCommand,
+    SignedGrantClaimV2, SignedGrantStateV2, SignedJcs,
 };
 use rusqlite::Connection;
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Barrier},
@@ -22,11 +25,40 @@ fn ledger_key() -> SigningKey {
     SigningKey::from_bytes(&[42; 32])
 }
 
+fn generation(id: &str) -> AuthorityGenerationV2 {
+    let (release, build, policy, mapper, protocol) = match id {
+        "1" => (
+            "gommage-release-1",
+            "gommage-test-build",
+            hash('2'),
+            hash('3'),
+            "gommage-managed-v2",
+        ),
+        "2" => (
+            "gommage-release-2",
+            "gommage-next-build",
+            hash('9'),
+            hash('8'),
+            "gommage-managed-v2",
+        ),
+        other => panic!("unexpected test generation {other}"),
+    };
+    AuthorityGenerationV2::new(
+        id.into(),
+        release.into(),
+        build.into(),
+        policy,
+        mapper,
+        protocol.into(),
+    )
+    .unwrap()
+}
+
 fn config() -> AuthorityConfig {
     AuthorityConfig {
         instance_id: "authority_test".into(),
         epoch: "1".into(),
-        genesis_build_identity: "gommage-test-build".into(),
+        genesis_generation: generation("1"),
         genesis_event_id: "event_genesis".into(),
         genesis_at: 1_700_000_000,
     }
@@ -45,6 +77,65 @@ fn fixture() -> (TempDir, PathBuf, Authority) {
 
 fn hash(byte: char) -> String {
     format!("sha256:{}", byte.to_string().repeat(64))
+}
+
+fn resign_ledger_suffix_with_build(path: &Path, first_seq: i64, build_identity: &str) {
+    let raw = Connection::open(path).unwrap();
+    raw.execute_batch("DROP TRIGGER ledger_entries_no_update;")
+        .unwrap();
+    let mut previous_hash: String = raw
+        .query_row(
+            "SELECT entry_hash FROM ledger_entries WHERE seq = ?1",
+            [first_seq - 1],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let entries = {
+        let mut statement = raw
+            .prepare(
+                "SELECT seq, entry_jcs FROM ledger_entries
+                 WHERE seq >= ?1 ORDER BY seq",
+            )
+            .unwrap();
+        statement
+            .query_map([first_seq], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    assert!(!entries.is_empty());
+    let key = ledger_key();
+    for (seq, stored_jcs) in entries {
+        let mut entry: Value = serde_json::from_str(&stored_jcs).unwrap();
+        entry["previous_hash"] = serde_json::json!(previous_hash);
+        entry["build_identity"] = serde_json::json!(build_identity);
+        let jcs = String::from_utf8(gommage_core::crypto_envelope::canonicalize(&entry).unwrap())
+            .unwrap();
+        let mut message = b"GOMMAGE\0LEDGER_ENTRY\0V2\0".to_vec();
+        message.extend_from_slice(jcs.as_bytes());
+        let signature = key.sign(&message).to_bytes();
+        let signature_b64 = URL_SAFE_NO_PAD.encode(signature);
+        let mut digest = Sha256::new();
+        digest.update(b"GOMMAGE\0LEDGER_ENTRY_HASH\0V2\0");
+        digest.update(jcs.as_bytes());
+        digest.update(signature);
+        let entry_hash = format!("sha256:{}", hex::encode(digest.finalize()));
+        raw.execute(
+            "UPDATE ledger_entries
+             SET entry_jcs = ?1, signature_b64 = ?2, entry_hash = ?3
+             WHERE seq = ?4",
+            rusqlite::params![jcs, signature_b64, entry_hash, seq],
+        )
+        .unwrap();
+        previous_hash = entry_hash;
+    }
+    raw.execute(
+        "UPDATE authority_meta SET head_hash = ?1 WHERE singleton = 1",
+        [previous_hash],
+    )
+    .unwrap();
 }
 
 fn context_with(
@@ -67,18 +158,23 @@ fn context_with(
 }
 
 fn authorization_context() -> AuthorizationContextV2 {
-    context_with(
-        "gommage-test-build",
-        "codex",
-        "Bash",
-        '1',
-        '2',
-        &[
-            "git.push:refs/heads/main",
-            "proc.exec:git",
-            "git.push:refs/heads/main",
+    authorization_context_for(&generation("1"))
+}
+
+fn authorization_context_for(generation: &AuthorityGenerationV2) -> AuthorizationContextV2 {
+    AuthorizationContextV2::new(
+        generation.build_identity().into(),
+        "codex".into(),
+        "Bash".into(),
+        hash('1'),
+        generation.policy_identity().into(),
+        vec![
+            "git.push:refs/heads/main".into(),
+            "proc.exec:git".into(),
+            "git.push:refs/heads/main".into(),
         ],
     )
+    .unwrap()
 }
 
 fn request_command(request_id: &str, event_id: &str) -> CreateRequestCommand {
@@ -87,6 +183,7 @@ fn request_command(request_id: &str, event_id: &str) -> CreateRequestCommand {
         event_id: event_id.into(),
         created_at: 1_700_000_010,
         context: authorization_context(),
+        generation: generation("1"),
         required_scope: "git.push:refs/heads/main".into(),
         reason: "Release the reviewed commit".into(),
     }
@@ -110,8 +207,17 @@ fn approve_command(index: usize) -> ApproveCommand {
         operator_principal: "uid:501".into(),
         reason: "Reviewed exact input and scope".into(),
         resolved_at: 1_700_000_020,
-        build_identity: "gommage-test-build".into(),
         ttl_seconds: 600,
+    }
+}
+
+fn deny_command(request_id: &str, index: usize, resolved_at: i64) -> DenyCommand {
+    DenyCommand {
+        request_id: request_id.into(),
+        event_id: format!("event_deny_{index}"),
+        operator_principal: "uid:501".into(),
+        reason: "Denied after exact review".into(),
+        resolved_at,
     }
 }
 
@@ -126,9 +232,30 @@ fn consume_command(index: usize) -> ConsumeCommand {
     ConsumeCommand {
         required_scope: "git.push:refs/heads/main".into(),
         context: authorization_context(),
+        generation: generation("1"),
         state_event_id: format!("event_spend_{index}"),
         decision_event_id: format!("event_allow_{index}"),
         consumed_at: 1_700_000_030,
+    }
+}
+
+fn activate_command(id: &str, index: usize, activated_at: i64) -> ActivateGenerationCommand {
+    ActivateGenerationCommand {
+        generation: generation(id),
+        event_id: format!("event_generation_{index}"),
+        operator_principal: "uid:501".into(),
+        reason: "Activate the reviewed immutable generation".into(),
+        activated_at,
+    }
+}
+
+fn maintenance_command(enabled: bool, index: usize, transitioned_at: i64) -> SetMaintenanceCommand {
+    SetMaintenanceCommand {
+        enabled,
+        event_id: format!("event_maintenance_{index}"),
+        operator_principal: "uid:501".into(),
+        reason: "Perform a controlled authority transition".into(),
+        transitioned_at,
     }
 }
 
@@ -156,6 +283,7 @@ fn consume_command_api_has_no_client_selected_grant() {
     let ConsumeCommand {
         required_scope,
         context,
+        generation: evaluated_generation,
         state_event_id,
         decision_event_id,
         consumed_at,
@@ -163,9 +291,45 @@ fn consume_command_api_has_no_client_selected_grant() {
 
     assert_eq!(required_scope, "git.push:refs/heads/main");
     assert_eq!(context, authorization_context());
+    assert_eq!(evaluated_generation, generation("1"));
     assert_eq!(state_event_id, "event_spend_0");
     assert_eq!(decision_event_id, "event_allow_0");
     assert_eq!(consumed_at, 1_700_000_030);
+}
+
+#[test]
+fn resolution_commands_have_no_caller_controlled_build_identity() {
+    let ApproveCommand {
+        request_id,
+        grant_id,
+        resolution_event_id,
+        activation_event_id,
+        operator_principal,
+        reason,
+        resolved_at,
+        ttl_seconds,
+    } = approve_command(7);
+    assert_eq!(request_id, "request_1");
+    assert_eq!(grant_id, "grant_7");
+    assert_eq!(resolution_event_id, "event_approve_7");
+    assert_eq!(activation_event_id, "event_activate_7");
+    assert_eq!(operator_principal, "uid:501");
+    assert_eq!(reason, "Reviewed exact input and scope");
+    assert_eq!(resolved_at, 1_700_000_020);
+    assert_eq!(ttl_seconds, 600);
+
+    let DenyCommand {
+        request_id,
+        event_id,
+        operator_principal,
+        reason,
+        resolved_at,
+    } = deny_command("request_2", 7, 1_700_000_021);
+    assert_eq!(request_id, "request_2");
+    assert_eq!(event_id, "event_deny_7");
+    assert_eq!(operator_principal, "uid:501");
+    assert_eq!(reason, "Denied after exact review");
+    assert_eq!(resolved_at, 1_700_000_021);
 }
 
 #[test]
@@ -276,26 +440,378 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
 }
 
 #[test]
-fn open_request_dedupe_binds_the_observing_build() {
+fn open_request_dedupe_binds_the_complete_active_generation() {
     let (_directory, _path, mut authority) = fixture();
     create_request(&mut authority);
+    authority
+        .activate_generation(&activate_command("2", 2, 1_700_000_011))
+        .unwrap();
 
     let mut other_build = request_command("request_other_build", "event_other_build");
-    other_build.context = context_with(
-        "gommage-next-build",
-        "codex",
-        "Bash",
-        '1',
-        '2',
-        &["git.push:refs/heads/main", "proc.exec:git"],
-    );
+    other_build.generation = generation("2");
+    other_build.context = authorization_context_for(&other_build.generation);
     assert!(matches!(
         authority.create_or_get_request(&other_build).unwrap(),
         CreateRequestResult::Created(request)
             if request.request_id() == "request_other_build"
                 && request.build_identity() == "gommage-next-build"
+                && request.generation() == &generation("2")
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "3");
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "4");
+}
+
+#[test]
+fn genesis_generation_and_admin_runtime_transitions_are_signed_state() {
+    let (_directory, _path, mut authority) = fixture();
+    let genesis = authority.runtime_state().unwrap();
+    assert_eq!(genesis.revision(), "0");
+    assert_eq!(genesis.active_generation(), &generation("1"));
+    assert!(!genesis.maintenance());
+    assert_eq!(genesis.transition_event_id(), "event_genesis");
+    assert_eq!(
+        authority.metadata().unwrap().genesis_generation,
+        generation("1")
+    );
+
+    let activated = authority
+        .activate_generation(&activate_command("2", 2, 1_700_000_010))
+        .unwrap();
+    assert_eq!(activated.revision(), "1");
+    assert_eq!(activated.active_generation(), &generation("2"));
+    assert!(!activated.maintenance());
+
+    let entered = authority
+        .set_maintenance(&maintenance_command(true, 1, 1_700_000_011))
+        .unwrap();
+    assert_eq!(entered.revision(), "2");
+    assert!(entered.maintenance());
+    let exited = authority
+        .set_maintenance(&maintenance_command(false, 2, 1_700_000_012))
+        .unwrap();
+    assert_eq!(exited.revision(), "3");
+    assert!(!exited.maintenance());
+
+    let event_types: Vec<_> = authority
+        .verify_ledger(None)
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|entry| entry.entry.event_type().to_string())
+        .collect();
+    assert_eq!(
+        event_types,
+        [
+            "genesis",
+            "generation_activated",
+            "maintenance_entered",
+            "maintenance_exited",
+        ]
+    );
+}
+
+#[test]
+fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
+    let (_directory, _path, mut authority) = fixture();
+    create_request(&mut authority);
+    approve(&mut authority);
+    authority
+        .activate_generation(&activate_command("2", 2, 1_700_000_025))
+        .unwrap();
+    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+
+    let stale_request = request_command("request_stale", "event_request_stale");
+    assert!(matches!(
+        authority.create_or_get_request(&stale_request),
+        Err(AuthorityError::StaleGeneration {
+            evaluated_generation_id,
+            active_generation_id,
+        }) if evaluated_generation_id == "1" && active_generation_id == "2"
+    ));
+    assert!(authority.request("request_stale").unwrap().is_none());
+    assert!(matches!(
+        authority.consume_and_record_allow(&consume_command(9)),
+        Err(AuthorityError::StaleGeneration { .. })
+    ));
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(
+        authority
+            .latest_state("grant_1")
+            .unwrap()
+            .unwrap()
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .status(),
+        GrantStatusV2::Active
+    );
+    assert_eq!(
+        authority
+            .verify_ledger(None)
+            .unwrap()
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.event_type() == "decision_allow")
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
+    for blocked_by_maintenance in [false, true] {
+        let (_directory, _path, mut authority) = fixture();
+        create_request(&mut authority);
+        if blocked_by_maintenance {
+            authority
+                .set_maintenance(&maintenance_command(true, 1, 1_700_000_015))
+                .unwrap();
+        } else {
+            authority
+                .activate_generation(&activate_command("2", 2, 1_700_000_015))
+                .unwrap();
+        }
+        let head_before = authority.verify_ledger(None).unwrap().head_seq;
+
+        let result = authority.approve(&approve_command(1));
+        if blocked_by_maintenance {
+            assert!(matches!(result, Err(AuthorityError::Maintenance)));
+        } else {
+            assert!(matches!(
+                result,
+                Err(AuthorityError::StaleGeneration {
+                    evaluated_generation_id,
+                    active_generation_id,
+                }) if evaluated_generation_id == "1" && active_generation_id == "2"
+            ));
+        }
+        assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+        assert!(authority.resolution("request_1").unwrap().is_none());
+        assert!(authority.grant("grant_1").unwrap().is_none());
+        assert!(authority.request("request_1").unwrap().is_some());
+    }
+}
+
+#[test]
+fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
+    let (_directory, _path, mut authority) = fixture();
+    create_request(&mut authority);
+    approve(&mut authority);
+
+    let mut second = request_command("request_2", "event_request_2");
+    second.context = context_with(
+        "gommage-test-build",
+        "codex",
+        "Bash",
+        '4',
+        '2',
+        &["git.push:refs/heads/main", "proc.exec:git"],
+    );
+    assert!(matches!(
+        authority.create_or_get_request(&second).unwrap(),
+        CreateRequestResult::Created(request) if request.request_id() == "request_2"
+    ));
+    authority
+        .activate_generation(&activate_command("2", 2, 1_700_000_025))
+        .unwrap();
+    authority
+        .set_maintenance(&maintenance_command(true, 1, 1_700_000_026))
+        .unwrap();
+
+    assert!(matches!(
+        authority
+            .deny(&deny_command("request_2", 2, 1_700_000_030))
+            .unwrap(),
+        DenyResult::Denied(resolution)
+            if resolution.request_id == "request_2"
+                && resolution.kind == gommage_core::ApprovalResolutionKindV2::Denied
+    ));
+    assert!(matches!(
+        authority
+            .revoke(&RevokeCommand {
+                grant_id: "grant_1".into(),
+                event_id: "event_revoke_maintenance".into(),
+                operator_principal: "uid:501".into(),
+                reason: "Revoke an obsolete active grant during maintenance".into(),
+                revoked_at: 1_700_000_031,
+                build_identity: "maintenance-admin-build".into(),
+            })
+            .unwrap(),
+        RevokeResult::Revoked(_)
+    ));
+    assert!(authority.runtime_state().unwrap().maintenance());
+    assert_eq!(
+        authority
+            .latest_state("grant_1")
+            .unwrap()
+            .unwrap()
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .status(),
+        GrantStatusV2::Revoked
+    );
+    authority.verify_ledger(None).unwrap();
+}
+
+#[test]
+fn generation_activation_linearizes_with_concurrent_approval() {
+    let (_directory, path, mut authority) = fixture();
+    create_request(&mut authority);
+    drop(authority);
+
+    let barrier = Arc::new(Barrier::new(2));
+    let approve_handle = {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            let mut authority = open(&path);
+            barrier.wait();
+            authority.approve(&approve_command(1))
+        })
+    };
+    let activate_handle = {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            let mut authority = open(&path);
+            barrier.wait();
+            authority.activate_generation(&activate_command("2", 2, 1_700_000_025))
+        })
+    };
+    let approve_result = approve_handle.join().unwrap();
+    activate_handle.join().unwrap().unwrap();
+
+    let authority = open(&path);
+    let verification = authority.verify_ledger(None).unwrap();
+    let generation_seq = verification
+        .entries
+        .iter()
+        .position(|entry| entry.entry.event_type() == "generation_activated")
+        .unwrap();
+    match approve_result {
+        Ok(ApproveResult::Approved { .. }) => {
+            let resolution_seq = verification
+                .entries
+                .iter()
+                .position(|entry| entry.entry.event_type() == "approval_resolved")
+                .unwrap();
+            let grant_activation_seq = verification
+                .entries
+                .iter()
+                .position(|entry| entry.entry.event_type() == "grant_activated")
+                .unwrap();
+            assert!(resolution_seq < grant_activation_seq);
+            assert!(grant_activation_seq < generation_seq);
+            assert!(authority.grant("grant_1").unwrap().is_some());
+        }
+        Err(AuthorityError::StaleGeneration { .. }) => {
+            assert!(
+                verification
+                    .entries
+                    .iter()
+                    .all(|entry| entry.entry.event_type() != "approval_resolved")
+            );
+            assert!(authority.grant("grant_1").unwrap().is_none());
+        }
+        other => panic!("unexpected concurrent approval result: {other:?}"),
+    }
+}
+
+#[test]
+fn maintenance_blocks_decisions_without_mutation_until_signed_exit() {
+    let (_directory, _path, mut authority) = fixture();
+    create_request(&mut authority);
+    approve(&mut authority);
+    authority
+        .set_maintenance(&maintenance_command(true, 1, 1_700_000_025))
+        .unwrap();
+    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+
+    assert!(matches!(
+        authority.create_or_get_request(&request_command(
+            "request_maintenance",
+            "event_request_maintenance",
+        )),
+        Err(AuthorityError::Maintenance)
+    ));
+    assert!(matches!(
+        authority.consume_and_record_allow(&consume_command(9)),
+        Err(AuthorityError::Maintenance)
+    ));
+    assert!(authority.request("request_maintenance").unwrap().is_none());
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(
+        authority
+            .latest_state("grant_1")
+            .unwrap()
+            .unwrap()
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .status(),
+        GrantStatusV2::Active
+    );
+
+    authority
+        .set_maintenance(&maintenance_command(false, 2, 1_700_000_026))
+        .unwrap();
+    assert!(matches!(
+        authority
+            .consume_and_record_allow(&consume_command(10))
+            .unwrap(),
+        ConsumeResult::Consumed { .. }
+    ));
+}
+
+#[test]
+fn generation_activation_linearizes_with_concurrent_allow() {
+    let (_directory, path, mut authority) = fixture();
+    create_request(&mut authority);
+    approve(&mut authority);
+    drop(authority);
+
+    let barrier = Arc::new(Barrier::new(2));
+    let consume_handle = {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            let mut authority = open(&path);
+            barrier.wait();
+            authority.consume_and_record_allow(&consume_command(20))
+        })
+    };
+    let activate_handle = {
+        let path = path.clone();
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            let mut authority = open(&path);
+            barrier.wait();
+            authority.activate_generation(&activate_command("2", 2, 1_700_000_025))
+        })
+    };
+    let consume_result = consume_handle.join().unwrap();
+    let activated = activate_handle.join().unwrap().unwrap();
+    assert_eq!(activated.active_generation(), &generation("2"));
+
+    let verification = open(&path).verify_ledger(None).unwrap();
+    let activation_seq = verification
+        .entries
+        .iter()
+        .position(|entry| entry.entry.event_type() == "generation_activated")
+        .unwrap();
+    let allow_sequences: Vec<_> = verification
+        .entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            (entry.entry.event_type() == "decision_allow").then_some(index)
+        })
+        .collect();
+    match consume_result {
+        Ok(ConsumeResult::Consumed { .. }) => {
+            assert_eq!(allow_sequences.len(), 1);
+            assert!(allow_sequences[0] < activation_seq);
+        }
+        Err(AuthorityError::StaleGeneration { .. }) => assert!(allow_sequences.is_empty()),
+        other => panic!("unexpected concurrent consume result: {other:?}"),
+    }
 }
 
 #[test]
@@ -305,14 +821,6 @@ fn consumption_requires_the_complete_approved_context_without_spending_on_mismat
     approve(&mut authority);
 
     let mismatches = [
-        context_with(
-            "gommage-next-build",
-            "codex",
-            "Bash",
-            '1',
-            '2',
-            &["git.push:refs/heads/main", "proc.exec:git"],
-        ),
         context_with(
             "gommage-test-build",
             "claude-code",
@@ -342,14 +850,6 @@ fn consumption_requires_the_complete_approved_context_without_spending_on_mismat
             "codex",
             "Bash",
             '1',
-            '9',
-            &["git.push:refs/heads/main", "proc.exec:git"],
-        ),
-        context_with(
-            "gommage-test-build",
-            "codex",
-            "Bash",
-            '1',
             '2',
             &["git.push:refs/heads/main"],
         ),
@@ -369,6 +869,34 @@ fn consumption_requires_the_complete_approved_context_without_spending_on_mismat
             .verify(&grant_key().verifying_key())
             .unwrap();
         assert_eq!(latest.status(), GrantStatusV2::Active);
+    }
+    for (index, context) in [
+        context_with(
+            "gommage-next-build",
+            "codex",
+            "Bash",
+            '1',
+            '2',
+            &["git.push:refs/heads/main", "proc.exec:git"],
+        ),
+        context_with(
+            "gommage-test-build",
+            "codex",
+            "Bash",
+            '1',
+            '9',
+            &["git.push:refs/heads/main", "proc.exec:git"],
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut command = consume_command(index + 30);
+        command.context = context;
+        assert!(matches!(
+            authority.consume_and_record_allow(&command),
+            Err(AuthorityError::InvalidInput(_))
+        ));
     }
     let mut wrong_scope = consume_command(20);
     wrong_scope.required_scope = "git.push:refs/heads/release".into();
@@ -629,14 +1157,7 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
             let mut authority = open(&path);
             barrier.wait();
             authority
-                .deny(&DenyCommand {
-                    request_id: "request_1".into(),
-                    event_id: "event_deny".into(),
-                    operator_principal: "uid:501".into(),
-                    reason: "Operator denied".into(),
-                    resolved_at: 1_700_000_020,
-                    build_identity: "gommage-test-build".into(),
-                })
+                .deny(&deny_command("request_1", 1, 1_700_000_020))
                 .unwrap()
         })
     };
@@ -830,14 +1351,7 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
     let mut authority = open(&resolution_path);
     create_request(&mut authority);
     authority
-        .deny(&DenyCommand {
-            request_id: "request_1".into(),
-            event_id: "event_deny_tamper".into(),
-            operator_principal: "uid:501".into(),
-            reason: "Denied after review".into(),
-            resolved_at: 1_700_000_020,
-            build_identity: "gommage-test-build".into(),
-        })
+        .deny(&deny_command("request_1", 99, 1_700_000_020))
         .unwrap();
     drop(authority);
     let raw = Connection::open(&resolution_path).unwrap();
@@ -851,6 +1365,95 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
     .unwrap();
     drop(raw);
     assert!(Authority::open(&resolution_path, config(), grant_key(), ledger_key()).is_err());
+}
+
+#[test]
+fn full_verification_rejects_signed_resolution_and_activation_build_rebinding() {
+    for mutation in [
+        "denied_resolution",
+        "approved_activation",
+        "approved_resolution_and_activation",
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(format!("{mutation}.sqlite3"));
+        let mut authority = open(&path);
+        create_request(&mut authority);
+        match mutation {
+            "denied_resolution" => {
+                authority
+                    .deny(&deny_command("request_1", 50, 1_700_000_020))
+                    .unwrap();
+            }
+            "approved_activation" | "approved_resolution_and_activation" => {
+                approve(&mut authority);
+            }
+            _ => unreachable!(),
+        }
+        drop(authority);
+
+        let first_rebound_seq = if mutation == "approved_activation" {
+            4
+        } else {
+            3
+        };
+        resign_ledger_suffix_with_build(&path, first_rebound_seq, "forged-signed-build");
+        match Authority::open(&path, config(), grant_key(), ledger_key()) {
+            Err(AuthorityError::Corrupt(_)) => {}
+            Err(other) => panic!(
+                "signed {mutation} rebinding reached the wrong verification layer: {other:?}"
+            ),
+            Ok(_) => panic!("signed {mutation} rebinding must fail relational verification"),
+        }
+    }
+}
+
+#[test]
+fn full_verification_rejects_generation_and_runtime_state_tampering() {
+    for mutation in ["generation", "runtime"] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory
+            .path()
+            .join(format!("{mutation}-tampered.sqlite3"));
+        let mut authority = open(&path);
+        authority
+            .activate_generation(&activate_command("2", 2, 1_700_000_010))
+            .unwrap();
+        drop(authority);
+
+        let raw = Connection::open(&path).unwrap();
+        match mutation {
+            "generation" => {
+                raw.execute_batch("DROP TRIGGER authority_generations_no_update;")
+                    .unwrap();
+                raw.execute(
+                    "UPDATE authority_generations
+                     SET generation_jcs = replace(
+                         generation_jcs,
+                         'gommage-release-2',
+                         'gommage-release-x'
+                     )
+                     WHERE generation_id = '2'",
+                    [],
+                )
+                .unwrap();
+            }
+            "runtime" => {
+                raw.execute_batch("DROP TRIGGER authority_runtime_states_no_update;")
+                    .unwrap();
+                raw.execute(
+                    "UPDATE authority_runtime_states SET maintenance = 1 WHERE revision = 1",
+                    [],
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        drop(raw);
+        assert!(
+            Authority::open(&path, config(), grant_key(), ledger_key()).is_err(),
+            "offline {mutation} tampering must fail runtime reconstruction"
+        );
+    }
 }
 
 #[test]
