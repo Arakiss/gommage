@@ -507,6 +507,25 @@ fn ledger_cursor_issuance_rejects_runtime_clock_regression() {
 }
 
 #[test]
+fn every_append_rejects_a_timestamp_before_the_signed_head() {
+    let (_directory, _path, mut authority) = fixture();
+    let before_ledger = authority.verify_ledger().unwrap();
+    let before_runtime = authority.runtime_state().unwrap();
+
+    assert!(matches!(
+        authority.set_maintenance(&maintenance_command(
+            true,
+            1,
+            config().genesis_at - 1,
+        )),
+        Err(AuthorityError::InvalidInput(message))
+            if message.contains("predates signed predecessor time")
+    ));
+    assert_eq!(authority.verify_ledger().unwrap(), before_ledger);
+    assert_eq!(authority.runtime_state().unwrap(), before_runtime);
+}
+
+#[test]
 fn runtime_authorization_owns_identity_time_and_the_complete_retry_transaction() {
     let (_directory, _path, mut authority) = fixture();
     let command = authorize_command();
@@ -745,7 +764,7 @@ fn open_request_dedupe_binds_the_complete_active_generation() {
     let (_directory, _path, mut authority) = fixture();
     let first = create_request(&mut authority);
     authority
-        .activate_generation(&activate_command("2", 2, 1_700_000_011))
+        .activate_generation(&activate_command("2", 2, 1_700_000_030))
         .unwrap();
 
     let second = match authority

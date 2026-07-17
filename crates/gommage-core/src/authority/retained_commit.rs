@@ -226,9 +226,11 @@ fn validate_successor_checkpoint(
 ) -> Result<(), AuthorityError> {
     let active = active.verify(ledger_key)?;
     let next = next.verify(ledger_key)?;
-    if checkpoint_seq(&next)? <= checkpoint_seq(&active)? {
+    if checkpoint_seq(&next)? <= checkpoint_seq(&active)?
+        || next.evidence_time_floor() < active.evidence_time_floor()
+    {
         return Err(AuthorityError::Corrupt(
-            "successor checkpoint does not strictly advance the active sequence".into(),
+            "successor checkpoint must advance sequence without regressing evidence time".into(),
         ));
     }
     Ok(())
@@ -240,17 +242,13 @@ pub(super) fn sign_head_checkpoint(
     ledger_key: &SigningKey,
     verification: &LedgerVerification,
 ) -> Result<SignedLedgerCheckpointV2, AuthorityError> {
-    let last = verification
-        .entries
-        .last()
-        .ok_or_else(|| AuthorityError::Corrupt("authority ledger has no genesis entry".into()))?;
     let checkpoint_id = checkpoint_id_for_head(&verification.head_seq, &verification.head_hash)?;
     sign_checkpoint(
         config,
         ledger_key_id,
         ledger_key,
         &checkpoint_id,
-        last.entry.timestamp(),
+        verification.evidence_time_floor,
         verification.head_seq.clone(),
         verification.head_hash.clone(),
     )
@@ -266,9 +264,10 @@ pub(super) fn require_checkpoint_at_head(
         require_checkpoint_for_verified_prefix(signed, verification, config, ledger_key)?;
     if checkpoint.head_seq() != verification.head_seq
         || checkpoint.head_hash() != verification.head_hash
+        || checkpoint.evidence_time_floor() != verification.evidence_time_floor
     {
         return Err(AuthorityError::RollbackDetected(
-            "active checkpoint does not equal the verified database head".into(),
+            "active checkpoint does not equal the verified database head and evidence time".into(),
         ));
     }
     Ok(checkpoint)
@@ -308,10 +307,10 @@ pub(super) fn require_checkpoint_for_verified_prefix(
             )
         })?;
     if entry.entry_hash != checkpoint.head_hash()
-        || entry.entry.timestamp() != checkpoint.created_at()
+        || entry.entry.timestamp() != checkpoint.evidence_time_floor()
     {
         return Err(AuthorityError::RollbackDetected(
-            "checkpoint hash or timestamp contradicts its verified ledger entry".into(),
+            "checkpoint hash or evidence time contradicts its verified ledger entry".into(),
         ));
     }
     Ok(checkpoint)

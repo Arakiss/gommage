@@ -23,66 +23,63 @@ pub(super) fn verify_all(
             "authority metadata does not match the trusted open parameters".into(),
         ));
     }
-    let raw_rows = {
+    let mut entries = Vec::new();
+    let mut previous_hash = ZERO_HASH.to_string();
+    let mut evidence_time_floor = None;
+    {
         let mut statement = conn.prepare(
             "SELECT seq, event_id, entry_jcs, signature_b64, entry_hash
              FROM ledger_entries ORDER BY seq ASC",
         )?;
-        statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    if raw_rows.is_empty() {
-        return Err(AuthorityError::Corrupt(
-            "ledger is missing its genesis entry".into(),
-        ));
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let stored_seq = row.get::<_, i64>(0)?;
+            let stored_event_id = row.get::<_, String>(1)?;
+            let jcs = row.get::<_, String>(2)?;
+            let signature_b64 = row.get::<_, String>(3)?;
+            let stored_hash = row.get::<_, String>(4)?;
+            let expected_seq = i64::try_from(entries.len() + 1)
+                .map_err(|_| AuthorityError::Corrupt("ledger sequence overflow".into()))?;
+            if stored_seq != expected_seq {
+                return Err(AuthorityError::Corrupt(format!(
+                    "ledger sequence gap: expected {expected_seq}, got {stored_seq}"
+                )));
+            }
+            let envelope = SignedJcs::from_stored(jcs, signature_b64);
+            let entry: LedgerEntryV2 =
+                verify_payload(EnvelopeDomain::LedgerEntry, &envelope, ledger_key)?;
+            entry.validate()?;
+            if entry.seq() != expected_seq.to_string()
+                || entry.event_id() != stored_event_id
+                || entry.previous_hash() != previous_hash
+            {
+                return Err(AuthorityError::Corrupt(
+                    "ledger row, sequence, event id, or previous hash mismatch".into(),
+                ));
+            }
+            if evidence_time_floor.is_some_and(|floor| entry.timestamp() < floor) {
+                return Err(AuthorityError::Corrupt(
+                    "ledger evidence timestamp regresses before its predecessor".into(),
+                ));
+            }
+            evidence_time_floor = Some(entry.timestamp());
+            let raw_signature = signature_bytes(envelope.signature_b64())?;
+            let computed_hash = ledger_entry_hash(envelope.jcs().as_bytes(), &raw_signature);
+            if computed_hash != stored_hash {
+                return Err(AuthorityError::Corrupt(
+                    "ledger signature-inclusive entry hash mismatch".into(),
+                ));
+            }
+            previous_hash = computed_hash.clone();
+            entries.push(VerifiedLedgerEntryV2 {
+                entry,
+                envelope,
+                entry_hash: computed_hash,
+            });
+        }
     }
-    let mut entries = Vec::with_capacity(raw_rows.len());
-    let mut previous_hash = ZERO_HASH.to_string();
-    for (index, (stored_seq, stored_event_id, jcs, signature_b64, stored_hash)) in
-        raw_rows.into_iter().enumerate()
-    {
-        let expected_seq = i64::try_from(index + 1)
-            .map_err(|_| AuthorityError::Corrupt("ledger sequence overflow".into()))?;
-        if stored_seq != expected_seq {
-            return Err(AuthorityError::Corrupt(format!(
-                "ledger sequence gap: expected {expected_seq}, got {stored_seq}"
-            )));
-        }
-        let envelope = SignedJcs::from_stored(jcs, signature_b64);
-        let entry: LedgerEntryV2 =
-            verify_payload(EnvelopeDomain::LedgerEntry, &envelope, ledger_key)?;
-        entry.validate()?;
-        if entry.seq() != expected_seq.to_string()
-            || entry.event_id() != stored_event_id
-            || entry.previous_hash() != previous_hash
-        {
-            return Err(AuthorityError::Corrupt(
-                "ledger row, sequence, event id, or previous hash mismatch".into(),
-            ));
-        }
-        let raw_signature = signature_bytes(envelope.signature_b64())?;
-        let computed_hash = ledger_entry_hash(envelope.jcs().as_bytes(), &raw_signature);
-        if computed_hash != stored_hash {
-            return Err(AuthorityError::Corrupt(
-                "ledger signature-inclusive entry hash mismatch".into(),
-            ));
-        }
-        previous_hash = computed_hash.clone();
-        entries.push(VerifiedLedgerEntryV2 {
-            entry,
-            envelope,
-            entry_hash: computed_hash,
-        });
-    }
+    let evidence_time_floor = evidence_time_floor
+        .ok_or_else(|| AuthorityError::Corrupt("ledger is missing its genesis entry".into()))?;
     verify_genesis(&entries[0], config, &metadata)?;
     let (stored_head_seq, stored_head_hash): (i64, String) = conn.query_row(
         "SELECT head_seq, head_hash FROM authority_meta WHERE singleton = 1",
@@ -117,9 +114,13 @@ pub(super) fn verify_all(
                     checkpoint.head_seq
                 )));
             }
-            if entries[checkpoint_seq - 1].entry_hash != checkpoint.head_hash {
+            let checkpointed_entry = &entries[checkpoint_seq - 1];
+            if checkpointed_entry.entry_hash != checkpoint.head_hash
+                || checkpointed_entry.entry.timestamp() != checkpoint.evidence_time_floor()
+            {
                 return Err(AuthorityError::RollbackDetected(
-                    "database chain contradicts the trusted checkpoint hash".into(),
+                    "database chain contradicts the trusted checkpoint hash or evidence time"
+                        .into(),
                 ));
             }
             FreshnessVerdict::Anchored {
@@ -130,6 +131,7 @@ pub(super) fn verify_all(
     Ok(LedgerVerification {
         head_seq: stored_head_seq.to_string(),
         head_hash: stored_head_hash,
+        evidence_time_floor,
         entries,
         freshness,
     })

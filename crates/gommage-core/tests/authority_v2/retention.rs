@@ -9,6 +9,10 @@ fn assert_active_matches(authority: &Authority, retention: &TestRetention) {
     assert_eq!(checkpoint.head_seq(), verification.head_seq);
     assert_eq!(checkpoint.head_hash(), verification.head_hash);
     assert_eq!(
+        checkpoint.evidence_time_floor(),
+        verification.evidence_time_floor
+    );
+    assert_eq!(
         checkpoint.checkpoint_id(),
         format!(
             "head:{}:{}",
@@ -491,11 +495,12 @@ fn recovery_rejects_signed_but_non_authority_checkpoint_metadata() {
         checkpoint["created_at"] = json!(1_700_000_001_i64);
     });
     retention.force_state(CheckpointRetentionStateV2::Active(forged_time));
-    assert!(matches!(
-        try_open(&path),
+    match try_open(&path) {
         Err(AuthorityError::RollbackDetected(message))
-            if message.contains("timestamp contradicts")
-    ));
+            if message.contains("hash or evidence time") => {}
+        Err(other) => panic!("forged evidence time reached the wrong verifier: {other:?}"),
+        Ok(_) => panic!("forged evidence time was accepted"),
+    }
 }
 
 #[test]

@@ -22,6 +22,40 @@ pub(super) fn append_ledger_entry(
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
+    if head_seq > 0 {
+        let (stored_event_id, jcs, signature_b64, stored_hash): (String, String, String, String) =
+            conn.query_row(
+                "SELECT event_id, entry_jcs, signature_b64, entry_hash
+                 FROM ledger_entries WHERE seq = ?1",
+                [head_seq],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        let envelope = SignedJcs::from_stored(jcs, signature_b64);
+        let head: LedgerEntryV2 = verify_payload(
+            EnvelopeDomain::LedgerEntry,
+            &envelope,
+            &ledger_key.verifying_key(),
+        )?;
+        head.validate()?;
+        let raw_signature = signature_bytes(envelope.signature_b64())?;
+        let computed_hash = ledger_entry_hash(envelope.jcs().as_bytes(), &raw_signature);
+        if head.seq() != head_seq.to_string()
+            || head.event_id() != stored_event_id
+            || stored_hash != previous_hash
+            || computed_hash != previous_hash
+        {
+            return Err(AuthorityError::Corrupt(
+                "ledger metadata does not identify its signed predecessor".into(),
+            ));
+        }
+        if draft.timestamp < head.timestamp() {
+            return Err(AuthorityError::InvalidInput(format!(
+                "ledger evidence time {} predates signed predecessor time {}",
+                draft.timestamp,
+                head.timestamp()
+            )));
+        }
+    }
     let seq = head_seq
         .checked_add(1)
         .ok_or_else(|| AuthorityError::Corrupt("ledger sequence overflow".into()))?;

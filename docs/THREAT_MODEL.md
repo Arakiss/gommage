@@ -215,6 +215,12 @@ database through a same-directory no-clobber hard link and syncs both directory
 transitions. The recovery matrix is fail-closed on supported local Unix
 filesystems; it is not a universal power-loss guarantee for remote or exotic
 filesystems whose link or sync semantics do not meet those operations.
+Authority ledger time is evidence ordering, not a trusted estimate of physical
+time: timestamps may be equal, but they cannot decrease. Each append verifies
+the signed predecessor, full verification enforces the same invariant, and the
+signed timestamp of every retained checkpoint head becomes the minimum time
+accepted for successor evidence. A clock rollback therefore fails closed
+instead of creating earlier-dated decisions, transitions, or cursors.
 
 The shipped daemon, CLI, key, policy, approval inbox, picto database, and Unix
 socket are user-local. A process under the same UID can edit policy and state,

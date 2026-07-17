@@ -349,6 +349,8 @@ pub struct LedgerVerification {
     pub head_seq: String,
     /// Verified signature-inclusive database head hash.
     pub head_hash: String,
+    /// Greatest verified evidence timestamp, equal to the monotonic head time.
+    pub evidence_time_floor: i64,
     /// Explicit bootstrap-only or durably anchored result.
     pub freshness: FreshnessVerdict,
 }
@@ -386,6 +388,14 @@ impl LedgerCheckpointV2 {
 
     /// Return the checkpoint creation timestamp.
     pub fn created_at(&self) -> i64 {
+        self.created_at
+    }
+
+    /// Return the signed minimum timestamp for any successor evidence.
+    ///
+    /// Checkpoints are created from a fully verified head, so their creation
+    /// time is the timestamp of that head and therefore the successor floor.
+    pub fn evidence_time_floor(&self) -> i64 {
         self.created_at
     }
 

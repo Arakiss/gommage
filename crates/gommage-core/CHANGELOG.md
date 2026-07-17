@@ -34,6 +34,12 @@ enforced by `cargo-semver-checks` in CI.
   post-link, and post-publication states resume exactly or fail closed; empty
   retention cannot re-anchor an initialized preparation. SQLite enables
   `fullfsync` and `checkpoint_fullfsync` for supported local Unix filesystems.
+* Ledger evidence time is monotonic. Appends verify their signed predecessor,
+  full verification rejects a validly re-signed timestamp regression, and a
+  checkpoint's signed `created_at` is its successor evidence-time floor.
+  Runtime decisions and cursors reject clocks below that verified floor. The
+  verifier now streams stored rows into one verified representation rather
+  than retaining a second raw copy.
 
 ## [0.17.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.16.1-alpha.1...gommage-core-v0.17.0-alpha.1) (2026-07-13)
 

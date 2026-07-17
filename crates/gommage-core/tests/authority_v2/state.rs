@@ -6,7 +6,7 @@ fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
     let request = create_request(&mut authority);
     approve(&mut authority, &request);
     authority
-        .activate_generation(&activate_command("2", 2, 1_700_000_025))
+        .activate_generation(&activate_command("2", 2, 1_700_000_030))
         .unwrap();
     let head_before = authority.verify_ledger().unwrap().head_seq;
 
@@ -51,11 +51,11 @@ fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
         let request = create_request(&mut authority);
         if blocked_by_maintenance {
             authority
-                .set_maintenance(&maintenance_command(true, 1, 1_700_000_015))
+                .set_maintenance(&maintenance_command(true, 1, 1_700_000_030))
                 .unwrap();
         } else {
             authority
-                .activate_generation(&activate_command("2", 2, 1_700_000_015))
+                .activate_generation(&activate_command("2", 2, 1_700_000_030))
                 .unwrap();
         }
         let head_before = authority.verify_ledger().unwrap().head_seq;
@@ -91,10 +91,10 @@ fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
     approve(&mut authority, &first);
     let second = create_second_request(&mut authority);
     authority
-        .activate_generation(&activate_command("2", 2, 1_700_000_025))
+        .activate_generation(&activate_command("2", 2, 1_700_000_030))
         .unwrap();
     authority
-        .set_maintenance(&maintenance_command(true, 1, 1_700_000_026))
+        .set_maintenance(&maintenance_command(true, 1, 1_700_000_030))
         .unwrap();
 
     assert!(matches!(
@@ -160,7 +160,7 @@ fn generation_activation_linearizes_with_concurrent_approval() {
             authority
                 .lock()
                 .unwrap()
-                .activate_generation(&activate_command("2", 2, 1_700_000_025))
+                .activate_generation(&activate_command("2", 2, 1_700_000_030))
         })
     };
     let approve_result = approve_handle.join().unwrap();
@@ -208,7 +208,7 @@ fn maintenance_blocks_decisions_without_mutation_until_signed_exit() {
     let request = create_request(&mut authority);
     approve(&mut authority, &request);
     authority
-        .set_maintenance(&maintenance_command(true, 1, 1_700_000_025))
+        .set_maintenance(&maintenance_command(true, 1, 1_700_000_030))
         .unwrap();
     let head_before = authority.verify_ledger().unwrap().head_seq;
 
@@ -229,7 +229,7 @@ fn maintenance_blocks_decisions_without_mutation_until_signed_exit() {
     );
 
     authority
-        .set_maintenance(&maintenance_command(false, 2, 1_700_000_026))
+        .set_maintenance(&maintenance_command(false, 2, 1_700_000_030))
         .unwrap();
     assert!(matches!(
         authority.commit_decision(&consume_command(10)).unwrap(),
@@ -264,7 +264,7 @@ fn generation_activation_linearizes_with_concurrent_allow() {
             authority
                 .lock()
                 .unwrap()
-                .activate_generation(&activate_command("2", 2, 1_700_000_025))
+                .activate_generation(&activate_command("2", 2, 1_700_000_030))
         })
     };
     let consume_result = consume_handle.join().unwrap();

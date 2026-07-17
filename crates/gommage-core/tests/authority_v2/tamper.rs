@@ -253,6 +253,28 @@ fn full_verification_rejects_generation_and_runtime_state_tampering() {
 }
 
 #[test]
+fn full_verification_rejects_a_validly_resigned_timestamp_regression() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("time-regression.sqlite3");
+    let mut authority = open(&path);
+    authority
+        .set_maintenance(&maintenance_command(true, 1, config().genesis_at + 10))
+        .unwrap();
+    drop(authority);
+
+    resign_ledger_suffix(&path, 2, |seq, entry| {
+        if seq == 2 {
+            entry["timestamp"] = json!(config().genesis_at - 1);
+        }
+    });
+    assert!(matches!(
+        try_open(&path),
+        Err(AuthorityError::Corrupt(message))
+            if message.contains("timestamp regresses before its predecessor")
+    ));
+}
+
+#[test]
 fn resigned_decision_record_tampering_fails_closed() {
     for mutation in ["outcome", "semantics", "provenance", "generation"] {
         let directory = tempfile::tempdir().unwrap();

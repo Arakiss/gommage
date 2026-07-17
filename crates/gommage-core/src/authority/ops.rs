@@ -549,14 +549,7 @@ impl Authority {
         let entries = verification.entries[start_index..end_index].to_vec();
         let next_cursor = if end_index < snapshot_head {
             let issued_at = authority_now(self.runtime_source.as_ref())?;
-            let evidence_time_floor = verification
-                .entries
-                .iter()
-                .map(|entry| entry.entry.timestamp())
-                .max()
-                .ok_or_else(|| {
-                    AuthorityError::Corrupt("authority ledger has no genesis entry".into())
-                })?;
+            let evidence_time_floor = verification.evidence_time_floor;
             let required_time_floor = evidence_time_floor.max(cursor_time_floor);
             if issued_at < required_time_floor {
                 return Err(AuthorityError::RuntimeSource(format!(

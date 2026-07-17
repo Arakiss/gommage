@@ -134,6 +134,13 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   connections also enable `fullfsync` and `checkpoint_fullfsync`. These
   guarantees target supported local Unix filesystems; unsupported filesystem
   semantics fail closed instead of weakening publication.
+- Authority v2 ledger timestamps are now nondecreasing. Every append verifies
+  the signed predecessor and rejects an earlier timestamp, full verification
+  rejects even a validly re-signed regressing chain, and each retained
+  checkpoint's signed `created_at` is the evidence-time floor for successors.
+  Runtime decisions and paginated cursors compare their trusted clock against
+  that verified floor. Full verification also streams SQLite rows directly
+  into verified entries instead of first retaining a second raw copy.
 - Pinned `serde_json_canonicalizer` as a determinism-critical dependency for
   Authority v2's RFC 8785 signed envelopes.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow

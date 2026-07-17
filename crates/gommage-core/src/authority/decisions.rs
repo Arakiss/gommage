@@ -228,12 +228,7 @@ fn ensure_evidence_time_not_regressed(
     timestamp: i64,
     verification: &LedgerVerification,
 ) -> Result<(), AuthorityError> {
-    let floor = verification
-        .entries
-        .iter()
-        .map(|entry| entry.entry.timestamp())
-        .max()
-        .ok_or_else(|| AuthorityError::Corrupt("authority ledger has no genesis entry".into()))?;
+    let floor = verification.evidence_time_floor;
     if timestamp < floor {
         return Err(AuthorityError::RuntimeSource(format!(
             "timestamp {timestamp} predates signed evidence time {floor}"
