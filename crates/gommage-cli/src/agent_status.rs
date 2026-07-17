@@ -698,7 +698,7 @@ fn push_hook_coverage_report(
         report.push(
             "hook_coverage",
             AgentStatus::Ok,
-            "Gommage hook matcher covers the current mapped tool surface",
+            "Gommage hook matcher covers every PreToolUse event emitted by the host",
             Some(serde_json::json!({
                 "path": path_display(path),
                 "installed_matchers": installed_matchers,
@@ -710,9 +710,9 @@ fn push_hook_coverage_report(
 
     report.push(
         "hook_coverage",
-        AgentStatus::Warn,
+        AgentStatus::Fail,
         format!(
-            "Gommage hook matcher is missing current mapped tool coverage: {}",
+            "Gommage hook matcher does not cover every PreToolUse event; missing: {}",
             missing.join(", ")
         ),
         Some(serde_json::json!({
@@ -828,7 +828,7 @@ fn command_tokens(command: &str) -> Vec<&str> {
 
 fn matcher_is_global(matcher: &str) -> bool {
     let matcher = matcher.trim();
-    matcher.is_empty() || matches!(matcher, "*" | ".*" | "all" | "All" | "ALL")
+    matcher.is_empty() || matches!(matcher, "*" | ".*")
 }
 
 fn hook_entry_json(entry: &HookEntry) -> serde_json::Value {
@@ -858,5 +858,23 @@ fn agent_kind_name(agent: AgentKind) -> &'static str {
     match agent {
         AgentKind::Claude => "claude",
         AgentKind::Codex => "codex",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::matcher_is_global;
+
+    #[test]
+    fn only_documented_all_tool_matchers_are_global() {
+        for matcher in ["", " ", "*", ".*"] {
+            assert!(matcher_is_global(matcher), "{matcher:?} should be global");
+        }
+        for matcher in ["all", "All", "ALL", "^all$", "Bash|all"] {
+            assert!(
+                !matcher_is_global(matcher),
+                "{matcher:?} must not be treated as global"
+            );
+        }
     }
 }

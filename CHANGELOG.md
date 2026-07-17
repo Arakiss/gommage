@@ -125,6 +125,11 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Fixed
 
+- Agent installation now uses an all-tools `PreToolUse` matcher for both
+  supported hosts. `agent status` treats a narrowed matcher as a failure, not a
+  warning, and no longer mistakes the literal tool name `all` for a global
+  matcher. Unmapped host-emitted calls therefore reach the evaluator and fail
+  closed instead of bypassing Gommage through installer configuration.
 - Package installation and registry-publication capabilities now come from the
   quote-preserving argv analyzer instead of regexes over command text. Known
   `--help`, `-h`, and version forms no longer request or consume publication

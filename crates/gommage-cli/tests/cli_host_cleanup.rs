@@ -1268,7 +1268,7 @@ fn agent_status_warns_for_legacy_codex_hook_feature_flag() {
     fs::create_dir_all(config.parent().unwrap()).unwrap();
     fs::write(
         &hooks,
-        r#"{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"gommage-mcp"}]}]}"#,
+        r#"{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"gommage-mcp"}]}]}"#,
     )
     .unwrap();
     fs::write(
@@ -1309,7 +1309,7 @@ fn agent_status_warns_for_legacy_codex_hook_feature_flag() {
 }
 
 #[test]
-fn agent_status_warns_when_claude_hook_is_not_global() {
+fn agent_status_fails_when_claude_hook_is_not_global() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     let settings = temp.path().join("claude").join("settings.json");
@@ -1326,20 +1326,16 @@ fn agent_status_warns_when_claude_hook_is_not_global() {
         .output()
         .unwrap();
 
-    assert!(
-        status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&status.stderr)
-    );
+    assert!(!status.status.success());
     let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
         report.get("status").and_then(|value| value.as_str()),
-        Some("warn")
+        Some("fail")
     );
     let check = doctor_check(&report, "hook_coverage");
     assert_eq!(
         check.get("status").and_then(|value| value.as_str()),
-        Some("warn")
+        Some("fail")
     );
     assert!(
         check
@@ -1352,7 +1348,7 @@ fn agent_status_warns_when_claude_hook_is_not_global() {
 }
 
 #[test]
-fn agent_status_warns_when_codex_hook_is_not_global() {
+fn agent_status_fails_when_codex_hook_is_not_global() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     let hooks = temp.path().join("codex").join("hooks.json");
@@ -1376,20 +1372,16 @@ fn agent_status_warns_when_codex_hook_is_not_global() {
         .output()
         .unwrap();
 
-    assert!(
-        status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&status.stderr)
-    );
+    assert!(!status.status.success());
     let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
         report.get("status").and_then(|value| value.as_str()),
-        Some("warn")
+        Some("fail")
     );
     let check = doctor_check(&report, "hook_coverage");
     assert_eq!(
         check.get("status").and_then(|value| value.as_str()),
-        Some("warn")
+        Some("fail")
     );
     assert!(
         check
@@ -1402,7 +1394,7 @@ fn agent_status_warns_when_codex_hook_is_not_global() {
 }
 
 #[test]
-fn agent_status_codex_warns_on_nested_legacy_wrapper_hook() {
+fn agent_status_codex_fails_on_narrow_nested_legacy_wrapper_hook() {
     let temp = tempdir().unwrap();
     let home = temp.path().join(".gommage");
     let hooks = temp.path().join("codex").join("hooks.json");
@@ -1426,15 +1418,11 @@ fn agent_status_codex_warns_on_nested_legacy_wrapper_hook() {
         .output()
         .unwrap();
 
-    assert!(
-        status.status.success(),
-        "{}",
-        String::from_utf8_lossy(&status.stderr)
-    );
+    assert!(!status.status.success());
     let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
         report.get("status").and_then(|value| value.as_str()),
-        Some("warn")
+        Some("fail")
     );
     assert_eq!(
         doctor_check(&report, "pre_tool_use")
@@ -1454,7 +1442,7 @@ fn agent_status_codex_warns_on_nested_legacy_wrapper_hook() {
         doctor_check(&report, "hook_coverage")
             .get("status")
             .and_then(|value| value.as_str()),
-        Some("warn")
+        Some("fail")
     );
     assert_eq!(
         doctor_check(&report, "legacy_hooks")
