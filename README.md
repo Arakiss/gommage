@@ -35,7 +35,8 @@ Keep the controls that already protect your machine:
 
 - Claude Code's native permissions, optional Bash sandbox, and any additional
   host controls you use.
-- Codex sandboxing, especially for filesystem and network boundaries outside matched hook events.
+- Codex sandboxing, especially for filesystem and network boundaries outside
+  host-emitted `PreToolUse` events.
 - Your existing approval and review process for changes with real consequences.
 
 The exact coverage boundary and threat assumptions are documented in the [threat model](THREAT_MODEL.md).
@@ -46,15 +47,17 @@ The release installer supports macOS and Linux. Windows is not currently support
 
 | Host | Default Gommage coverage | Keep enabled |
 | --- | --- | --- |
-| Claude Code | `Bash`, file tools, `WebFetch` / `WebSearch`, and emitted `mcp__…` tool names | Native permissions, optional Bash sandbox, and any additional host confinement |
-| OpenAI Codex CLI | `Bash`, parsed `apply_patch` paths, and emitted `mcp__…` tool names | Codex sandboxing for boundaries outside matched hook events |
+| Claude Code | Every host-emitted `PreToolUse` call reaches Gommage; bundled mappings cover `Bash`, file tools, `WebFetch` / `WebSearch`, and emitted `mcp__…` names | Native permissions, optional Bash sandbox, and any additional host confinement |
+| OpenAI Codex CLI | Every host-emitted `PreToolUse` call reaches Gommage; bundled mappings cover `Bash`, parsed `apply_patch` paths, and emitted `mcp__…` names | Codex sandboxing for boundaries outside hook-emitted calls |
 
 Both integrations use the same YAML policies, independently signed audit
-records, and Picto store. Coverage is limited to tool calls that the host emits
-through a matched hook event. Claude Code can surface an approval request in
-its flow. Gommage's current Codex `PreToolUse` adapter returns a denial for a
-picto-required call with no matching grant; it does not yet connect Pictos to
-Codex's separate `PermissionRequest` event.
+records, and Picto store. New installs use an all-tools `PreToolUse` matcher;
+an emitted tool with no mapper reaches the evaluator and fails closed rather
+than bypassing the hook. This does not make unknown tools semantically covered,
+and calls the host never emits remain outside Gommage. Claude Code can surface
+an approval request in its flow. Gommage's current Codex adapter returns a
+denial for a picto-required call with no matching grant; it does not yet connect
+Pictos to Codex's separate `PermissionRequest` event.
 
 Read the host-specific boundaries before rollout: [Claude Code](docs/comparison-with-claude-code.md), [Codex](docs/comparison-with-codex.md), and the [compatibility guide](docs/agent-compatibility.md).
 
@@ -104,6 +107,56 @@ gommage quickstart --agent claude --daemon --self-test
 # OpenAI Codex CLI
 gommage quickstart --agent codex --daemon --self-test
 ```
+
+Both commands install the strict policy posture by default. Unmatched shell,
+file, and outbound capabilities remain fail-closed. For Claude Code, supported
+`permissions.deny` entries are imported into Gommage policy, while
+`permissions.allow` remains native to Claude and is not converted into a
+Gommage allow rule.
+
+Use `--relaxed` only when you explicitly want the legacy convenience posture:
+
+```sh
+gommage quickstart --agent claude --daemon --self-test --relaxed
+```
+
+Relaxed mode adds broad generated allow layers for routine shell, file, and
+outbound work and, for Claude, imports supported native allows. This weakens
+Gommage's mediation of opaque scripts and interpreters. Rerunning `quickstart`
+or `gommage agent install <agent>` without `--relaxed` backs up and removes
+recognized Gommage-generated relaxation layers. Static generated files must
+match their canonical bytes; generated native-permission imports carry and
+verify a content digest and constrained rule shape. Digest-less legacy imports
+require explicit operator review instead of automatic replacement. If one of
+the reserved `06-agent-config-writable.yaml`, `90-claude-allow-import.yaml`, or
+`95-agent-catch-all.yaml` paths contains unrecognized custom content, the
+strict install stops and preserves it for manual review.
+
+Before writing, agent setup parses every selected host config and checks every
+reserved policy path. Standalone `agent install` journals the active config and
+reserved policy files. `quickstart` begins its journal before home
+initialization and covers every file and directory it may create or replace,
+including the key, bundled defaults, host config, local context, and daemon
+service file. A later error or failed readiness gate restores recorded bytes,
+modes, backups, and newly-created paths. Generated deny/allow imports are
+synchronized on every install while native import is enabled and removed with
+a backup when their native source becomes empty; `--replace-hooks` controls
+hook replacement only.
+
+After applying agent and policy changes, both `quickstart` and
+`gommage agent install` make one bounded daemon reload request on the successful
+path. A running daemon must acknowledge the reload; connection, write, and read
+timeouts, permission or resource errors, rejection, invalid JSON, an incomplete
+response, or an oversized response fail setup. If setup then rolls back,
+quickstart may make one additional bounded reload so the daemon sees the
+restored files. Only an absent or connection-refused socket is treated as “not
+running”.
+
+With `--daemon`, quickstart validates that `gommage-daemon` resolves to a
+canonical regular executable before any write; a JSON dry-run with an invalid
+binary reports `status: blocked` and exits non-zero. The policy/agent self-test
+runs before service activation, and service-manager failure restores the prior
+service file and activation state.
 
 Then verify the installed path:
 

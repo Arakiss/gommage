@@ -51,7 +51,7 @@ issue:
 | Beta gate | `gommage beta check --json --policy-test examples/policy-fixtures.yaml` exits with `pass` or documented `warn` and includes actionable `next` entries. |
 | Readiness gate | `gommage verify --json` exits with `pass` or documented `warn`. |
 | State index | `gommage state rebuild --json`, `gommage state verify --json`, and `gommage state stats --json` report state schema v2 with `source_log: "audit.log"`, prove `state.sqlite` matches the current snapshot, and keep it a rebuildable read-model over available independently signed records. This is not cryptographic completeness evidence. |
-| Quickstart self-test | `gommage quickstart --self-test` reaches the same readiness gate after setup. |
+| Quickstart self-test | `gommage quickstart --self-test` reaches the same policy/agent readiness gate after filesystem setup and before optional service activation; run a post-install `gommage verify --json` when live daemon health is part of the gate. |
 | Semantic smoke | `gommage smoke --json` exits with `pass`. |
 | Launch demo | `sh scripts/launch-demo.sh` completes in an isolated home and captures ask-picto, one-use picto allow, hard-stop deny, audit verification, state-index verification, policy fixtures, beta check, and TUI snapshot evidence. |
 | Operator TUI | `gommage tui --snapshot --view all` shows summary, focus, readiness rows, approvals, policy, audit, capability, recovery, onboarding, local metrics, daemon health, active pictos, and next actions on a clean pre-init home and after quickstart. `gommage tui --snapshot --view onboarding` gives a first-minute setup/recovery path. `gommage tui --snapshot --view metrics` shows local counters, webhook DLQ count, audit anomaly count, daemon reachability, and picto inventory. `gommage tui --watch --watch-ticks 2 --view approvals` produces bounded plain-text refreshes without ANSI escapes. `gommage tui --stream --stream-ticks 1` shows recent decision/event rows through daemon IPC when available and falls back to signed audit log reads while still showing daemon/picto/metrics context. |
@@ -101,9 +101,9 @@ Treat these as beta blockers:
 
 These can remain open for beta if they are clearly documented:
 
-- Codex hook coverage remains narrower than Codex execution. The default
-  Gommage Codex matcher covers Bash, `apply_patch`, and MCP tool names, but
-  incomplete shell interception and non-shell/non-MCP tools remain native Codex
+- Codex hook coverage remains narrower than Codex execution. Gommage installs
+  an all-tools `PreToolUse` matcher and fails closed for emitted calls it cannot
+  map, but operations Codex does not emit through that hook remain native Codex
   boundaries and must stay documented.
 - Cursor remains evaluation-only because its hook timing differs from Claude
   Code and Codex.

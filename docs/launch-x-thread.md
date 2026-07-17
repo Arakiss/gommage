@@ -38,8 +38,9 @@ launch record.
 5. Existing harnesses are supported as a coexistence path.
 
    Gommage dry-runs first, preserves unrelated hooks by default, backs up
-   changed host files, imports supported Claude permissions into YAML, and
-   gives agents a local harness report instead of asking them to guess.
+   changed host files, imports supported Claude denies into YAML while leaving
+   native allows outside strict Gommage policy, and gives agents a local harness
+   report instead of asking them to guess.
 
 6. What it does not claim:
 

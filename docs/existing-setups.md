@@ -13,8 +13,17 @@ configuration:
   `--replace-hooks` is passed.
 - Codex: writes the Gommage Codex hook and enables Codex hooks, but does not
   rewrite Codex sandbox or approval policy.
+- Policy: installs strict posture by default. Unmatched shell, file, and
+  outbound capabilities remain fail-closed; broad agent convenience allows
+  require an explicit `--relaxed`.
 - Backups: changed host files are backed up next to the original as
   `<name>.gommage-bak-<timestamp>`.
+- Runtime: after all agent and policy edits, a successful quickstart makes one
+  bounded daemon reload request. Standalone `agent install` does the same after
+  its single integration change. A missing or connection-refused listener is a
+  warning; connection, write, or read timeout, another connection error, a
+  rejection, or an invalid/incomplete/oversized response fails setup. Rollback
+  may issue a second reload to reapply restored files.
 - Rollback: `agent uninstall`, `repair`, and `uninstall --dry-run` are the
   supported recovery surfaces.
 
@@ -88,17 +97,60 @@ gommage agent uninstall claude --restore-backup --dry-run
 
 ## Native Claude Permissions
 
-By default, Gommage imports supported Claude native permission rules:
+By default, Gommage imports supported Claude native deny rules only:
 
 - `permissions.deny` goes to `~/.gommage/policy.d/05-claude-import.yaml`.
-- `permissions.allow` goes to `~/.gommage/policy.d/90-claude-allow-import.yaml`.
+- `permissions.allow` remains in Claude Code and is not converted into a
+  Gommage policy rule.
 
-Supported broad allow entries such as `Bash` are imported as late allow rules.
-This preserves the user's existing Claude posture while earlier hard-stops,
-native deny imports, deny rules, and ask rules still win.
+This keeps native denies fail-closed without silently turning broad Claude
+allows such as `Bash` into Gommage allows. Claude's own permission system still
+applies independently; a native allow does not make the same operation an
+allow in strict Gommage policy.
 
-Use `--no-import-native-permissions` when you want a fail-closed Gommage policy
-from the start and prefer to author allow rules manually.
+Pass `--relaxed` to opt into the legacy convenience posture. Relaxed mode
+creates `06-agent-config-writable.yaml` and `95-agent-catch-all.yaml`; for
+Claude, supported `permissions.allow` entries are also imported as late rules
+in `90-claude-allow-import.yaml`. The `06` layer deliberately grants writes to
+selected agent configuration paths before the later blanket home-dotfile deny;
+the `90` import and `95` catch-all load late as fallbacks. Compiled hard-stops
+remain unconditional, but unmatched routine shell, file, and outbound work can
+reach the generated broad allows. This is a deliberate reduction in mediation,
+especially for opaque scripts and interpreters.
+
+Use `--no-import-native-permissions` to skip Claude deny import as well. This
+flag controls native permission import; it does not select relaxed posture.
+
+## Migrating From Generated Relaxation Layers
+
+Rerun either setup command without `--relaxed` to return the agent integration
+to strict posture:
+
+```sh
+gommage quickstart --agent claude --dry-run
+gommage agent install claude
+```
+
+The strict installer preflights these reserved paths before removing anything:
+
+- `06-agent-config-writable.yaml`
+- `90-claude-allow-import.yaml`
+- `95-agent-catch-all.yaml`
+
+Static generated files must match their canonical bytes. Generated Claude
+permission imports must have the constrained generated rule shape and a valid
+content digest; digest-less legacy imports require explicit review.
+Recognized files are copied to adjacent `.gommage-bak-*` backups and then
+removed. If any reserved path contains modified or custom content, installation
+fails before any agent-config or reserved-policy write and preserves the file
+for manual review. Standalone agent installation restores its active config and
+reserved policy inventory if a later write fails. Quickstart starts a broader
+journal before home initialization and restores every file/directory it may
+create or replace, including key, stdlib, context, host config, and optional
+service definition. Move or review custom policy instead of overwriting it.
+This cleanup is separate from
+`gommage policy init --remove-local-relaxations`, which targets other named
+operator policy layers.
 
 ## Capability Gaps
 
@@ -122,11 +174,11 @@ local mapper under `~/.gommage/capabilities.d/`, then add a policy rule and a
 
 Codex upstream changed after Gommage's initial Codex integration was written.
 Codex `rust-v0.124.0` can emit hooks for `apply_patch`, MCP tools, and
-long-running Bash sessions. Gommage's current beta quickstart installs a Codex
-matcher for Bash, `apply_patch`, and `mcp__.*` tool names. The bundled stdlib
-maps Bash commands, parsed `apply_patch` file paths, and Codex MCP tool names.
-Keep sandboxing enabled because Codex hooks still do not cover every shell path
-or non-shell, non-MCP tool.
+long-running Bash sessions. Gommage's current beta quickstart installs an
+all-tools `PreToolUse` matcher. The bundled stdlib maps Bash commands, parsed
+`apply_patch` file paths, and Codex MCP tool names; other emitted tools fail
+closed until they have reviewed mapping and policy. Keep sandboxing enabled
+because Codex still has execution paths outside its emitted hook contract.
 
 Keep Codex sandboxing enabled:
 
@@ -135,9 +187,9 @@ codex exec --sandbox read-only "audit this repo"
 codex exec --sandbox workspace-write "apply this refactor"
 ```
 
-Do not widen the Codex matcher by hand and assume policy coverage. If you
-experiment with non-Bash Codex hooks, capture real payloads, add mapper rules,
-and commit fixtures before trusting the setup.
+Do not narrow the matcher or mistake interception for semantic coverage. For a
+new Codex tool, capture real payloads, add mapper rules, and commit fixtures
+before allowing it.
 
 ## MCP Scope
 

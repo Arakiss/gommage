@@ -10,11 +10,12 @@ shell-aware mapper's coverage ends. Read the root file for everything else.
 
 ## 1. What gommage IS
 
-A **deterministic policy and audit gate on matched agent tool calls.** When a
-supported host forwards a `Bash`, file, web, or `mcp__*` call through a matched
-hook event, Gommage maps it to capabilities, evaluates declarative YAML policy,
-and emits `allow` / `deny` / `ask`, recording the decision in a signed audit
-record. Calls that the host does not forward remain outside this boundary.
+A **deterministic policy and audit gate on host-emitted agent tool calls.** New
+integrations use an all-tools `PreToolUse` matcher. Reviewed `Bash`, file, web,
+and `mcp__*` shapes map to capabilities; an emitted but unmapped shape fails
+closed. Gommage evaluates declarative YAML policy and emits `allow` / `deny` /
+`ask`, recording its decision in a signed audit record. Calls that the host does
+not forward remain outside this boundary.
 
 Capability mapping and policy evaluation are pure functions of the canonical
 tool call, loaded mapper, and loaded policy. Picto lookup is separate
@@ -97,6 +98,51 @@ echo "$(cat /etc/shadow)"
 
 Quoted text is never treated as a verb: `echo 'git push'` is data, not a push.
 
+GitHub pull-request merges are bound to one normalized literal identity:
+`<host>/<owner>/<repository>#<pull-request-number>`. A numeric target requires
+an explicit static `-R` / `--repo HOST/OWNER/REPOSITORY`; an exact
+`https://HOST/OWNER/REPOSITORY/pull/NUMBER` URL carries the same fields. The
+normalizer lowercases host, owner, and repository and parses the positive PR
+number within the signed 64-bit range, but it does not call GitHub, follow
+redirects, resolve renamed repositories, equate host aliases, or infer a remote
+from the current checkout. Missing or dynamic identity fields fail closed.
+
+An administrative merge is typed only when `--admin` is paired with one static
+`--match-head-commit` value containing exactly 40 or 64 hexadecimal characters.
+It emits the input-bound `gh.pr.merge.admin` approval scope in addition to the
+target-bound merge capability. `-d` / `--delete-branch` emits a separate remote
+mutation and uses the input-bound `gh.pr.merge.delete-branch` scope. A command
+that combines both flags uses the more specific input-bound
+`gh.pr.merge.admin-delete-branch` scope, so approval of either mutation alone
+cannot authorize the combination.
+
+A static `--body-file PATH` adds `fs.read:<PATH>`,
+`gh.pr.merge.body-file:<identity>`, and `net.out.post:<host>`. The default pack
+requires the input-bound `gh.pr.merge.body-file` scope and the ordinary file
+policy must resolve the read. Its combinations use the more specific
+`gh.pr.merge.admin-body-file`, `gh.pr.merge.delete-branch-body-file`, or
+`gh.pr.merge.admin-delete-branch-body-file` scope. That input-bound gate covers
+the static file read and post together unless an earlier policy rule denies the
+path; no approval for a subset of the effects authorizes the larger call. An
+opaque `--body-file -` without a
+static redirected input has no resolvable `fs.read` capability and therefore
+fails closed. Input binding covers the canonical tool call and path, not file
+bytes or the hook-to-exec TOCTOU window described in section 2.
+
+Environment-changing command prefixes and `env NAME=value` wrappers retain the
+typed effects of a statically visible inner command, but also emit a
+fail-closed `proc.exec.ambiguous:*` capability. Gommage therefore does not
+silently certify the inner GitHub, filesystem, or administration operation
+under a modified execution environment.
+
+Direct static starts of `gommage-daemon` are typed as
+`gommage.reconfigure`. Explicit static `--home` and `--socket` operands also
+surface `gommage.home.mutate:<normalized-path>` and
+`fs.write:<normalized-path>`, respectively. This applies to the daemon selected
+by executable name, absolute path, or supported `cargo run` package/binary
+forms; help/version inspection is read-only, while dynamic or unknown options
+fail closed.
+
 ---
 
 ## 4. Residual shell limits
@@ -109,7 +155,7 @@ remaining limits are runtime-dependent forms such as:
 
 - shell aliases, sourced files, functions defined for later invocation, and
   interpreter-specific behavior outside the parsed shell grammar;
-- `eval`, static `xargs` command construction, generated scripts, and other
+- generated scripts, opaque interpreters, aliases, sourced functions, and
   commands whose final executed argv is not represented as a nested shell AST;
 - parameter, arithmetic, glob, or command-substitution results when the
   security-relevant destination cannot be determined statically;
@@ -118,12 +164,15 @@ remaining limits are runtime-dependent forms such as:
 
 Every `Bash` call still carries one raw `proc.exec:<original command>`
 capability, and many dynamic forms also carry `proc.exec.ambiguous:*`. The
-shipped strict policy denies the ambiguous namespace. Runtime-dependent forms
-that leave only the raw capability can still be authorized by a broad user or
-organization `proc.exec:*` allow; editing or removing the ambiguous deny can
-reopen the rest. For strict filesystem or branch control, keep raw execution
-allows narrow, retain the host sandbox, or route access through dedicated tools
-whose path arguments are explicit (see
+shipped strict policy denies the ambiguous namespace. `eval`, `watch`, `xargs`,
+and `find -exec` are always ambiguous because their effective calls can contain
+effects outside a lane-specific parser. Runtime-dependent forms that leave only
+the raw capability can still be authorized by a broad user or organization
+`proc.exec:*` allow. The strict default posture does not install such a
+catch-all; an explicitly relaxed posture gives up this mediation claim. For
+strict filesystem or branch control, retain the ambiguous deny and host
+sandbox, keep raw execution allows narrow, or route access through dedicated
+tools whose path arguments are explicit (see
 [`input-schema.md` §4.1](input-schema.md#41-tool-boundary)).
 
 ## 5. Policy can re-open shape-based bypass

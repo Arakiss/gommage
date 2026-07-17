@@ -63,7 +63,7 @@ cases:
       title: smoke
     expect:
       decision: ask_picto
-      required_scope: mcp.write
+      required_scope: mcp.write:mcp__github__create_issue
       matched_rule: ask-mcp-write
 
   - name: deny_unparsed_codex_apply_patch

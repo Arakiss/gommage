@@ -179,9 +179,9 @@ Cargo to build from source.
 - Prefer `gommage audit-verify --explain --json` for new automation; bare `--explain` remains JSON for compatibility. Human `approval deny-stale` output is summarized by default; use `--show-all` or `--verbose` only when a person needs every matched request printed in the terminal.
 - Existing host setups: quickstart preserves unrelated host hooks by default.
   Use `--replace-hooks` only when the operator intentionally wants Gommage to
-  own the whole `PreToolUse` surface. Existing hooks can coexist, but the first
-  layer to block determines what the agent sees; if another hook blocks before
-  Gommage, Gommage cannot audit that decision.
+  replace the whole `PreToolUse` stack. Existing hooks can coexist. Supported
+  hosts run matching hooks concurrently and block if any one denies; Gommage
+  records its own decision but does not audit another hook's independent result.
 - Agent-readable context: `gommage harness diagnose --json` is the canonical
   preinstall/local truth source for host hooks, native permission imports,
   coverage boundaries, and next commands. After real quickstart, Gommage writes
@@ -189,17 +189,30 @@ Cargo to build from source.
   `$GOMMAGE_HOME/integration-report.json`; future agent sessions should read
   these files or call `gommage harness explain` before making coverage claims.
 - Claude Code: `quickstart --agent claude` installs the `PreToolUse` hook,
-  imports supported `permissions.deny` entries into `05-claude-import.yaml`,
-  and imports supported `permissions.allow` entries into
-  `90-claude-allow-import.yaml`. Supported broad allow entries such as `Bash`
-  are imported as late allow rules, so earlier hard-stops, denies, ask rules,
-  and native deny imports still win. Use `--no-import-native-permissions` when
-  the operator wants to author the initial Gommage policy manually.
-- Codex CLI: `quickstart --agent codex` enables hooks and installs a Gommage
-  matcher for Bash, `apply_patch`, and Codex MCP tool names. `apply_patch`
-  payloads are mapped to parsed filesystem write paths and fail closed when
-  they cannot be parsed safely. Keep Codex sandboxing enabled because hooks do
-  not intercept every shell path or non-shell, non-MCP tool call.
+  preserves unrelated hook groups, and uses strict Gommage policy posture by
+  default. It imports supported `permissions.deny` entries into
+  `05-claude-import.yaml`; native `permissions.allow` entries remain in Claude
+  and are not converted into Gommage allows. Use
+  `--no-import-native-permissions` when the operator wants to skip deny import
+  and author the initial Gommage policy manually. Explicit `--relaxed` restores
+  the legacy convenience posture: it generates `06-agent-config-writable.yaml`
+  and `95-agent-catch-all.yaml` and imports supported native allows into
+  `90-claude-allow-import.yaml`.
+- Codex CLI: `quickstart --agent codex` enables hooks and installs an all-tools
+  `PreToolUse` matcher under the same strict-by-default posture. Bundled mapping
+  covers Bash, parsed `apply_patch`, and Codex MCP names; other emitted calls
+  fail closed until mapped and allowed. Explicit `--relaxed` adds the generated `06` and
+  `95` broad allow layers; Codex has no Claude native allow import for `90`.
+  `apply_patch` payloads are mapped to parsed filesystem write paths and fail
+  closed when they cannot be parsed safely. Keep Codex sandboxing enabled
+  because operations the host does not emit through `PreToolUse` remain outside
+  Gommage. Rerunning either integration without `--relaxed` backs up and removes
+  recognized generated 06/90/95 relaxation layers and stops on modified or
+  custom content at those reserved paths. Static 06/95 files require canonical
+  byte equality; dynamic imports require a valid generated content digest and
+  constrained rule shape. Native imports synchronize on every install while
+  native import is enabled and do not depend on `--replace-hooks`; the allow
+  import exists only in explicit relaxed mode.
 - Dual-agent flows: if Claude launches Codex via `tmux`, shell, or script,
   Gommage sees the outer Claude Bash call only. Inner Codex calls are governed
   only when the invoked Codex session uses a `CODEX_HOME` with Gommage's Codex
@@ -209,8 +222,8 @@ Cargo to build from source.
   `gommage agent status codex --json` before the handoff.
 - Hook adapter: new quickstart installs call `gommage hook --agent claude` or `gommage hook --agent codex`; older `gommage-mcp`, `gommage mcp`, and unqualified `gommage hook` commands are compatibility surfaces.
 - MCP gateway: use `gommage-mcp --gateway --server-name <name> -- <stdio-mcp-server>` only for stdio MCP servers you intentionally proxy. This is optional compatibility plumbing, not the canonical Gommage operation path. Allowed `tools/call` requests are forwarded; denied or picto-required calls return MCP tool errors and are not sent upstream.
-- Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them.
-- Quickstart self-test: the readiness gate runs by default. `--self-test` remains accepted for scripts; `--no-self-test` is the manual escape hatch.
+- Daemon: `--daemon` installs and starts the user-level service. Use `--daemon-no-start` for CI/image builds that should write service files without starting them. On the successful path, `quickstart` and standalone `agent install` each make one bounded daemon reload attempt after policy/agent edits. Only a missing or connection-refused listener is a warning; another connect failure, timeout, rejection, invalid JSON, incomplete response, or oversized response fails setup. Quickstart rollback may make a second reload for restored files. The daemon binary must resolve to a canonical regular executable, and failed service activation restores prior service bytes and loaded/enabled state.
+- Quickstart self-test: the policy/agent readiness gate runs by default before optional service activation. `--self-test` remains accepted for scripts; `--no-self-test` is the manual escape hatch. Run `gommage verify --json` after service installation when live daemon health is required.
 - Backups: Gommage writes `.gommage-bak-<timestamp>` backups before replacing agent configs, generated policy imports, daemon service files, installed binaries, or installed skill files when content changes. Unchanged files are not backed up.
 - Recovery: use `gommage repair agent claude --dry-run` or `gommage repair agent codex --dry-run` first for old/broken alpha hooks; repair rewrites Gommage-owned hook groups to the current scoped hook while preserving unrelated hooks. Use `gommage agent uninstall claude --restore-backup`, `gommage agent uninstall codex --restore-backup`, or `gommage uninstall --all --dry-run` before destructive cleanup. `--purge-home` requires `--yes`; `--purge-backups` removes Gommage-created `.gommage-bak-*` files only when a clean slate is intentional.
 - Break-glass: `GOMMAGE_BYPASS=1` is a policy bypass, not a hard-stop bypass. Valid hook payloads are still mapped and compiled hard-stops still deny; when a usable home/key exists, bypass writes a signed `bypass_activated` audit event. Use only to recover a broken hook path.

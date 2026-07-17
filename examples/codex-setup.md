@@ -10,12 +10,11 @@ schema-compatible for older hooks and
 optional gateway use, but new Codex installs point at the CLI adapter.
 
 > **Current Gommage beta scope caveat**:
-> `quickstart --agent codex` installs a matcher for Bash, `apply_patch`, and
-> Codex MCP tool names. `apply_patch` payloads are mapped to parsed file paths
-> and fail closed when the patch cannot be parsed safely. Keep Codex's sandbox
+> `quickstart --agent codex` installs an all-tools `PreToolUse` matcher.
+> Bundled mapping understands Bash, parsed `apply_patch` paths, and Codex MCP
+> names; other emitted calls fail closed until mapped. Keep Codex's sandbox
 > modes (`--sandbox read-only` / `workspace-write`) underneath Gommage because
-> Codex hooks still do not intercept every shell path or non-shell, non-MCP tool
-> call.
+> operations Codex never emits through the hook remain outside Gommage.
 
 ## 1. Install
 
@@ -74,19 +73,19 @@ gommage expedition start "refactor-auth"
 codex exec --sandbox workspace-write "refactor the auth middleware"
 ```
 
-Every matched Bash, `apply_patch`, and Codex MCP tool call is gated through
-Gommage's policy under the default integration. Pictos, audit log, and
+Every Codex call emitted through `PreToolUse` reaches Gommage under the default
+integration. Reviewed Bash, `apply_patch`, and MCP shapes receive semantic
+capabilities; unknown shapes fail closed. Pictos, audit log, and
 `gommage explain <id>` all behave identically to the Claude Code flow for
 audited decisions.
 
 ## 4. What Gommage does NOT gate under Codex by default today
 
-These are NOT intercepted by Gommage in a Codex session unless Codex emits a
-matched hook event and Gommage has mapper coverage:
+These are NOT positively governed by Gommage in a Codex session:
 
 - shell paths that Codex's hook runtime does not emit as matched `Bash` events
-- built-in file reads or other internal tools that do not have a Gommage mapper
-- WebSearch and other non-shell, non-MCP tools outside Codex hook coverage
+- internal operations for which Codex emits no `PreToolUse` event
+- emitted tool shapes without a mapper remain intercepted but fail closed
 - anything blocked or approved before the Gommage hook path receives it
 
 Use Codex's native `--sandbox` mode as the authority for those. A typical

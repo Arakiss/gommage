@@ -7,7 +7,7 @@ verification links are filled in.
 ## Positioning
 
 Gommage is a deterministic policy and audit layer for AI coding agent tool
-calls that reach a matched hook. It gives operators reviewable YAML policy,
+calls that the host emits through its configured hook. It gives operators reviewable YAML policy,
 signed short-lived and usage-bounded pictos, independently signed audit records,
 and one command to report how the local agent integration is wired.
 
@@ -85,8 +85,9 @@ binaries sequentially rather than atomically.
 
 - Do not call it a sandbox.
 - Do not claim universal MCP coverage.
-- Do not imply Codex hooks cover every shell path, WebSearch, built-in
-  non-shell/non-MCP tools, or MCP servers that never emit a matched hook event.
+- Do not imply Codex emits every shell path, internal operation, or MCP action
+  through `PreToolUse`. An emitted unknown tool fails closed; a non-emitted
+  operation remains outside Gommage.
 - Do not imply existing hooks are removed automatically.
 - Do not imply `state.sqlite` is a permission source.
 - Do not present crates.io as the signed release-archive install path. It is a

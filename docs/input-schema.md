@@ -159,31 +159,72 @@ walks compound commands, static shell payloads, substitutions, wrappers,
 redirections, and every statically known operand. If syntax or a
 security-relevant destination is dynamic, it emits
 `proc.exec.ambiguous:<reason>` and the shipped strict stdlib policy denies it
-before generic `proc.exec:*` rules can authorize the command. Analysis is capped at 64
-KiB of input, 16 levels of nesting, and 512 commands. It does not execute shell
-expansions, resolve aliases or sourced functions, or reconstruct generated argv
-from commands such as `eval` and static `xargs`; the original raw
-`proc.exec:<command>` remains visible for those cases.
+before generic `proc.exec:*` rules can authorize the command. Analysis is capped
+at 64 KiB of input, 16 levels of nesting, and 512 commands. It does not execute
+shell expansions or resolve aliases, sourced functions, generated scripts, or
+opaque interpreter behavior. `eval`, `watch`, `xargs`, and `find -exec` are
+therefore marked ambiguous for the whole shell call even when a nested payload
+can also be classified semantically.
 
 GitHub pull-request merges are typed shell effects. A statically identified
 `gh pr merge` emits a target-bound capability in this form:
 
 ```text
-gh.pr.merge:github.com/<owner>/<repository>#<pull-request-number>
+gh.pr.merge:<host>/<owner>/<repository>#<pull-request-number>
 ```
 
 The target identity must come from either an exact GitHub pull-request URL or
 an exact numeric target paired with an explicit static `-R` / `--repo`
-selector. Gommage deliberately does not infer the repository from the shell's
-current directory, a local Git remote, or any network lookup: none of those is
-part of the canonical `ToolCall`. A missing repository selector for a numeric
-target, a dynamic target or repository, and unsupported target shapes emit
-`proc.exec.ambiguous:*` and fail closed under the reference policy. An active
-`--admin` flag additionally emits
-`gh.pr.merge.admin:github.com/<owner>/<repository>#<pull-request-number>`;
-`--admin=false` remains a normal merge. Administrative merge approvals are
-input-bound, so an approval for one reviewed command cannot authorize another
-merge command even when both share the administrative scope.
+selector in `HOST/OWNER/REPOSITORY` form. The host is mandatory because the
+GitHub CLI can otherwise select it from `GH_HOST`; ports are rejected rather
+than normalized. Gommage deliberately does not infer the repository from the
+shell's current directory, a local Git remote, environment variables, or any
+network lookup: none of those is part of the canonical `ToolCall`. A missing
+host or repository selector for a numeric target, a dynamic target or
+repository, and unsupported target shapes emit `proc.exec.ambiguous:*` and fail
+closed under the reference policy. Typed merge authorization is emitted only
+for a single shell command; compounds, pipelines, substitutions, and repeating
+dispatchers fail closed. An active `--admin` flag additionally emits
+`gh.pr.merge.admin:<host>/<owner>/<repository>#<pull-request-number>`.
+Administrative mode is typed only when the same static argv contains exactly
+one `--match-head-commit` value that is 40 or 64 hexadecimal characters. A
+missing, dynamic, shortened, or repeated head commit fails closed instead of
+emitting a typed merge. `--admin=false` remains a normal merge.
+
+`-d` / `--delete-branch` additionally emits
+`gh.pr.merge.delete-branch:<host>/<owner>/<repository>#<pull-request-number>`.
+The reference policy gives that remote branch deletion its own input-bound
+`gh.pr.merge.delete-branch` approval scope. When administrative merge and
+branch deletion are requested together, the more specific input-bound
+`gh.pr.merge.admin-delete-branch` scope covers the combined mutation. The head
+commit remains part of the canonical tool input, so none of these approvals can
+authorize a command whose reviewed SHA, flags, or other input differs.
+
+Repository identity is normalized lexically as
+`<lowercase-host>/<lowercase-owner>/<lowercase-repository>#<positive-number>`,
+with the PR number limited to the signed 64-bit range. This is not GitHub API
+resolution: Gommage does not follow redirects, resolve a renamed repository,
+equate host aliases, or discover a repository through the current checkout. A
+URL or selector that names a different literal identity is a different
+authorization target.
+
+`-F` / `--body-file` is a real read path, not inert merge metadata. A static
+file emits `fs.read:<normalized-path>` and remains subject to secret-read
+policy, plus `gh.pr.merge.body-file:<identity>` and
+`net.out.post:<normalized-host>`. The default policy uses the input-bound
+`gh.pr.merge.body-file` scope, or the specific `admin-body-file`,
+`delete-branch-body-file`, and `admin-delete-branch-body-file` combinations.
+A dynamic file fails closed. `-F -` reads standard input; a static redirection
+still emits its read, while an opaque stdin source without a resolvable read
+fails closed.
+
+Environment mutation does not become ambient mapper input. A static inner
+command remains visible through a prefix assignment or an `env NAME=value`
+wrapper, so its filesystem, GitHub, and administration effects are retained.
+The mutation also emits `proc.exec.ambiguous:shell-environment-mutation` or
+`proc.exec.ambiguous:wrapper-environment-mutation`; the shipped strict policy
+therefore fails the whole call closed instead of authorizing the inner effect
+under potentially changed path or executable resolution.
 
 Gommage's own administrative CLI is a typed shell effect too. Parsed invocations
 emit exactly one of `gommage.authorize`, `gommage.reconfigure`, or
@@ -195,6 +236,13 @@ start/restart operations emit reconfigure, while
 uninstall, stop, disable, and name-targeted process termination emit disable.
 Documented inspection and dry-run forms emit no administration capability.
 Unknown or dynamic administration forms emit `proc.exec.ambiguous:*`.
+Starting `gommage-daemon` directly is also a typed reconfiguration, whether the
+static executable is selected by name, absolute path, or a supported
+`cargo run` package/binary selector. Static explicit `--home` adds
+`gommage.home.mutate:<normalized-path>` and static explicit `--socket` adds
+`fs.write:<normalized-path>` alongside `gommage.reconfigure`. Help/version
+inspection emits no administration effect; dynamic or unknown daemon options
+fail closed.
 When one of these operations actually mutates an explicitly selected `--home`,
 the mapper also emits `gommage.home.mutate:<normalized-path>`. This semantic
 effect names the selected authority root; it is not an `fs.write:*` wildcard

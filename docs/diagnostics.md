@@ -46,9 +46,11 @@ sections or vocabulary change.
 
 `gommage agent status <claude|codex>` is the host-agent integration check. Use
 `--json` when an installer, skill, or CI script needs to prove that the host
-hook is actually wired, that generated Claude native-permission imports are
-present when applicable, that the installed matcher covers the current mapped
-tool surface, and that Codex hooks are enabled.
+hook is actually wired, report the state of generated Claude
+native-permission imports, check that the installed matcher covers every
+host-emitted `PreToolUse` event, and prove that Codex hooks are enabled. This command does
+not choose or certify strict policy posture; use `gommage posture --json` for
+that semantic comparison.
 
 `gommage harness diagnose` is the agent-readable harness explanation surface.
 Use `gommage harness diagnose --json` before installing on mature dotfiles, and
@@ -69,11 +71,22 @@ when `--replace-hooks` is passed.
 fixtures against the active capability mappers and policy set without writing
 audit entries or consuming pictos. Use `gommage smoke --json` after installing
 policies or changing policy packs. The built-in fixtures are anchored to the
-stdlib safety model, but an operator may deliberately relax selected friction
-gates in local policy. In that case, `smoke` reports `warn`, exits zero, and
-prints the matched local allow rule instead of treating the installation as
-broken. Hard-stops, fail-closed behavior, force-push gating, and other
-non-relaxable checks still fail if their expected decision changes.
+stdlib safety model. A deliberate local allow may relax a fixture explicitly
+classified as operator-configurable, including routine unmatched shell or
+file work. In that case, `smoke` reports `warn`, exits zero, and prints the
+matched local allow rule instead of treating the installation as broken.
+Compiled hard-stops, force-push gating, unsafe unparsed patches, and other
+fixtures not classified as relaxable still fail if their expected decision
+changes.
+
+`gommage posture` compares the active mapper and policy decisions for the same
+built-in fixture set against the bundled strict stdlib. `strict` means all
+sampled decisions match; `relaxed` means at least one active decision is less
+restrictive; `custom` means sampled decisions were tightened or changed
+without a failed comparison; and `failing` means comparison failed. Strict
+returns `pass`, relaxed/custom return `warn`, and failing returns `fail`. This
+is a focused semantic regression signal, not proof that every possible tool
+call matches stdlib.
 
 `gommage policy test <file>` is the project-owned semantic regression runner. It reads YAML fixtures, evaluates them against the active capability mappers and policy set, and exits non-zero when any expected decision changes.
 
@@ -91,15 +104,38 @@ workflow guidance. The watchlist is advisory: it must never feed policy
 decisions directly, and any policy change still goes through reviewed YAML,
 fixtures, and `gommage policy lint --strict`.
 
-When an operator wants to return a host to the bundled strict policy after
-local experiments, use
-`gommage policy init --stdlib --force --remove-local-relaxations`. The command
-reinstalls embedded stdlib files and removes known local relaxation layers only
-after writing adjacent `.gommage-bak-*` backups, then asks the running daemon to
-reload policy from disk. If no daemon is listening, it exits successfully and
-prints a warning so scripts can decide whether to start or reload the service.
-Direct edits under `~/.gommage/policy.d` remain harness-internal and may be
-blocked by policy.
+To remove the broad agent convenience posture, rerun `gommage quickstart` or
+`gommage agent install <agent>` without `--relaxed`. Strict installation
+preflights the reserved `06-agent-config-writable.yaml`,
+`90-claude-allow-import.yaml`, and `95-agent-catch-all.yaml` paths. Recognized
+static Gommage-generated files must match their canonical bytes; dynamic native
+permission imports must pass generated-shape and content-digest validation.
+Recognized files receive adjacent `.gommage-bak-*` backups and are removed;
+modified or custom content stops installation before any integration write. A
+standalone rollback journal restores active host config and reserved policy
+files if a later write fails. Quickstart additionally journals its home/key,
+bundled defaults, context, runtime paths, and optional service definition from
+before initialization. Generated native imports are refreshed automatically
+while native import is enabled and removed with a backup when the corresponding
+native list becomes empty.
+`agent status` compares the generated deny import with current native settings;
+a missing, stale, or custom deny import is a failing integration check and the
+default quickstart self-test includes that result.
+
+After all policy and agent changes, successful `quickstart` and standalone
+`agent install` runs each make one bounded daemon reload attempt. A live daemon
+must acknowledge the new policy; connection, write, or read timeout, another
+connection error, rejection, invalid, incomplete, or oversized responses fail
+setup. Only a missing or connection-refused daemon produces a warning. A
+quickstart rollback may make a second bounded reload for the restored files.
+
+For the separate named operator relaxation layers installed by policy
+workflows, use
+`gommage policy init --stdlib --force --remove-local-relaxations`. That command
+reinstalls embedded stdlib files, backs up and removes its known operator
+layers, and asks the running daemon to reload policy from disk. If no daemon is
+listening, it exits successfully and prints a warning. Direct edits under
+`~/.gommage/policy.d` remain harness-internal and may be blocked by policy.
 
 `gommage state` manages `~/.gommage/state.sqlite`, a rebuildable SQLite
 read-model for fast local operator queries. It is not a permission authority:
@@ -156,12 +192,19 @@ The JSON report includes top-level `status`, `summary`, `doctor`, `smoke`, and
 `policy_tests`. Use the nested reports for the exact failing check, emitted
 capabilities, matched rule, and mismatch errors.
 
-`gommage quickstart --self-test` runs the same readiness gate after setup:
+`gommage quickstart --self-test` runs the same policy/agent readiness gate after
+filesystem setup and before optional daemon service activation:
 
 ```sh
 gommage quickstart --agent claude --daemon --self-test
 gommage quickstart --agent codex --daemon --self-test
 ```
+
+The self-test is posture-aware. In strict mode it verifies that representative
+unmatched shell/file operations and agent-config writes remain governed by
+Gommage; with explicit `--relaxed`, it expects the generated convenience rules
+to allow those operations. Both modes still check the hard-stop and protected
+Git paths.
 
 With `--dry-run`, self-test prints the planned verification step without
 creating `GOMMAGE_HOME` or writing host-agent config:
@@ -199,13 +242,14 @@ Claude checks cover the settings file, `PreToolUse` hook group, matcher
 coverage, generated deny imports, and generated allow imports. Codex checks
 cover `hooks.json`, `config.toml`, the `PreToolUse` hook group, matcher
 coverage, canonical `features.hooks`, and the configured sandbox mode. A
-missing hook or disabled hook feature is `fail`; a hook that exists but misses
-new mapped surfaces such as `mcp__.*` is `warn` and should be repaired. A
+missing hook or disabled hook feature is `fail`; a hook whose matcher is not
+global is also `fail` because it can omit host-emitted calls. A
 legacy-only `features.codex_hooks` setting is `warn` and should be migrated by
 rerunning `gommage agent install codex`. A dangerous Codex sandbox is `warn`
-because Gommage governs matched hook events only; Codex's sandbox remains the
-boundary for other tool paths. Legacy Gommage hook commands and global or
-missing matchers are `warn`; inspect the repair plan before mutating:
+because Gommage governs host-emitted hook events only; Codex's sandbox remains
+the boundary for other execution paths. Legacy Gommage hook commands are
+`warn`; `*`, `.*`, or an omitted matcher are the accepted all-tools forms.
+Inspect the repair plan before mutating:
 
 ```sh
 gommage repair agent claude --dry-run
@@ -377,12 +421,14 @@ The report has a top-level `status`:
 | Status | Exit code | Meaning |
 |---|---:|---|
 | `pass` | 0 | Every built-in semantic fixture produced the expected decision. |
+| `warn` | 0 | One or more explicitly relaxable fixtures became less restrictive through a matched local allow rule. |
 | `fail` | 1 | At least one fixture produced an unexpected decision. Do not trust the hook until the policy or mapper change is understood. |
 
 The built-in fixtures cover:
 
 - compiled hard-stop behavior for destructive shell commands;
-- fail-closed behavior for unmapped shell commands;
+- fail-closed behavior for unmatched shell commands, reads, and writes;
+- absence of a blanket write grant for agent configuration;
 - stdlib allow and ask-picto behavior for Git pushes;
 - stdlib web-tool gating for `WebFetch`;
 - stdlib MCP gating for write-like `mcp__*` tools.

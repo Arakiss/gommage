@@ -184,8 +184,10 @@ Features:
   - Initial stdio gateway exists in `gommage-mcp --gateway`; keep it as
     compatibility plumbing unless real host demand justifies broader work.
 - Codex hook-surface catch-up
-  - Current default Codex quickstart maps Bash, parsed `apply_patch` file
-    paths, and `mcp__server__tool` names when Codex emits those hook events.
+  - Current default Codex quickstart sends every host-emitted `PreToolUse` call
+    to Gommage. The bundled mapper positively understands Bash, parsed
+    `apply_patch` file paths, and `mcp__server__tool` names; other emitted calls
+    fail closed.
   - Remaining work is host-smoke evidence for the widened default path,
     incomplete shell interception tracking, and future hook-exposed tool
     families with real payload captures, capability mappers, and policy

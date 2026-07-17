@@ -43,14 +43,20 @@ To extend coverage, add a mapper rule under `~/.gommage/capabilities.d/` — Cla
 `gommage quickstart --agent claude` installs the hook, preserving unrelated
 existing `PreToolUse` hook groups unless `--replace-hooks` is passed. It imports
 supported `permissions.deny` entries from `~/.claude/settings.json` into
-`~/.gommage/policy.d/05-claude-import.yaml`. It also imports supported
-`permissions.allow` entries such as `Bash`, `Bash(git status *)`, and
-`Read(./docs/**)` into `~/.gommage/policy.d/90-claude-allow-import.yaml`, which
-loads after bundled hard-stops, deny imports, deny rules, and ask rules. That
-ordering preserves the user's existing Claude posture without letting broad
-native allows override Gommage guardrails. Use
-`--no-import-native-permissions` when you want to author the initial Gommage
-policy manually instead of importing Claude's native permissions.
+`~/.gommage/policy.d/05-claude-import.yaml`. Strict posture is the default:
+supported `permissions.allow` entries remain native to Claude and are not
+converted into Gommage policy. Use `--no-import-native-permissions` when you
+want to author the initial Gommage policy manually instead of importing even
+Claude's native denies.
+
+`--relaxed` explicitly selects the legacy convenience posture. It creates the
+generated `06-agent-config-writable.yaml` and `95-agent-catch-all.yaml` broad
+allow layers and imports supported Claude allows such as `Bash`,
+`Bash(git status *)`, and `Read(./docs/**)` into
+`90-claude-allow-import.yaml`. The `06` layer is an early carve-out for selected
+agent configuration writes, while the `90` import and `95` catch-all are late
+fallbacks. Compiled hard-stops remain unconditional, but the broad fallback
+means Gommage no longer completely mediates opaque scripts or interpreters.
 
 Verify the host wiring after quickstart with:
 
@@ -95,10 +101,10 @@ See [`examples/claude-code-setup.md`](../examples/claude-code-setup.md).
 ## Existing Claude Hook Stacks
 
 Existing hooks and Gommage can coexist. The default installer appends a Gommage
-hook group and leaves unrelated shell hooks in place. If an older hook denies a
-call before Gommage evaluates it, the agent sees that older hook's message and
-Gommage has no decision to audit. If Gommage denies or asks, the agent receives
-the Gommage reason and the signed audit log records it.
+hook group and leaves unrelated shell hooks in place. Current Claude Code hook
+semantics run all matching hooks concurrently; a deny from any matching hook
+blocks the call. Gommage records and can explain its own decision, but it does
+not authenticate, order, or audit another hook's independent result.
 
 Use this sequence before changing a mature Claude home:
 
@@ -125,10 +131,12 @@ There are two separate facts to keep straight:
    [openai/codex#16732](https://github.com/openai/codex/issues/16732), were
    effectively Bash-only for this use case.
 2. **Gommage beta default wiring.** `gommage quickstart --agent codex`
-   installs a matcher for `Bash`, `apply_patch`, and `mcp__.*` tool names. The
-   bundled stdlib maps Bash commands, parsed `apply_patch` file paths, and
-   Codex MCP tool names. `apply_patch` payloads fail closed when the patch file
-   list cannot be parsed safely.
+   installs an all-tools `PreToolUse` matcher. The bundled stdlib maps Bash
+   commands, parsed `apply_patch` file paths, and Codex MCP tool names. An
+   emitted call without mapper coverage reaches the evaluator with no resolved
+   capability and fails closed. `apply_patch` payloads also fail closed when
+   their file list cannot be parsed safely. The installed policy posture is
+   strict by default; `--relaxed` is required to add broad generated allows.
 
 | Tool | Upstream Codex 0.124+ hook surface | Gommage quickstart default | Capability produced today |
 |---|---|---|---|
@@ -136,7 +144,7 @@ There are two separate facts to keep straight:
 | long-running Bash session | yes | partially, through Bash hook payloads Gommage receives | same as Bash when emitted as `Bash` |
 | `apply_patch` | yes | yes | `fs.write:<parsed path>` for up to 16 parsed patch paths; unsafe/unparsed payloads emit fail-closed patch capabilities |
 | Codex MCP tools | yes | yes when emitted as `mcp__server__tool` | same `mcp.read`, `mcp.write`, and `mcp.call` mapping used for Claude-style MCP names |
-| built-in read-only file inspection | not claimed by Gommage | no | none |
+| other built-in tools | host-dependent | received whenever Codex emits `PreToolUse`; denied until mapped and allowed | none when unmapped |
 
 Codex also exposes a separate `PermissionRequest` hook when it is about to ask
 for native approval. Gommage's beta quickstart does not wire Pictos into that
@@ -145,15 +153,11 @@ result to a denial rather than claiming an interactive Codex approval path.
 
 ### Bypasses Gommage under Codex
 
-- Any Codex tool call that is not matched by the installed Gommage hook group.
-  In the current beta quickstart, the intended matcher covers Bash,
-  `apply_patch`, and Codex MCP names.
-- Built-in file reads or other internal Codex tools for which no upstream hook
-  payload is emitted or no Gommage mapper exists.
-- WebSearch and other non-shell, non-MCP tool calls outside Codex hook
-  coverage.
-- Equivalent work performed through another tool path that the installed hook
-  group or Gommage mapper does not cover.
+- Any Codex operation for which the host emits no `PreToolUse` payload.
+- Equivalent work performed through a process or internal path outside the
+  host hook contract.
+- A tool without a bundled mapper does not bypass the global matcher; it is
+  denied as unresolved until an operator adds and tests mapping plus policy.
 
 ### Recommended stack
 
@@ -167,10 +171,10 @@ Codex ships OS-level confinement as a first-class feature — **use it**:
 
 Gommage + Codex is a layered posture: Codex's OS-level sandbox covers file and
 network boundaries that are below, outside, or not yet mapped by Gommage;
-Gommage governs the installed hook surface declaratively and audits it. In the
-current beta, the default matcher covers Bash, `apply_patch`, and emitted Codex
-MCP tool names. Other hook families still need captured payloads, mapper rules,
-and policy fixtures before they become supported coverage.
+Gommage governs host-emitted `PreToolUse` calls declaratively and audits its own
+decisions. The default matcher is global, while positive semantic support still
+depends on captured payloads, mapper rules, and policy fixtures. Other hook
+families and operations Codex does not emit remain outside this contract.
 
 For MCP tools that can be routed through a stdio proxy, the optional legacy
 gateway `gommage-mcp --gateway --server-name <name> -- <upstream-command>`
@@ -200,10 +204,11 @@ See [`examples/codex-setup.md`](../examples/codex-setup.md).
 `gommage quickstart --agent codex` writes `~/.codex/hooks.json` and enables
 `features.hooks = true`, but it does not convert Codex's OS sandbox or
 approval policy into Gommage YAML. Those native controls remain authoritative
-for surfaces outside Gommage's installed matcher and mapper coverage.
+for operations outside the host-emitted `PreToolUse` path and for boundaries
+below Gommage's semantic mapper coverage.
 
-For custom Codex tools or newly hook-exposed payload shapes, do not widen the
-matcher by hand and assume security coverage. Capture real payloads with
+For custom Codex tools or newly hook-exposed payload shapes, do not narrow the
+global matcher or assume that interception equals semantic support. Capture real payloads with
 `gommage map --json --hook`, add local capability mappers, and commit policy
 fixtures before trusting the result.
 
@@ -220,6 +225,19 @@ because Codex's sandbox remains the authority outside mapped hook events.
 Older Codex configs may still contain the legacy `features.codex_hooks` flag.
 Gommage reports that as a migration warning and rewrites the canonical
 `features.hooks` setting when `gommage agent install codex` runs.
+
+For either agent, rerunning `quickstart` or `agent install` without `--relaxed`
+backs up and removes recognized Gommage-generated
+`06-agent-config-writable.yaml`, `90-claude-allow-import.yaml`, and
+`95-agent-catch-all.yaml` layers. Static generated files must match canonical
+bytes; dynamic native imports must pass generated-shape and content-digest
+validation. A modified or custom file at any reserved path is not removed: the
+install stops before any integration write so the operator can review or move
+it. On a successful complete policy/hook change, each command makes one bounded
+daemon reload request; quickstart does not reload separately for every selected
+agent. A reachable daemon must acknowledge it. Only a missing or
+connection-refused listener remains a warning, and quickstart rollback may
+issue a second reload for restored files.
 
 ## Dual-Agent And Nested-Agent Flows
 

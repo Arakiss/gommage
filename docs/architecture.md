@@ -68,6 +68,61 @@ These commands do not change the evaluator contract. They make coverage,
 configuration, launch posture, and operator evidence more visible around the
 deterministic decision kernel.
 
+## Agent installation posture
+
+`gommage quickstart` and `gommage agent install` configure host hooks and local
+policy around the evaluator. They select strict posture by default: no broad
+agent convenience layer is generated, unmatched capabilities retain the
+evaluator's fail-closed result, and the Claude integration imports supported
+native denies into `05-claude-import.yaml` without translating native allows.
+Codex sandbox and approval settings remain native Codex configuration.
+
+`--relaxed` is the explicit compatibility path for the previous convenience
+posture. It generates `06-agent-config-writable.yaml` and
+`95-agent-catch-all.yaml`; the Claude integration also translates supported
+native allows into `90-claude-allow-import.yaml`. These are ordinary ordered
+policy layers, not a change to evaluator precedence. The `06` configuration
+carve-out is deliberately early; the `90` import and `95` catch-all are late
+fallbacks. Compiled hard-stops remain unconditional, while unmatched shell,
+file, and outbound capabilities may reach broad fallback allows. Opaque runtime
+behavior is still outside complete hook-level mediation.
+
+Returning to strict posture is content-aware. The installer first checks all
+three reserved relaxation paths. Static generated files must match their
+canonical bytes. Dynamic Claude imports must have the generated header,
+constrained rule shape, and valid content digest. Digest-less legacy imports
+require operator review rather than automatic migration. A mismatch aborts the
+operation before any host config or reserved policy write. The installer keeps
+a byte-for-byte rollback journal for those active files if a later write fails.
+Quickstart captures its broader journal before initializing the Gommage home;
+it also records directory modes, the signing key, bundled policy/capability
+defaults, context files, runtime files it may initialize, host configuration,
+and the optional daemon service file. Rollback removes paths that did not exist
+and restores prior bytes, modes, and backup inventory.
+
+After all agent and policy edits, `quickstart` and standalone `agent install`
+each make one bounded daemon reload request on a successful setup. Quickstart
+does this once across all selected agents rather than once per integration. A
+reachable daemon must acknowledge the reload; connection, write, and read
+timeouts, other connection errors, rejection, malformed, incomplete, or
+oversized responses fail the command. If quickstart rolls back after a later
+gate, it may make one additional reload for the restored files. Only a missing
+or connection-refused socket counts as an unavailable daemon; the next daemon
+start loads the files from disk.
+
+Optional daemon installation is preflighted before any mutation. The resolved
+binary must be a canonical regular executable. The policy/agent self-test runs
+before service activation; activation itself journals the previous unit bytes
+and loaded/enabled state so a failed service-manager command can compensate.
+
+`gommage posture` compares a representative set of active mapper/policy
+decisions with the same fixtures evaluated against bundled stdlib. Its
+strict/relaxed/custom/failing result describes that sampled semantic
+comparison; it is not an exhaustive proof over every possible tool input.
+`gommage smoke` applies expected decisions to the active policy and reports a
+warning, rather than a failure, when an explicitly relaxable fixture is allowed
+by local policy.
+
 `managed status` is diagnostic only. Its `mode` is `user_level`,
 `user_service_file_present`, or `unconfigured`, and the report states
 `status_requires_root: false`, `isolation: "none"`, `tamper_resistance: "none"`,

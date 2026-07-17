@@ -30,14 +30,33 @@ That command:
 - installs bundled policies and capability mappers;
 - imports supported `permissions.deny` entries from `~/.claude/settings.json`
   into `~/.gommage/policy.d/05-claude-import.yaml`;
-- imports supported `permissions.allow` entries into
-  `~/.gommage/policy.d/90-claude-allow-import.yaml`, including broad supported
-  entries such as `Bash`; the import loads late so hard-stops, deny imports,
-  deny rules, and ask rules still win;
+- leaves `permissions.allow` in Claude Code instead of converting it into a
+  Gommage allow rule;
 - installs the Claude `PreToolUse` hook, preserving existing hooks unless you
   pass `--replace-hooks`;
-- installs and starts the user-level daemon service;
+- runs the policy/agent readiness gate, then installs and starts the user-level
+  daemon service;
+- makes one bounded daemon reload attempt on the successful path after policy
+  and hook changes; rollback may make a second reload for restored files;
 - backs up changed config files before writing.
+
+Strict policy posture is the default: unmatched shell, file, and outbound
+capabilities remain fail-closed. Use the legacy convenience posture only when
+that broader behavior is intentional:
+
+```sh
+gommage quickstart --agent claude --daemon --relaxed
+```
+
+`--relaxed` generates `06-agent-config-writable.yaml` and
+`95-agent-catch-all.yaml` and imports supported Claude `permissions.allow`
+entries into `90-claude-allow-import.yaml`. Rerunning quickstart without
+`--relaxed` backs up and removes recognized generated 06/90/95 layers; modified
+or custom content at one of those reserved paths stops the operation before any
+integration write. Static files require canonical bytes and generated imports
+require a valid content digest. Native imports refresh automatically when the
+Claude settings change and native import remains enabled; `--replace-hooks`
+controls only hook replacement.
 
 `doctor --json` should report top-level `status` as `ok` or `warn`. A warning is
 expected before the first audited decision. Treat `fail` as a setup error
@@ -59,9 +78,9 @@ gommage repair agent claude --dry-run
 gommage uninstall --all --dry-run
 ```
 
-Keeping existing hooks and Gommage together is supported. The first layer to
-deny a call determines what the agent sees; if an existing hook blocks before
-Gommage evaluates, Gommage cannot audit that decision.
+Keeping existing hooks and Gommage together is supported. Claude Code runs all
+matching hooks concurrently and blocks when any one denies. Gommage records its
+own decision; it does not audit another hook's independent result.
 
 ## 3. Daemon service controls
 

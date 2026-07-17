@@ -35,7 +35,7 @@ These surfaces are part of the beta operator contract:
 | Hook adapter | New agent hooks call `gommage hook --agent claude` or `gommage hook --agent codex`; `gommage-mcp` remains a compatibility binary and optional stdio MCP gateway. |
 | Agent skill | Installed by `--with-skill` or `--skill-only`; teaches agents to diagnose, dry-run, verify, and avoid overclaiming coverage. |
 | Harness diagnostics | `gommage harness diagnose --json`, `harness explain`, and `harness write-context --dry-run` report the observed local hook and configuration state for agents; they do not prove a protected service identity. |
-| Quickstart | Additive by default; preserves unrelated Claude hooks, backs up changed files, imports supported native Claude permissions, and self-tests unless disabled. |
+| Quickstart | Additive and strict by default; preserves unrelated Claude hooks, backs up changed files, imports supported native Claude denies but not allows, reloads the daemon once after policy changes, and self-tests unless disabled. Broad generated allows require explicit `--relaxed`. |
 | Beta gate | `gommage beta check --json` aggregates doctor, smoke, selected agent status, optional policy fixtures, state-index readiness, dashboard availability, and next commands. |
 | Readiness gate | `gommage verify --json` remains the lower-level install/CI readiness gate. |
 | Policy fixtures | `gommage policy test <file> --json` is the stable semantic regression contract. |
@@ -52,9 +52,10 @@ Beta does not claim:
 - universal interception of every agent action;
 - replacement of Claude Code, Codex, or OS-native security controls;
 - automatic coverage for every MCP server on the machine;
-- default Codex coverage for non-shell/non-MCP tools or shell paths that Codex
-  hooks do not emit; the current default Codex surface is Bash, `apply_patch`,
-  and Codex MCP tool names when those hook events reach Gommage;
+- semantic support for every Codex tool or any operation Codex does not emit
+  through `PreToolUse`; the installed matcher is global, but bundled positive
+  mapping remains limited to reviewed tool shapes and unknown emitted calls
+  fail closed;
 - production security certification;
 - crates.io source builds as a replacement for the signed GitHub Release
   binary path;
@@ -96,11 +97,10 @@ sh scripts/launch-demo.sh
 
 ## Existing Harnesses
 
-Gommage is designed for coexistence first. Existing hooks may remain active, but
-the first layer to block determines what the agent sees. If another hook denies
-before Gommage receives the call, Gommage cannot audit that decision. If
-Gommage denies or asks first, the reason is returned by Gommage and the signed
-audit log records the decision.
+Gommage is designed for coexistence first. Existing hooks may remain active.
+Current supported-host semantics run all matching hooks concurrently, and a
+deny from any hook blocks the call. Gommage records its own signed decision;
+it does not authenticate or audit another hook's independent result.
 
 For mature homes, do not infer behavior from the README alone. Run:
 

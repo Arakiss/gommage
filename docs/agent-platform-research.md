@@ -112,8 +112,10 @@ Primary sources checked:
 Priority order:
 
 1. **Keep Codex hook feature config current.** Write `features.hooks = true`,
-   keep status/uninstall compatibility for legacy `features.codex_hooks`, and
-   update docs when Codex changes the hook contract.
+   keep status compatibility for legacy `features.codex_hooks`, preserve both
+   shared feature flags during normal uninstall, and update docs when Codex
+   changes the hook contract. Only backup restoration can safely restore their
+   previous values because inline and plugin hooks share the same flags.
 2. **Build a real hook payload capture matrix.** Capture Codex and Claude Code
    payloads for every event before widening Gommage claims beyond the current
    Bash / `apply_patch` / MCP Codex default.
