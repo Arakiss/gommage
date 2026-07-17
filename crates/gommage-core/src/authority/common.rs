@@ -45,3 +45,31 @@ pub(super) fn validate_key_identifier(value: &str, purpose: &str) -> Result<(), 
     }
     Ok(())
 }
+
+pub(super) fn sign_checkpoint(
+    config: &AuthorityConfig,
+    ledger_key_id: &str,
+    ledger_key: &SigningKey,
+    checkpoint_id: &str,
+    created_at: i64,
+    head_seq: String,
+    head_hash: String,
+) -> Result<SignedLedgerCheckpointV2, AuthorityError> {
+    validate_token("checkpoint id", checkpoint_id, 160)?;
+    validate_timestamp(created_at)?;
+    let checkpoint = LedgerCheckpointV2 {
+        domain: CHECKPOINT_DOMAIN.into(),
+        version: FORMAT_VERSION,
+        checkpoint_id: checkpoint_id.into(),
+        authority_instance: config.instance_id.clone(),
+        authority_epoch: config.epoch.clone(),
+        created_at,
+        head_seq,
+        head_hash,
+        ledger_key_id: ledger_key_id.into(),
+    };
+    checkpoint.validate()?;
+    Ok(SignedLedgerCheckpointV2 {
+        envelope: sign_payload(EnvelopeDomain::LedgerCheckpoint, &checkpoint, ledger_key)?,
+    })
+}

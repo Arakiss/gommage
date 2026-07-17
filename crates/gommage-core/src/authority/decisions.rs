@@ -30,7 +30,13 @@ impl Authority {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let verification = verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        let verification = verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         ensure_decision_admitted(&tx, &prepared.generation)?;
         let decided_at = authority_now(runtime_source.as_ref())?;
         ensure_evidence_time_not_regressed(decided_at, &verification)?;

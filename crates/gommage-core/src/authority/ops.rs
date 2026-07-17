@@ -20,7 +20,13 @@ impl Authority {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         let current = load_current_runtime_state(&tx)?;
         if !generation_id_is_newer(
             command.generation.generation_id(),
@@ -68,7 +74,13 @@ impl Authority {
                 },
             },
         )?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         let activated = load_current_runtime_state(&tx)?;
         tx.commit()?;
         Ok(activated)
@@ -92,7 +104,13 @@ impl Authority {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         let current = load_current_runtime_state(&tx)?;
         if current.maintenance == command.enabled {
             return Err(AuthorityError::InvalidInput(format!(
@@ -130,7 +148,13 @@ impl Authority {
                 },
             },
         )?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         let changed = load_current_runtime_state(&tx)?;
         tx.commit()?;
         Ok(changed)
@@ -166,7 +190,13 @@ impl Authority {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         if let Some(resolution) = load_resolution(&tx, &command.request_id)? {
             tx.commit()?;
             return Ok(ApproveResult::AlreadyResolved(resolution));
@@ -305,7 +335,13 @@ impl Authority {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         if let Some(resolution) = load_resolution(&tx, &command.request_id)? {
             tx.commit()?;
             return Ok(DenyResult::AlreadyResolved(resolution));
@@ -398,7 +434,13 @@ impl Authority {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        verify_all(
+            &tx,
+            &config,
+            &grant_vk,
+            &ledger_vk,
+            Some(&self.retained_checkpoint),
+        )?;
         let Some((signed_claim, _claim)) = load_claim(&tx, &command.grant_id, &grant_vk)? else {
             tx.commit()?;
             return Ok(RevokeResult::NotUsable(GrantNotUsableReason::Missing));
@@ -450,7 +492,7 @@ impl Authority {
             &self.config,
             &self.grant_key.verifying_key(),
             &self.ledger_key.verifying_key(),
-            None,
+            Some(&self.retained_checkpoint),
         )?;
         let request = load_request(&tx, request_id)?.map(|stored| stored.request);
         tx.commit()?;
@@ -468,7 +510,7 @@ impl Authority {
             &self.config,
             &self.grant_key.verifying_key(),
             &self.ledger_key.verifying_key(),
-            None,
+            Some(&self.retained_checkpoint),
         )?;
         let resolution = load_resolution(&tx, request_id)?;
         tx.commit()?;
@@ -483,7 +525,7 @@ impl Authority {
             &self.config,
             &self.grant_key.verifying_key(),
             &self.ledger_key.verifying_key(),
-            None,
+            Some(&self.retained_checkpoint),
         )?;
         let claim =
             load_claim(&tx, grant_id, &self.grant_key.verifying_key())?.map(|(signed, _)| signed);
@@ -502,7 +544,7 @@ impl Authority {
             &self.config,
             &self.grant_key.verifying_key(),
             &self.ledger_key.verifying_key(),
-            None,
+            Some(&self.retained_checkpoint),
         )?;
         let state = load_latest_state(&tx, grant_id, &self.grant_key.verifying_key())?
             .map(|(signed, _)| signed);
@@ -518,7 +560,7 @@ impl Authority {
             &self.config,
             &self.grant_key.verifying_key(),
             &self.ledger_key.verifying_key(),
-            None,
+            Some(&self.retained_checkpoint),
         )?;
         let state = load_current_runtime_state(&tx)?;
         tx.commit()?;
@@ -531,19 +573,16 @@ impl Authority {
     /// attestation and its internal reduction. It does not replay the policy or
     /// mapper artifacts identified by the signed generation.
     ///
-    /// Without `trusted_checkpoint`, the chain is internally authenticated but
-    /// explicitly reported as [`FreshnessVerdict::Unanchored`].
-    pub fn verify_ledger(
-        &self,
-        trusted_checkpoint: Option<&SignedLedgerCheckpointV2>,
-    ) -> Result<LedgerVerification, AuthorityError> {
+    /// Verification always applies the externally retained checkpoint supplied
+    /// at open (or subsequently admitted with [`Authority::admit_checkpoint`]).
+    pub fn verify_ledger(&self) -> Result<LedgerVerification, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
         let verification = verify_all(
             &tx,
             &self.config,
             &self.grant_key.verifying_key(),
             &self.ledger_key.verifying_key(),
-            trusted_checkpoint,
+            Some(&self.retained_checkpoint),
         )?;
         tx.commit()?;
         Ok(verification)
@@ -562,14 +601,13 @@ impl Authority {
         &self,
         cursor: Option<&SignedLedgerCursorV2>,
         limit: usize,
-        trusted_checkpoint: Option<&SignedLedgerCheckpointV2>,
     ) -> Result<LedgerPageV2, AuthorityError> {
         if limit == 0 || limit > MAX_LEDGER_PAGE_ENTRIES {
             return Err(AuthorityError::InvalidInput(format!(
                 "ledger page limit must be between 1 and {MAX_LEDGER_PAGE_ENTRIES}"
             )));
         }
-        let verification = self.verify_ledger(trusted_checkpoint)?;
+        let verification = self.verify_ledger()?;
         let (snapshot_head_seq, snapshot_head_hash, start_seq, cursor_time_floor) = match cursor {
             Some(signed) => {
                 let cursor = signed.verify(&self.ledger_key.verifying_key())?;
@@ -661,6 +699,9 @@ impl Authority {
     }
 
     /// Produce a ledger-purpose signed checkpoint for an external trust store.
+    ///
+    /// Until the caller persists and admits this checkpoint, rollback detection
+    /// remains bounded by the previously retained checkpoint sequence.
     pub fn checkpoint(
         &self,
         checkpoint_id: &str,
@@ -668,25 +709,83 @@ impl Authority {
     ) -> Result<SignedLedgerCheckpointV2, AuthorityError> {
         validate_token("checkpoint id", checkpoint_id, 160)?;
         validate_timestamp(created_at)?;
-        let verification = self.verify_ledger(None)?;
-        let checkpoint = LedgerCheckpointV2 {
-            domain: CHECKPOINT_DOMAIN.into(),
-            version: FORMAT_VERSION,
-            checkpoint_id: checkpoint_id.into(),
-            authority_instance: self.config.instance_id.clone(),
-            authority_epoch: self.config.epoch.clone(),
+        let verification = self.verify_ledger()?;
+        sign_checkpoint(
+            &self.config,
+            &self.ledger_key_id,
+            &self.ledger_key,
+            checkpoint_id,
             created_at,
-            head_seq: verification.head_seq,
-            head_hash: verification.head_hash,
-            ledger_key_id: self.ledger_key_id.clone(),
-        };
-        checkpoint.validate()?;
-        Ok(SignedLedgerCheckpointV2 {
-            envelope: sign_payload(
-                EnvelopeDomain::LedgerCheckpoint,
-                &checkpoint,
-                &self.ledger_key,
-            )?,
-        })
+            verification.head_seq,
+            verification.head_hash,
+        )
+    }
+
+    /// Admit a newer checkpoint after the caller has persisted it externally.
+    ///
+    /// The checkpoint must be a strict successor of the retained anchor and
+    /// commit the exact currently verified database head. The retained anchor is
+    /// replaced only after both the old and candidate checkpoints have verified
+    /// against the same immediate database transaction. Once admitted, rollback
+    /// detection covers the prefix through the candidate sequence; a later
+    /// uncheckpointed suffix still requires a subsequent retained checkpoint.
+    pub fn admit_checkpoint(
+        &mut self,
+        candidate: SignedLedgerCheckpointV2,
+    ) -> Result<(), AuthorityError> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = verify_all(
+            &tx,
+            &self.config,
+            &self.grant_key.verifying_key(),
+            &self.ledger_key.verifying_key(),
+            Some(&self.retained_checkpoint),
+        )?;
+        let retained = self
+            .retained_checkpoint
+            .verify(&self.ledger_key.verifying_key())?;
+        let next = candidate.verify(&self.ledger_key.verifying_key())?;
+        if next.authority_instance() != self.config.instance_id
+            || next.authority_epoch() != self.config.epoch
+            || next.ledger_key_id() != self.ledger_key_id
+        {
+            return Err(AuthorityError::RollbackDetected(
+                "candidate checkpoint belongs to another authority".into(),
+            ));
+        }
+        let retained_seq = retained
+            .head_seq()
+            .parse::<u64>()
+            .map_err(|_| AuthorityError::Corrupt("retained checkpoint sequence overflow".into()))?;
+        let next_seq = next.head_seq().parse::<u64>().map_err(|_| {
+            AuthorityError::Corrupt("candidate checkpoint sequence overflow".into())
+        })?;
+        if next_seq <= retained_seq {
+            return Err(AuthorityError::InvalidInput(
+                "candidate checkpoint must strictly advance the retained checkpoint".into(),
+            ));
+        }
+        if next.created_at() < retained.created_at() {
+            return Err(AuthorityError::InvalidInput(
+                "candidate checkpoint timestamp predates the retained checkpoint".into(),
+            ));
+        }
+        if next.head_seq() != current.head_seq || next.head_hash() != current.head_hash {
+            return Err(AuthorityError::RollbackDetected(
+                "candidate checkpoint does not commit the current database head".into(),
+            ));
+        }
+        verify_all(
+            &tx,
+            &self.config,
+            &self.grant_key.verifying_key(),
+            &self.ledger_key.verifying_key(),
+            Some(&candidate),
+        )?;
+        tx.commit()?;
+        self.retained_checkpoint = candidate;
+        Ok(())
     }
 }

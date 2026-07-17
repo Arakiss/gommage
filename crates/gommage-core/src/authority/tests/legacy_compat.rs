@@ -239,8 +239,15 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
     let generation = generation(&policy.version_hash);
     let config = config(generation.clone());
     let (grant_key, ledger_key) = keys();
-    let mut authority =
-        Authority::open(&path, config.clone(), grant_key.clone(), ledger_key.clone()).unwrap();
+    let genesis_checkpoint = Authority::bootstrap(&path, &config, &grant_key, &ledger_key).unwrap();
+    let mut authority = Authority::open(
+        &path,
+        config.clone(),
+        grant_key.clone(),
+        ledger_key.clone(),
+        genesis_checkpoint,
+    )
+    .unwrap();
 
     let ask_call = ToolCall {
         tool: "Bash".into(),
@@ -421,7 +428,7 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
         legacy_jcs_digest,
         "5cab755e09c059995ac02de7e10fd299044e2467acea6eaf0cb2c1151bccb1e6"
     );
-    authority.verify_ledger(None).unwrap();
+    authority.verify_ledger().unwrap();
 
     let allow_call = ToolCall {
         tool: "Bash".into(),
@@ -438,16 +445,14 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
     let checkpoint = authority
         .checkpoint("mixed_checkpoint", 2_000_000_000)
         .unwrap();
+    authority.admit_checkpoint(checkpoint.clone()).unwrap();
     assert!(matches!(
-        authority
-            .verify_ledger(Some(&checkpoint))
-            .unwrap()
-            .freshness,
+        authority.verify_ledger().unwrap().freshness,
         FreshnessVerdict::Anchored { .. }
     ));
-    let first_page = authority.ledger_page(None, 3, Some(&checkpoint)).unwrap();
+    let first_page = authority.ledger_page(None, 3).unwrap();
     let second_page = authority
-        .ledger_page(first_page.next_cursor.as_ref(), 3, Some(&checkpoint))
+        .ledger_page(first_page.next_cursor.as_ref(), 3)
         .unwrap();
     assert!(!first_page.entries.is_empty());
     assert!(!second_page.entries.is_empty());
@@ -463,8 +468,8 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
     assert_eq!(legacy_after, legacy_before);
     drop(authority);
 
-    let reopened = Authority::open(&path, config, grant_key, ledger_key).unwrap();
-    let verification = reopened.verify_ledger(Some(&checkpoint)).unwrap();
+    let reopened = Authority::open(&path, config, grant_key, ledger_key, checkpoint).unwrap();
+    let verification = reopened.verify_ledger().unwrap();
     assert!(
         verification.entries.iter().any(|entry| {
             matches!(entry.entry.payload(), LedgerPayloadV2::DecisionAllow { .. })

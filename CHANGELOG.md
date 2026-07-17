@@ -103,6 +103,18 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   MCP, shell-analysis, policy, Picto, and integration-test modules were split
   by responsibility so the limit applies to the whole current tree rather
   than only to new files.
+- Authority v2 now separates exclusive database bootstrap from runtime open.
+  Bootstrap creates only a new path and returns a signed genesis checkpoint;
+  every runtime open, read, and mutation requires and verifies an externally
+  retained checkpoint. A newer checkpoint can replace the retained anchor only
+  when it strictly advances it and commits the exact verified database head.
+  This detects rollback through the retained checkpoint sequence; rollback
+  confined to a later, not-yet-checkpointed suffix remains indistinguishable
+  until a subsequent checkpoint is retained and admitted.
+  **Breaking pre-1.0 migration:** call `Authority::bootstrap`, persist the
+  returned signed checkpoint outside the authority database, then pass it to
+  `Authority::open` (or `open_with_runtime_source`). Existing callers that
+  relied on `open` to initialize a database must adopt this three-step flow.
 - Pinned `serde_json_canonicalizer` as a determinism-critical dependency for
   Authority v2's RFC 8785 signed envelopes.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
@@ -208,9 +220,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   and provenance under a frozen v2 reducer, while historical requests, claims,
   states, and `DecisionAllow` entries remain verifiable. Tool-call commitments
   are bounded by canonical bytes, JSON depth, and node count before Authority
-  reads time or opens a transaction. Externally anchorable checkpoints remain
-  available. Existing Picto and approval paths remain unchanged until a later
-  control-plane migration integrates the API.
+  reads time or opens a transaction. Runtime Authority handles always verify an
+  externally retained checkpoint prefix; protecting a later suffix requires
+  retaining and admitting another checkpoint. Existing Picto and approval paths
+  remain unchanged until a later control-plane migration integrates the API.
 - `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes
   only the canonical observed tool input as well as its scope.
 - `gommage daemon reload` reloads policy and capability mappers in the running

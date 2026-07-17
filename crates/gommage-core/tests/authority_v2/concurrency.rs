@@ -1,5 +1,77 @@
 use super::*;
 
+struct LockHoldingRuntimeSource {
+    entered: Arc<Barrier>,
+    release: Arc<Barrier>,
+    next_nonce: AtomicU64,
+}
+
+impl AuthorityRuntimeSource for LockHoldingRuntimeSource {
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
+        self.entered.wait();
+        self.release.wait();
+        Ok(1_700_000_030)
+    }
+
+    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
+        let nonce = self.next_nonce.fetch_add(1, Ordering::SeqCst);
+        Ok(format!("serialized{nonce:016x}"))
+    }
+}
+
+#[test]
+fn checkpoint_admission_serializes_behind_an_inflight_writer() {
+    let (_directory, path, mut authority) = fixture();
+    create_request(&mut authority);
+    let candidate = authority
+        .checkpoint("checkpoint_before_writer", 1_700_000_020)
+        .unwrap();
+    drop(authority);
+
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let mut writer = open_with_source(
+        &path,
+        config(),
+        Arc::new(LockHoldingRuntimeSource {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+            next_nonce: AtomicU64::new(1),
+        }),
+    );
+    let mut admitting = open(&path);
+    let writer_handle = thread::spawn(move || writer.commit_decision(&authorize_command()));
+    entered.wait();
+
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let admission_handle = thread::spawn(move || {
+        ready_tx.send(()).unwrap();
+        done_tx.send(admitting.admit_checkpoint(candidate)).unwrap();
+    });
+    ready_rx.recv().unwrap();
+    assert!(
+        done_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err(),
+        "checkpoint admission must wait for the existing immediate writer"
+    );
+
+    release.wait();
+    assert!(matches!(
+        writer_handle.join().unwrap().unwrap(),
+        CommittedDecisionV2::ApprovalRequired { created: false, .. }
+    ));
+    assert!(matches!(
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap(),
+        Err(AuthorityError::RollbackDetected(_))
+    ));
+    admission_handle.join().unwrap();
+    assert_eq!(open(&path).verify_ledger().unwrap().head_seq, "4");
+}
+
 #[test]
 fn concurrent_decision_asks_share_one_request_but_record_every_attempt() {
     let (_directory, path, authority) = fixture();
@@ -41,7 +113,7 @@ fn concurrent_decision_asks_share_one_request_but_record_every_attempt() {
         31
     );
     let authority = open(&path);
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "34");
     assert_eq!(
         verification
@@ -108,7 +180,7 @@ fn thirty_two_concurrent_approvers_create_exactly_one_grant() {
         .query_row("SELECT count(*) FROM grant_claims", [], |row| row.get(0))
         .unwrap();
     assert_eq!(grants, 1);
-    open(&path).verify_ledger(None).unwrap();
+    open(&path).verify_ledger().unwrap();
 }
 
 #[test]
@@ -150,7 +222,7 @@ fn thirty_two_concurrent_decisions_yield_one_allow_and_record_every_retry() {
     );
     let authority = open(&path);
     let allow_events = authority
-        .verify_ledger(None)
+        .verify_ledger()
         .unwrap()
         .entries
         .into_iter()
@@ -238,7 +310,7 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
     );
 
     let authority = open(&path);
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "39");
     assert_eq!(
         verification
@@ -302,7 +374,7 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
             + usize::from(matches!(deny_result, DenyResult::Denied(_))),
         1
     );
-    open(&path).verify_ledger(None).unwrap();
+    open(&path).verify_ledger().unwrap();
 
     let (_terminal_directory, terminal_path, mut terminal_authority) = fixture();
     let terminal_request = create_request(&mut terminal_authority);
@@ -346,5 +418,5 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
         )) + usize::from(matches!(revoke_result, RevokeResult::Revoked(_))),
         1
     );
-    open(&terminal_path).verify_ledger(None).unwrap();
+    open(&terminal_path).verify_ledger().unwrap();
 }

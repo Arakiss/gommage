@@ -8,7 +8,7 @@ use gommage_core::{
     FreshnessVerdict, GrantStatusV2, LedgerPayloadV2, MAX_CANONICAL_TOOL_CALL_BYTES,
     MAX_LEDGER_PAGE_ENTRIES, MatchedRule, PictoBinding, Policy, RevokeCommand, RevokeResult,
     RuleContribution, SetMaintenanceCommand, SignedGrantClaimV2, SignedGrantStateV2, SignedJcs,
-    SignedLedgerCursorV2, ToolCall, evaluate,
+    SignedLedgerCheckpointV2, SignedLedgerCursorV2, ToolCall, evaluate,
 };
 use rusqlite::Connection;
 use serde_json::{Value, json};
@@ -138,12 +138,54 @@ fn config() -> AuthorityConfig {
 }
 
 fn open(path: &Path) -> Authority {
+    open_with_source(path, config(), Arc::new(DefaultTestRuntimeSource))
+}
+
+fn try_open(path: &Path) -> Result<Authority, AuthorityError> {
+    try_open_with_source(path, config(), Arc::new(DefaultTestRuntimeSource))
+}
+
+fn open_with_source(
+    path: &Path,
+    config: AuthorityConfig,
+    runtime_source: Arc<dyn AuthorityRuntimeSource>,
+) -> Authority {
+    try_open_with_source(path, config, runtime_source).unwrap()
+}
+
+fn try_open_with_source(
+    path: &Path,
+    config: AuthorityConfig,
+    runtime_source: Arc<dyn AuthorityRuntimeSource>,
+) -> Result<Authority, AuthorityError> {
+    let grant_key = grant_key();
+    let ledger_key = ledger_key();
+    let checkpoint = external_genesis_checkpoint(path, &config, &grant_key, &ledger_key);
     Authority::open_with_runtime_source(
         path,
-        config(),
-        grant_key(),
-        ledger_key(),
-        Arc::new(DefaultTestRuntimeSource),
+        config,
+        grant_key,
+        ledger_key,
+        checkpoint,
+        runtime_source,
+    )
+}
+
+fn external_genesis_checkpoint(
+    path: &Path,
+    config: &AuthorityConfig,
+    grant_key: &SigningKey,
+    ledger_key: &SigningKey,
+) -> SignedLedgerCheckpointV2 {
+    if !path.exists() {
+        return Authority::bootstrap(path, config, grant_key, ledger_key).unwrap();
+    }
+    let directory = tempfile::tempdir().unwrap();
+    Authority::bootstrap(
+        &directory.path().join("equivalent-authority.sqlite3"),
+        config,
+        grant_key,
+        ledger_key,
     )
     .unwrap()
 }

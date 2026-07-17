@@ -1,6 +1,99 @@
 use super::*;
 
 #[test]
+fn bootstrap_requires_an_exclusive_new_database_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let empty_path = directory.path().join("empty.sqlite3");
+    std::fs::File::create(&empty_path).unwrap();
+    assert!(matches!(
+        Authority::bootstrap(&empty_path, &config(), &grant_key(), &ledger_key()),
+        Err(AuthorityError::InvalidInput(message))
+            if message.contains("new authority database path")
+    ));
+    assert_eq!(std::fs::metadata(&empty_path).unwrap().len(), 0);
+
+    let initialized_path = directory.path().join("initialized.sqlite3");
+    let checkpoint =
+        Authority::bootstrap(&initialized_path, &config(), &grant_key(), &ledger_key()).unwrap();
+    assert!(
+        Authority::bootstrap(&initialized_path, &config(), &grant_key(), &ledger_key()).is_err()
+    );
+    Authority::open(
+        &initialized_path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        checkpoint.clone(),
+    )
+    .unwrap();
+
+    let missing_path = directory.path().join("missing.sqlite3");
+    assert!(
+        Authority::open(
+            &missing_path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            checkpoint,
+        )
+        .is_err()
+    );
+    assert!(!missing_path.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn bootstrap_rejects_a_preexisting_symlink_without_touching_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory.path().join("target.sqlite3");
+    let link = directory.path().join("authority.sqlite3");
+    std::fs::File::create(&target).unwrap();
+    symlink(&target, &link).unwrap();
+
+    assert!(Authority::bootstrap(&link, &config(), &grant_key(), &ledger_key()).is_err());
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::metadata(&target).unwrap().len(), 0);
+}
+
+#[test]
+fn checkpoint_admission_requires_the_exact_current_head_and_strict_progress() {
+    let (_directory, _path, mut authority) = fixture();
+    create_request(&mut authority);
+    let stale = authority
+        .checkpoint("checkpoint_stale", 1_700_000_020)
+        .unwrap();
+    create_second_request(&mut authority);
+
+    assert!(matches!(
+        authority.admit_checkpoint(stale),
+        Err(AuthorityError::RollbackDetected(_))
+    ));
+    assert_eq!(
+        authority.verify_ledger().unwrap().freshness,
+        FreshnessVerdict::Anchored {
+            checkpoint_seq: "1".into()
+        }
+    );
+
+    let current = authority
+        .checkpoint("checkpoint_current", 1_700_000_021)
+        .unwrap();
+    authority.admit_checkpoint(current.clone()).unwrap();
+    assert!(matches!(
+        authority.admit_checkpoint(current),
+        Err(AuthorityError::InvalidInput(message))
+            if message.contains("strictly advance")
+    ));
+}
+
+#[test]
 fn decision_command_has_no_client_selected_grant_time_or_event_id() {
     let CommitDecisionCommandV2 {
         evaluated_generation,
@@ -40,14 +133,7 @@ fn trusted_open_time_and_identifier_source_owns_runtime_evidence() {
         timestamp: AtomicI64::new(1_800_000_000),
         next_nonce: AtomicU64::new(1),
     });
-    let mut authority = Authority::open_with_runtime_source(
-        &path,
-        config(),
-        grant_key(),
-        ledger_key(),
-        source.clone(),
-    )
-    .unwrap();
+    let mut authority = open_with_source(&path, config(), source.clone());
     let command = authorize_command();
     let request = match authority.commit_decision(&command).unwrap() {
         CommittedDecisionV2::ApprovalRequired {
@@ -73,14 +159,14 @@ fn trusted_open_time_and_identifier_source_owns_runtime_evidence() {
             ..
         } if decision_event_id == "decision_fixed0000000000000005"
     ));
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
     source.timestamp.store(1_799_999_999, Ordering::SeqCst);
     assert!(matches!(
         authority.commit_decision(&command),
         Err(AuthorityError::RuntimeSource(message))
             if message.contains("predates signed evidence time")
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
 }
 
 #[test]
@@ -121,9 +207,14 @@ fn resolution_commands_have_no_caller_controlled_build_identity() {
 #[test]
 fn reference_lifecycle_is_atomic_exact_and_reopenable() {
     let (_directory, path, mut authority) = fixture();
-    let initial = authority.verify_ledger(None).unwrap();
+    let initial = authority.verify_ledger().unwrap();
     assert_eq!(initial.head_seq, "1");
-    assert_eq!(initial.freshness, FreshnessVerdict::Unanchored);
+    assert_eq!(
+        initial.freshness,
+        FreshnessVerdict::Anchored {
+            checkpoint_seq: "1".into()
+        }
+    );
     assert_eq!(
         authority.metadata().unwrap().schema_version,
         2,
@@ -178,7 +269,8 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
         CommittedDecisionV2::ApprovalRequired { created: true, .. }
     ));
     let checkpoint = authority.checkpoint("checkpoint_1", 1_700_000_040).unwrap();
-    let anchored = authority.verify_ledger(Some(&checkpoint)).unwrap();
+    authority.admit_checkpoint(checkpoint.clone()).unwrap();
+    let anchored = authority.verify_ledger().unwrap();
     assert_eq!(anchored.head_seq, "12");
     assert_eq!(
         anchored.freshness,
@@ -188,8 +280,8 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
     );
     drop(authority);
 
-    let reopened = open(&path);
-    let verification = reopened.verify_ledger(Some(&checkpoint)).unwrap();
+    let reopened = Authority::open(&path, config(), grant_key(), ledger_key(), checkpoint).unwrap();
+    let verification = reopened.verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "12");
     assert!(reopened.grant("grant_1").unwrap().is_some());
     assert_eq!(
@@ -228,14 +320,19 @@ fn signed_ledger_pages_are_bounded_and_keep_one_snapshot_head() {
         authority.commit_decision(&consume_command(1)).unwrap(),
         CommittedDecisionV2::AllowedByGrant { .. }
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "7");
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "7");
 
-    let first = authority.ledger_page(None, 2, None).unwrap();
+    let first = authority.ledger_page(None, 2).unwrap();
     assert_eq!(first.entries.len(), 2);
     assert_eq!(first.entries[0].entry.seq(), "1");
     assert_eq!(first.entries[1].entry.seq(), "2");
     assert_eq!(first.snapshot_head_seq, "7");
-    assert_eq!(first.freshness, FreshnessVerdict::Unanchored);
+    assert_eq!(
+        first.freshness,
+        FreshnessVerdict::Anchored {
+            checkpoint_seq: "1".into()
+        }
+    );
     let first_cursor = first.next_cursor.unwrap();
     let verified_cursor = first_cursor.verify(&ledger_key().verifying_key()).unwrap();
     assert_eq!(verified_cursor.snapshot_head_seq(), "7");
@@ -243,21 +340,19 @@ fn signed_ledger_pages_are_bounded_and_keep_one_snapshot_head() {
 
     let later = create_second_request(&mut authority);
     assert_ne!(later.request_id(), request.request_id());
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "9");
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "9");
 
-    let second = authority.ledger_page(Some(&first_cursor), 2, None).unwrap();
+    let second = authority.ledger_page(Some(&first_cursor), 2).unwrap();
     assert_eq!(second.snapshot_head_seq, "7");
     assert_eq!(second.entries[0].entry.seq(), "3");
     assert_eq!(second.entries[1].entry.seq(), "4");
     let second_cursor = second.next_cursor.unwrap();
-    let third = authority
-        .ledger_page(Some(&second_cursor), 2, None)
-        .unwrap();
+    let third = authority.ledger_page(Some(&second_cursor), 2).unwrap();
     assert_eq!(third.snapshot_head_seq, "7");
     assert_eq!(third.entries[0].entry.seq(), "5");
     assert_eq!(third.entries[1].entry.seq(), "6");
     let third_cursor = third.next_cursor.unwrap();
-    let fourth = authority.ledger_page(Some(&third_cursor), 2, None).unwrap();
+    let fourth = authority.ledger_page(Some(&third_cursor), 2).unwrap();
     assert_eq!(fourth.snapshot_head_seq, "7");
     assert_eq!(fourth.entries.len(), 1);
     assert_eq!(fourth.entries[0].entry.seq(), "7");
@@ -272,11 +367,11 @@ fn signed_ledger_pages_are_bounded_and_keep_one_snapshot_head() {
     );
 
     assert!(matches!(
-        authority.ledger_page(None, 0, None),
+        authority.ledger_page(None, 0),
         Err(AuthorityError::InvalidInput(_))
     ));
     assert!(matches!(
-        authority.ledger_page(None, MAX_LEDGER_PAGE_ENTRIES + 1, None),
+        authority.ledger_page(None, MAX_LEDGER_PAGE_ENTRIES + 1),
         Err(AuthorityError::InvalidInput(_))
     ));
 
@@ -284,7 +379,7 @@ fn signed_ledger_pages_are_bounded_and_keep_one_snapshot_head() {
         format!("{} ", first_cursor.envelope().jcs()),
         first_cursor.envelope().signature_b64().to_owned(),
     ));
-    assert!(authority.ledger_page(Some(&tampered), 2, None).is_err());
+    assert!(authority.ledger_page(Some(&tampered), 2).is_err());
 }
 
 #[test]
@@ -295,18 +390,11 @@ fn ledger_cursor_issuance_rejects_runtime_clock_regression() {
         timestamp: AtomicI64::new(1_800_000_000),
         next_nonce: AtomicU64::new(1),
     });
-    let mut authority = Authority::open_with_runtime_source(
-        &path,
-        config(),
-        grant_key(),
-        ledger_key(),
-        source.clone(),
-    )
-    .unwrap();
+    let mut authority = open_with_source(&path, config(), source.clone());
     let request = create_request(&mut authority);
     approve(&mut authority, &request);
 
-    let first = authority.ledger_page(None, 1, None).unwrap();
+    let first = authority.ledger_page(None, 1).unwrap();
     let cursor = first.next_cursor.unwrap();
     assert_eq!(
         cursor
@@ -317,7 +405,7 @@ fn ledger_cursor_issuance_rejects_runtime_clock_regression() {
     );
     source.timestamp.store(1_799_999_999, Ordering::SeqCst);
     assert!(matches!(
-        authority.ledger_page(Some(&cursor), 1, None),
+        authority.ledger_page(Some(&cursor), 1),
         Err(AuthorityError::RuntimeSource(message))
             if message.contains("predates signed evidence time")
     ));
@@ -351,7 +439,7 @@ fn runtime_authorization_owns_identity_time_and_the_complete_retry_transaction()
         }
         other => panic!("expected Authority-owned approval request, got {other:?}"),
     };
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "3");
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "3");
 
     let duplicate = authority.commit_decision(&command).unwrap();
     assert!(matches!(
@@ -363,7 +451,7 @@ fn runtime_authorization_owns_identity_time_and_the_complete_retry_transaction()
         } if request.request_id() == request_id
     ));
     assert_eq!(
-        authority.verify_ledger(None).unwrap().head_seq,
+        authority.verify_ledger().unwrap().head_seq,
         "4",
         "deduplicating the request must still record the retried decision"
     );
@@ -382,7 +470,7 @@ fn runtime_authorization_owns_identity_time_and_the_complete_retry_transaction()
         }
         other => panic!("expected exact one-use authorization, got {other:?}"),
     }
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "8");
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "8");
 
     let replacement = authority.commit_decision(&command).unwrap();
     assert!(matches!(
@@ -394,7 +482,7 @@ fn runtime_authorization_owns_identity_time_and_the_complete_retry_transaction()
         } if request.request_id() != request_id
             && request.request_id().starts_with("request_")
     ));
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "10");
     assert_eq!(
         verification
@@ -479,7 +567,7 @@ fn runtime_authorization_never_spends_for_input_or_scope_mismatch() {
             .status(),
         GrantStatusV2::Spent
     );
-    authority.verify_ledger(None).unwrap();
+    authority.verify_ledger().unwrap();
 }
 
 #[test]
@@ -511,12 +599,12 @@ fn runtime_authorization_requires_the_evaluated_generation_and_fails_closed_in_m
     authority
         .set_maintenance(&maintenance_command(true, 7, request.created_at() + 1))
         .unwrap();
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
     assert!(matches!(
         authority.commit_decision(&authorize_command_for(generation("2"))),
         Err(AuthorityError::Maintenance)
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
 }
 
 #[test]
@@ -537,14 +625,14 @@ fn runtime_authorization_fails_closed_on_future_dated_grant_evidence() {
         request.created_at() + 60,
         3,
     );
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
 
     assert!(matches!(
         authority.commit_decision(&command),
         Err(AuthorityError::RuntimeSource(message))
             if message.contains("predates signed evidence time")
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
     assert_eq!(
         authority
             .latest_state("grant_runtime_3")
@@ -579,7 +667,7 @@ fn open_request_dedupe_binds_the_complete_active_generation() {
     assert_ne!(second.request_id(), first.request_id());
     assert_eq!(second.build_identity(), "gommage-next-build");
     assert_eq!(second.generation(), &generation("2"));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "6");
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "6");
 }
 
 #[test]
@@ -614,7 +702,7 @@ fn genesis_generation_and_admin_runtime_transitions_are_signed_state() {
     assert!(!exited.maintenance());
 
     let event_types: Vec<_> = authority
-        .verify_ledger(None)
+        .verify_ledger()
         .unwrap()
         .entries
         .into_iter()

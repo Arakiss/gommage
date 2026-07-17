@@ -8,10 +8,10 @@ fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
     authority
         .activate_generation(&activate_command("2", 2, 1_700_000_025))
         .unwrap();
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
 
     let decisions_before = authority
-        .verify_ledger(None)
+        .verify_ledger()
         .unwrap()
         .entries
         .iter()
@@ -21,7 +21,7 @@ fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
         authority.commit_decision(&consume_command(9)),
         Err(AuthorityError::StaleGeneration { .. })
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
     assert_eq!(
         authority
             .latest_state("grant_1")
@@ -34,7 +34,7 @@ fn stale_generation_creates_no_request_spends_no_grant_and_records_no_allow() {
     );
     assert_eq!(
         authority
-            .verify_ledger(None)
+            .verify_ledger()
             .unwrap()
             .entries
             .iter()
@@ -58,7 +58,7 @@ fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
                 .activate_generation(&activate_command("2", 2, 1_700_000_015))
                 .unwrap();
         }
-        let head_before = authority.verify_ledger(None).unwrap().head_seq;
+        let head_before = authority.verify_ledger().unwrap().head_seq;
 
         let result = authority.approve(&approval_command(&request, 1));
         if blocked_by_maintenance {
@@ -72,7 +72,7 @@ fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
                 }) if evaluated_generation_id == "1" && active_generation_id == "2"
             ));
         }
-        assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+        assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
         assert!(
             authority
                 .resolution(request.request_id())
@@ -129,7 +129,7 @@ fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
             .status(),
         GrantStatusV2::Revoked
     );
-    authority.verify_ledger(None).unwrap();
+    authority.verify_ledger().unwrap();
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn generation_activation_linearizes_with_concurrent_approval() {
     activate_handle.join().unwrap().unwrap();
 
     let authority = open(&path);
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     let generation_seq = verification
         .entries
         .iter()
@@ -209,13 +209,13 @@ fn maintenance_blocks_decisions_without_mutation_until_signed_exit() {
     authority
         .set_maintenance(&maintenance_command(true, 1, 1_700_000_025))
         .unwrap();
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
 
     assert!(matches!(
         authority.commit_decision(&consume_command(9)),
         Err(AuthorityError::Maintenance)
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
     assert_eq!(
         authority
             .latest_state("grant_1")
@@ -266,7 +266,7 @@ fn generation_activation_linearizes_with_concurrent_allow() {
     let activated = activate_handle.join().unwrap().unwrap();
     assert_eq!(activated.active_generation(), &generation("2"));
 
-    let verification = open(&path).verify_ledger(None).unwrap();
+    let verification = open(&path).verify_ledger().unwrap();
     let activation_seq = verification
         .entries
         .iter()
@@ -309,19 +309,16 @@ fn failure_between_spend_and_decision_rolls_back_the_whole_transition() {
     authority
         .set_maintenance(&maintenance_command(false, 92, request.created_at()))
         .unwrap();
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
     drop(authority);
 
-    let mut authority = Authority::open_with_runtime_source(
+    let mut authority = open_with_source(
         &path,
         config(),
-        grant_key(),
-        ledger_key(),
         Arc::new(CollidingDecisionRuntimeSource {
             identifiers: AtomicU64::new(0),
         }),
-    )
-    .unwrap();
+    );
     assert!(matches!(
         authority.commit_decision(&authorize_command()),
         Err(AuthorityError::Sqlite(_))
@@ -329,7 +326,7 @@ fn failure_between_spend_and_decision_rolls_back_the_whole_transition() {
     drop(authority);
 
     let authority = open(&path);
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
     let state = authority
         .latest_state("grant_1")
         .unwrap()
@@ -389,14 +386,14 @@ fn exact_binding_requires_the_complete_tool_input_without_spending_on_mismatch()
         authority.commit_decision(&wrong_scope).unwrap(),
         CommittedDecisionV2::ApprovalRequired { created: true, .. }
     ));
-    let head_before_allow = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before_allow = authority.verify_ledger().unwrap().head_seq;
     assert!(matches!(
         authority.commit_decision(&consume_command(99)).unwrap(),
         CommittedDecisionV2::AllowedByGrant { .. }
     ));
     assert_eq!(
         authority
-            .verify_ledger(None)
+            .verify_ledger()
             .unwrap()
             .head_seq
             .parse::<usize>()

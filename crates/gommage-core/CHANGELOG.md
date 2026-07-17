@@ -3,6 +3,23 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [Unreleased]
+
+### Changed
+
+* Authority v2 database creation now uses an exclusive bootstrap operation
+  that returns a signed genesis checkpoint without returning a usable
+  Authority. Runtime open, verification, pagination, reads, and mutations
+  require the retained external checkpoint. Admitting a newer checkpoint is
+  monotonic and requires it to commit the exact verified database head. The
+  retained checkpoint detects rollback only through its sequence; a later
+  uncheckpointed suffix requires another externally retained checkpoint.
+* **Breaking pre-1.0 migration:** replace initialization through `open` with
+  `bootstrap -> retain the signed checkpoint outside the database -> open with
+  that checkpoint`. The same checkpoint argument is mandatory for
+  `open_with_runtime_source`; `verify_ledger` and `ledger_page` now use the
+  retained checkpoint instead of accepting an optional per-call anchor.
+
 ## [0.17.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.16.1-alpha.1...gommage-core-v0.17.0-alpha.1) (2026-07-13)
 
 

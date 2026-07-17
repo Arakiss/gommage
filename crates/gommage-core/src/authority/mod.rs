@@ -20,10 +20,11 @@ use crate::{
     picto::PictoBinding,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
+    fs::OpenOptions,
     path::Path,
     sync::Arc,
     time::Duration,
@@ -40,6 +41,7 @@ const GENERATION_DOMAIN: &str = "gommage.authority.generation";
 const LEDGER_DOMAIN: &str = "gommage.ledger.entry";
 const CHECKPOINT_DOMAIN: &str = "gommage.ledger.checkpoint";
 const CURSOR_DOMAIN: &str = "gommage.ledger.cursor";
+const GENESIS_CHECKPOINT_ID: &str = "genesis";
 const FORMAT_VERSION: u8 = 2;
 const MAX_INTEGRATION_BYTES: usize = 128;
 const MAX_TOOL_BYTES: usize = 256;
@@ -168,25 +170,86 @@ pub struct Authority {
     ledger_key: SigningKey,
     grant_key_id: String,
     ledger_key_id: String,
+    retained_checkpoint: SignedLedgerCheckpointV2,
     runtime_source: Arc<dyn AuthorityRuntimeSource>,
 }
 
 impl Authority {
-    /// Open or initialize a file-backed Authority v2 database.
+    /// Create a new Authority v2 database and return its signed genesis checkpoint.
     ///
-    /// Keys and paths are supplied by the managed control plane; the core never
-    /// reads shared legacy key files or infers filesystem ownership.
+    /// Bootstrap never returns a usable Authority. The caller must durably retain
+    /// the returned checkpoint outside the database before calling [`Authority::open`].
+    /// Existing databases are rejected so bootstrap cannot mint a replacement
+    /// trust root for rolled-back state.
+    pub fn bootstrap(
+        path: &Path,
+        config: &AuthorityConfig,
+        grant_key: &SigningKey,
+        ledger_key: &SigningKey,
+    ) -> Result<SignedLedgerCheckpointV2, AuthorityError> {
+        validate_authority_inputs(path, config, grant_key, ledger_key)?;
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|error| {
+                AuthorityError::InvalidInput(format!(
+                    "bootstrap requires a new authority database path: {error}"
+                ))
+            })?;
+        let grant_key_id = key_id(KeyPurpose::Grant, &grant_key.verifying_key());
+        let ledger_key_id = key_id(KeyPurpose::Ledger, &ledger_key.verifying_key());
+        // Failure after exclusive creation intentionally leaves the file in
+        // place. Bootstrap never removes a path because it cannot safely prove
+        // pathname identity after handing it to SQLite.
+        let mut conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        configure_connection(&conn)?;
+        let current_application_id: i32 =
+            conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
+        let current_user_version: i32 =
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if current_application_id != 0 || current_user_version != 0 {
+            return Err(AuthorityError::Schema(
+                "bootstrap path changed before schema initialization".into(),
+            ));
+        }
+        initialize_schema(&mut conn, config, &grant_key_id, &ledger_key_id, ledger_key)?;
+        let verification = verify_all(
+            &conn,
+            config,
+            &grant_key.verifying_key(),
+            &ledger_key.verifying_key(),
+            None,
+        )?;
+        sign_checkpoint(
+            config,
+            &ledger_key_id,
+            ledger_key,
+            GENESIS_CHECKPOINT_ID,
+            config.genesis_at,
+            verification.head_seq,
+            verification.head_hash,
+        )
+    }
+
+    /// Open an initialized file-backed Authority v2 database under an external checkpoint.
+    ///
+    /// Keys, paths, and the externally retained checkpoint are supplied by the
+    /// managed control plane; the core never infers filesystem ownership or
+    /// permits an unanchored runtime Authority.
     pub fn open(
         path: &Path,
         config: AuthorityConfig,
         grant_key: SigningKey,
         ledger_key: SigningKey,
+        retained_checkpoint: SignedLedgerCheckpointV2,
     ) -> Result<Self, AuthorityError> {
         Self::open_with_runtime_source(
             path,
             config,
             grant_key,
             ledger_key,
+            retained_checkpoint,
             Arc::new(SystemAuthorityRuntimeSource),
         )
     }
@@ -200,39 +263,19 @@ impl Authority {
         config: AuthorityConfig,
         grant_key: SigningKey,
         ledger_key: SigningKey,
+        retained_checkpoint: SignedLedgerCheckpointV2,
         runtime_source: Arc<dyn AuthorityRuntimeSource>,
     ) -> Result<Self, AuthorityError> {
-        config.validate()?;
-        let path_text = path.to_string_lossy();
-        if path.as_os_str().is_empty() || path_text == ":memory:" || path_text.starts_with("file:")
-        {
-            return Err(AuthorityError::InvalidInput(
-                "reference authority requires a regular file path".into(),
-            ));
-        }
-        if grant_key.verifying_key() == ledger_key.verifying_key() {
-            return Err(AuthorityError::InvalidInput(
-                "grant and ledger keys must be distinct".into(),
-            ));
-        }
+        validate_authority_inputs(path, &config, &grant_key, &ledger_key)?;
         let grant_key_id = key_id(KeyPurpose::Grant, &grant_key.verifying_key());
         let ledger_key_id = key_id(KeyPurpose::Ledger, &ledger_key.verifying_key());
-        let mut conn = Connection::open(path)?;
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         configure_connection(&conn)?;
         let current_application_id: i32 =
             conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
         let current_user_version: i32 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current_application_id == 0 && current_user_version == 0 {
-            initialize_schema(
-                &mut conn,
-                &config,
-                &grant_key_id,
-                &ledger_key_id,
-                &ledger_key,
-            )?;
-        } else if current_application_id != APPLICATION_ID || current_user_version != SCHEMA_VERSION
-        {
+        if current_application_id != APPLICATION_ID || current_user_version != SCHEMA_VERSION {
             return Err(AuthorityError::Schema(format!(
                 "expected application_id {APPLICATION_ID} and user_version {SCHEMA_VERSION}, got {current_application_id} and {current_user_version}"
             )));
@@ -244,10 +287,11 @@ impl Authority {
             ledger_key,
             grant_key_id,
             ledger_key_id,
+            retained_checkpoint,
             runtime_source,
         };
         authority.verify_metadata()?;
-        authority.verify_ledger(None)?;
+        authority.verify_ledger()?;
         Ok(authority)
     }
 
@@ -259,7 +303,7 @@ impl Authority {
             &self.config,
             &self.grant_key.verifying_key(),
             &self.ledger_key.verifying_key(),
-            None,
+            Some(&self.retained_checkpoint),
         )?;
         let metadata = read_metadata(&tx)?;
         tx.commit()?;
@@ -282,4 +326,25 @@ impl Authority {
         }
         Ok(())
     }
+}
+
+fn validate_authority_inputs(
+    path: &Path,
+    config: &AuthorityConfig,
+    grant_key: &SigningKey,
+    ledger_key: &SigningKey,
+) -> Result<(), AuthorityError> {
+    config.validate()?;
+    let path_text = path.to_string_lossy();
+    if path.as_os_str().is_empty() || path_text == ":memory:" || path_text.starts_with("file:") {
+        return Err(AuthorityError::InvalidInput(
+            "reference authority requires a regular file path".into(),
+        ));
+    }
+    if grant_key.verifying_key() == ledger_key.verifying_key() {
+        return Err(AuthorityError::InvalidInput(
+            "grant and ledger keys must be distinct".into(),
+        ));
+    }
+    Ok(())
 }

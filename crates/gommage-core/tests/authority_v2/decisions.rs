@@ -67,14 +67,11 @@ fn policy_config(generation: AuthorityGenerationV2) -> AuthorityConfig {
 }
 
 fn open_policy_authority(path: &Path, generation: AuthorityGenerationV2) -> Authority {
-    Authority::open_with_runtime_source(
+    open_with_source(
         path,
         policy_config(generation),
-        grant_key(),
-        ledger_key(),
         Arc::new(DefaultTestRuntimeSource),
     )
-    .unwrap()
 }
 
 fn evaluated_command(
@@ -128,7 +125,7 @@ fn every_policy_outcome_commits_one_normalized_decision_record() {
         CommittedDecisionV2::ApprovalRequired { created: true, .. }
     ));
 
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "7");
     let records: Vec<_> = verification
         .entries
@@ -168,7 +165,7 @@ fn every_policy_outcome_commits_one_normalized_decision_record() {
     drop(authority);
 
     let reopened = open_policy_authority(&path, generation);
-    assert_eq!(reopened.verify_ledger(None).unwrap().head_seq, "7");
+    assert_eq!(reopened.verify_ledger().unwrap().head_seq, "7");
 }
 
 #[test]
@@ -188,7 +185,7 @@ fn every_stale_policy_outcome_fails_without_any_transition() {
             activated_at: 1_700_000_020,
         })
         .unwrap();
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
 
     for (capability, command) in [
         ("test.allow", "true"),
@@ -206,7 +203,7 @@ fn every_stale_policy_outcome_fails_without_any_transition() {
             }) if evaluated_generation_id == "1" && active_generation_id == "2"
         ));
     }
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
     let raw = Connection::open(&path).unwrap();
     let requests: i64 = raw
         .query_row("SELECT count(*) FROM approval_requests", [], |row| {
@@ -247,7 +244,7 @@ fn compiled_hard_stop_never_selects_or_spends_matching_grants() {
         .verify(&grant_key().verifying_key())
         .unwrap();
     assert_eq!(state.status(), GrantStatusV2::Active);
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     assert_eq!(
         verification
             .entries
@@ -306,7 +303,7 @@ fn scope_only_grant_authorizes_a_different_observed_input() {
         CommittedDecisionV2::AllowedByGrant { .. }
     ));
 
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     let record = verification
         .entries
         .iter()
@@ -396,12 +393,12 @@ fn mismatched_policy_reason_never_commits_or_spends() {
         &["test.ask"],
     );
 
-    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before = authority.verify_ledger().unwrap().head_seq;
     assert!(matches!(
         authority.commit_decision(&mismatch),
         Err(AuthorityError::InvalidInput(_))
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
 
     approve_request_at(
         &mut authority,
@@ -409,13 +406,13 @@ fn mismatched_policy_reason_never_commits_or_spends() {
         request.created_at(),
         43,
     );
-    let head_before_spend = authority.verify_ledger(None).unwrap().head_seq;
+    let head_before_spend = authority.verify_ledger().unwrap().head_seq;
     assert!(matches!(
         authority.commit_decision(&mismatch),
         Err(AuthorityError::InvalidInput(_))
     ));
     assert_eq!(
-        authority.verify_ledger(None).unwrap().head_seq,
+        authority.verify_ledger().unwrap().head_seq,
         head_before_spend
     );
     let state = authority
@@ -427,7 +424,7 @@ fn mismatched_policy_reason_never_commits_or_spends() {
     assert_eq!(state.status(), GrantStatusV2::Active);
     drop(authority);
     open_policy_authority(&path, generation)
-        .verify_ledger(None)
+        .verify_ledger()
         .unwrap();
 }
 
@@ -451,7 +448,7 @@ fn zero_capability_deny_commits_and_reopens() {
         authority.commit_decision(&command).unwrap(),
         CommittedDecisionV2::Denied { .. }
     ));
-    let verification = authority.verify_ledger(None).unwrap();
+    let verification = authority.verify_ledger().unwrap();
     let record = match verification.entries[1].entry.payload() {
         LedgerPayloadV2::DecisionRecorded { record } => record,
         other => panic!("expected recorded deny, got {other:?}"),
@@ -460,7 +457,7 @@ fn zero_capability_deny_commits_and_reopens() {
     drop(authority);
     assert_eq!(
         open_policy_authority(&path, generation)
-            .verify_ledger(None)
+            .verify_ledger()
             .unwrap()
             .head_seq,
         "2"
@@ -512,7 +509,7 @@ fn many_large_picto_scopes_reduce_to_a_bounded_recordable_denial() {
     drop(authority);
     assert_eq!(
         open_policy_authority(&path, generation)
-            .verify_ledger(None)
+            .verify_ledger()
             .unwrap()
             .head_seq,
         "2"
@@ -572,7 +569,7 @@ fn oversized_canonical_decision_is_rejected_before_mutation() {
         Err(AuthorityError::InvalidInput(message))
             if message.contains("canonical decision evidence exceeds")
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "1");
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "1");
 }
 
 #[test]
@@ -580,14 +577,7 @@ fn oversized_tool_call_is_rejected_before_time_or_transaction_access() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("authority.sqlite3");
     let generation = generation("1");
-    let mut authority = Authority::open_with_runtime_source(
-        &path,
-        config(),
-        grant_key(),
-        ledger_key(),
-        Arc::new(RejectRuntimeSource),
-    )
-    .unwrap();
+    let mut authority = open_with_source(&path, config(), Arc::new(RejectRuntimeSource));
     let command = CommitDecisionCommandV2 {
         evaluated_generation: generation.clone(),
         integration: "codex".into(),
@@ -603,7 +593,7 @@ fn oversized_tool_call_is_rejected_before_time_or_transaction_access() {
         Err(AuthorityError::InvalidInput(message))
             if message.contains("canonical tool call exceeds")
     ));
-    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "1");
+    assert_eq!(authority.verify_ledger().unwrap().head_seq, "1");
 }
 
 #[test]
@@ -611,14 +601,7 @@ fn oversized_hidden_decision_fields_are_rejected_before_runtime_access() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("authority.sqlite3");
     let generation = generation("1");
-    let mut authority = Authority::open_with_runtime_source(
-        &path,
-        config(),
-        grant_key(),
-        ledger_key(),
-        Arc::new(RejectRuntimeSource),
-    )
-    .unwrap();
+    let mut authority = open_with_source(&path, config(), Arc::new(RejectRuntimeSource));
     let base = CommitDecisionCommandV2 {
         evaluated_generation: generation.clone(),
         integration: "codex".into(),
@@ -657,7 +640,7 @@ fn oversized_hidden_decision_fields_are_rejected_before_runtime_access() {
         let error = authority.commit_decision(&command).unwrap_err();
         assert!(error.to_string().contains("exceeds"), "{error}");
         assert!(!matches!(error, AuthorityError::RuntimeSource(_)));
-        assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "1");
+        assert_eq!(authority.verify_ledger().unwrap().head_seq, "1");
     }
 }
 
@@ -700,9 +683,7 @@ fn policy_allow_linearizes_before_or_fails_after_generation_activation() {
     };
     let commit = commit_handle.join().unwrap();
     activation_handle.join().unwrap().unwrap();
-    let verification = open_policy_authority(&path, first)
-        .verify_ledger(None)
-        .unwrap();
+    let verification = open_policy_authority(&path, first).verify_ledger().unwrap();
     let activation_index = verification
         .entries
         .iter()
@@ -727,17 +708,14 @@ fn decision_record_wire_digests_are_stable_for_every_outcome() {
     let path = directory.path().join("authority.sqlite3");
     let policy = decision_policy();
     let generation = policy_generation("1", &policy.version_hash);
-    let mut authority = Authority::open_with_runtime_source(
+    let mut authority = open_with_source(
         &path,
         policy_config(generation.clone()),
-        grant_key(),
-        ledger_key(),
         Arc::new(FixedRuntimeSource {
             timestamp: AtomicI64::new(1_700_000_030),
             next_nonce: AtomicU64::new(1),
         }),
-    )
-    .unwrap();
+    );
     authority
         .commit_decision(&evaluated_command(
             &generation,
@@ -768,7 +746,7 @@ fn decision_record_wire_digests_are_stable_for_every_outcome() {
     authority.commit_decision(&ask).unwrap();
 
     let digests: Vec<_> = authority
-        .verify_ledger(None)
+        .verify_ledger()
         .unwrap()
         .entries
         .into_iter()

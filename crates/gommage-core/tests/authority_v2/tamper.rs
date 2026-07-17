@@ -126,7 +126,7 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
         }
         drop(raw);
         assert!(
-            Authority::open(&path, config(), grant_key(), ledger_key()).is_err(),
+            try_open(&path).is_err(),
             "offline {mutation} tampering must fail verification"
         );
     }
@@ -156,7 +156,7 @@ fn append_only_triggers_and_full_verification_reject_row_tampering() {
     )
     .unwrap();
     drop(raw);
-    assert!(Authority::open(&resolution_path, config(), grant_key(), ledger_key()).is_err());
+    assert!(try_open(&resolution_path).is_err());
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn full_verification_rejects_signed_resolution_and_activation_build_rebinding() 
             4
         };
         resign_ledger_suffix_with_build(&path, first_rebound_seq, "forged-signed-build");
-        match Authority::open(&path, config(), grant_key(), ledger_key()) {
+        match try_open(&path) {
             Err(AuthorityError::Corrupt(_)) => {}
             Err(other) => panic!(
                 "signed {mutation} rebinding reached the wrong verification layer: {other:?}"
@@ -246,7 +246,7 @@ fn full_verification_rejects_generation_and_runtime_state_tampering() {
         }
         drop(raw);
         assert!(
-            Authority::open(&path, config(), grant_key(), ledger_key()).is_err(),
+            try_open(&path).is_err(),
             "offline {mutation} tampering must fail runtime reconstruction"
         );
     }
@@ -287,7 +287,7 @@ fn resigned_decision_record_tampering_fails_closed() {
             }
         });
         assert!(
-            Authority::open(&path, config(), grant_key(), ledger_key()).is_err(),
+            try_open(&path).is_err(),
             "re-signed decision {mutation} tampering must fail"
         );
     }
@@ -305,7 +305,7 @@ fn resigned_request_and_spent_state_links_fail_closed() {
             entry["payload"]["record"]["outcome"]["request_hash"] = json!(hash('9'));
         }
     });
-    assert!(Authority::open(&request_path, config(), grant_key(), ledger_key()).is_err());
+    assert!(try_open(&request_path).is_err());
 
     let state_directory = tempfile::tempdir().unwrap();
     let state_path = state_directory.path().join("state-hash.sqlite3");
@@ -330,50 +330,100 @@ fn resigned_request_and_spent_state_links_fail_closed() {
             entry["payload"]["record"]["outcome"]["state_hash"] = json!(hash('8'));
         }
     });
-    assert!(Authority::open(&state_path, config(), grant_key(), ledger_key()).is_err());
+    assert!(try_open(&state_path).is_err());
 }
 
 #[test]
 fn trusted_checkpoint_detects_whole_store_rollback() {
     let older_directory = tempfile::tempdir().unwrap();
     let older_path = older_directory.path().join("older.sqlite3");
-    let older = open(&older_path);
-    assert_eq!(older.verify_ledger(None).unwrap().head_seq, "1");
+    let mut older = open(&older_path);
+    assert_eq!(older.verify_ledger().unwrap().head_seq, "1");
 
     let newer_directory = tempfile::tempdir().unwrap();
     let newer_path = newer_directory.path().join("newer.sqlite3");
     let mut newer = open(&newer_path);
     create_request(&mut newer);
     let checkpoint = newer.checkpoint("checkpoint_newer", 1_700_000_020).unwrap();
-    assert_eq!(
-        newer.verify_ledger(Some(&checkpoint)).unwrap().head_seq,
-        "3"
-    );
+    newer.admit_checkpoint(checkpoint.clone()).unwrap();
+    assert_eq!(newer.verify_ledger().unwrap().head_seq, "3");
 
     assert!(matches!(
-        older.verify_ledger(Some(&checkpoint)),
+        older.admit_checkpoint(checkpoint),
         Err(AuthorityError::RollbackDetected(_))
     ));
     assert_eq!(
-        older.verify_ledger(None).unwrap().freshness,
-        FreshnessVerdict::Unanchored
+        older.verify_ledger().unwrap().freshness,
+        FreshnessVerdict::Anchored {
+            checkpoint_seq: "1".into()
+        }
     );
+}
+
+#[test]
+fn admitted_checkpoint_blocks_snapshot_rollback_on_live_commit_and_reopen() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    let snapshot = directory.path().join("approved.snapshot.sqlite3");
+    let source = Arc::new(FixedRuntimeSource {
+        timestamp: AtomicI64::new(1_700_000_030),
+        next_nonce: AtomicU64::new(1),
+    });
+    let mut authority = open_with_source(&path, config(), source.clone());
+    let request = create_request(&mut authority);
+    approve(&mut authority, &request);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .unwrap();
+    std::fs::copy(&path, &snapshot).unwrap();
+
+    assert!(matches!(
+        authority.commit_decision(&consume_command(1)).unwrap(),
+        CommittedDecisionV2::AllowedByGrant { .. }
+    ));
+    let checkpoint = authority
+        .checkpoint("checkpoint_after_spend", 1_700_000_040)
+        .unwrap();
+    authority.admit_checkpoint(checkpoint.clone()).unwrap();
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .unwrap();
+    let nonce_before_rollback = source.next_nonce.load(Ordering::SeqCst);
+
+    std::fs::copy(&snapshot, &path).unwrap();
+    assert!(matches!(
+        authority.request(request.request_id()),
+        Err(AuthorityError::RollbackDetected(_))
+    ));
+    assert!(matches!(
+        authority.commit_decision(&consume_command(1)),
+        Err(AuthorityError::RollbackDetected(_))
+    ));
+    assert_eq!(
+        source.next_nonce.load(Ordering::SeqCst),
+        nonce_before_rollback
+    );
+    drop(authority);
+
+    assert!(matches!(
+        Authority::open(&path, config(), grant_key(), ledger_key(), checkpoint),
+        Err(AuthorityError::RollbackDetected(_))
+    ));
 }
 
 #[test]
 fn fixed_commands_produce_byte_identical_signed_artifacts_and_order() {
     fn build(path: &Path) -> Vec<(String, String, String)> {
-        let mut authority = Authority::open_with_runtime_source(
+        let mut authority = open_with_source(
             path,
             config(),
-            grant_key(),
-            ledger_key(),
             Arc::new(FixedRuntimeSource {
                 timestamp: AtomicI64::new(1_700_000_030),
                 next_nonce: AtomicU64::new(1),
             }),
-        )
-        .unwrap();
+        );
         let request = create_request(&mut authority);
         approve(&mut authority, &request);
         authority.commit_decision(&consume_command(1)).unwrap();

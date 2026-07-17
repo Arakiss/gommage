@@ -324,9 +324,16 @@ pub struct VerifiedLedgerEntryV2 {
 /// Freshness statement produced by local-chain verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FreshnessVerdict {
-    /// The local chain is internally valid but has no external rollback anchor.
+    /// A bootstrap/internal verifier has no external rollback anchor.
+    ///
+    /// Public runtime Authority operations never return this verdict because
+    /// they cannot open without a retained checkpoint.
     Unanchored,
     /// The chain contains and extends the supplied trusted checkpoint.
+    ///
+    /// This proves the prefix through `checkpoint_seq`. A rollback confined to
+    /// later entries cannot be detected until a later checkpoint is retained
+    /// outside the authority database and admitted by the runtime.
     Anchored {
         /// Trusted external checkpoint sequence.
         checkpoint_seq: String,
@@ -342,7 +349,7 @@ pub struct LedgerVerification {
     pub head_seq: String,
     /// Verified signature-inclusive database head hash.
     pub head_hash: String,
-    /// Explicit local-only or externally anchored freshness result.
+    /// Explicit bootstrap-only or externally anchored prefix result.
     pub freshness: FreshnessVerdict,
 }
 
