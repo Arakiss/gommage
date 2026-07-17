@@ -33,11 +33,12 @@ pub use approval_webhook::{
 pub use authority::{
     ActivateGenerationCommand, ApprovalRequestV2, ApprovalResolutionKindV2, ApprovalResolutionV2,
     ApproveCommand, ApproveResult, Authority, AuthorityConfig, AuthorityError,
-    AuthorityGenerationV2, AuthorityMetadata, AuthorityRuntimeStateV2, AuthorizationContextV2,
-    ConsumeCommand, ConsumeResult, CreateRequestCommand, CreateRequestResult, CutoverStateV2,
-    DenyCommand, DenyResult, FreshnessVerdict, GrantNotUsableReason, LedgerCheckpointV2,
-    LedgerEntryV2, LedgerPayloadV2, LedgerVerification, RevokeCommand, RevokeResult,
-    SetMaintenanceCommand, SignedLedgerCheckpointV2, VerifiedLedgerEntryV2,
+    AuthorityGenerationV2, AuthorityMetadata, AuthorityRuntimeSource, AuthorityRuntimeStateV2,
+    AuthorizationContextV2, AuthorizeApprovalCommandV2, AuthorizeApprovalResultV2, ConsumeCommand,
+    ConsumeResult, CreateRequestCommand, CreateRequestResult, CutoverStateV2, DenyCommand,
+    DenyResult, FreshnessVerdict, GrantNotUsableReason, LedgerCheckpointV2, LedgerEntryV2,
+    LedgerPayloadV2, LedgerVerification, RevokeCommand, RevokeResult, SetMaintenanceCommand,
+    SignedLedgerCheckpointV2, SystemAuthorityRuntimeSource, VerifiedLedgerEntryV2,
 };
 pub use capability::Capability;
 pub use crypto_envelope::{
