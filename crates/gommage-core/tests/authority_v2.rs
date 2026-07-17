@@ -122,15 +122,50 @@ fn approve(authority: &mut Authority) -> (SignedGrantClaimV2, SignedGrantStateV2
     }
 }
 
-fn consume_command(index: usize, grant_id: &str) -> ConsumeCommand {
+fn consume_command(index: usize) -> ConsumeCommand {
     ConsumeCommand {
-        grant_id: grant_id.into(),
         required_scope: "git.push:refs/heads/main".into(),
         context: authorization_context(),
         state_event_id: format!("event_spend_{index}"),
         decision_event_id: format!("event_allow_{index}"),
         consumed_at: 1_700_000_030,
     }
+}
+
+fn create_second_request(authority: &mut Authority, created_at: i64) {
+    let mut command = request_command("request_2", "event_request_2");
+    command.created_at = created_at;
+    assert!(matches!(
+        authority.create_or_get_request(&command).unwrap(),
+        CreateRequestResult::Created(request) if request.request_id() == "request_2"
+    ));
+}
+
+fn approve_second_request(authority: &mut Authority, resolved_at: i64) {
+    let mut command = approve_command(2);
+    command.request_id = "request_2".into();
+    command.resolved_at = resolved_at;
+    assert!(matches!(
+        authority.approve(&command).unwrap(),
+        ApproveResult::Approved { .. }
+    ));
+}
+
+#[test]
+fn consume_command_api_has_no_client_selected_grant() {
+    let ConsumeCommand {
+        required_scope,
+        context,
+        state_event_id,
+        decision_event_id,
+        consumed_at,
+    } = consume_command(0);
+
+    assert_eq!(required_scope, "git.push:refs/heads/main");
+    assert_eq!(context, authorization_context());
+    assert_eq!(state_event_id, "event_spend_0");
+    assert_eq!(decision_event_id, "event_allow_0");
+    assert_eq!(consumed_at, 1_700_000_030);
 }
 
 #[test]
@@ -175,7 +210,7 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
             .status(),
         GrantStatusV2::Active
     );
-    let mut mismatch = consume_command(0, "grant_1");
+    let mut mismatch = consume_command(0);
     mismatch.context = context_with(
         "gommage-test-build",
         "codex",
@@ -186,17 +221,17 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
     );
     assert_eq!(
         authority.consume_and_record_allow(&mismatch).unwrap(),
-        ConsumeResult::NotUsable(GrantNotUsableReason::InputMismatch)
+        ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
     );
     let consumed = authority
-        .consume_and_record_allow(&consume_command(1, "grant_1"))
+        .consume_and_record_allow(&consume_command(1))
         .unwrap();
     assert!(matches!(consumed, ConsumeResult::Consumed { .. }));
     assert_eq!(
         authority
-            .consume_and_record_allow(&consume_command(2, "grant_1"))
+            .consume_and_record_allow(&consume_command(2))
             .unwrap(),
-        ConsumeResult::NotUsable(GrantNotUsableReason::Terminal)
+        ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
     );
     let checkpoint = authority.checkpoint("checkpoint_1", 1_700_000_040).unwrap();
     let anchored = authority.verify_ledger(Some(&checkpoint)).unwrap();
@@ -270,80 +305,62 @@ fn consumption_requires_the_complete_approved_context_without_spending_on_mismat
     approve(&mut authority);
 
     let mismatches = [
-        (
-            context_with(
-                "gommage-next-build",
-                "codex",
-                "Bash",
-                '1',
-                '2',
-                &["git.push:refs/heads/main", "proc.exec:git"],
-            ),
-            GrantNotUsableReason::BuildIdentityMismatch,
+        context_with(
+            "gommage-next-build",
+            "codex",
+            "Bash",
+            '1',
+            '2',
+            &["git.push:refs/heads/main", "proc.exec:git"],
         ),
-        (
-            context_with(
-                "gommage-test-build",
-                "claude-code",
-                "Bash",
-                '1',
-                '2',
-                &["git.push:refs/heads/main", "proc.exec:git"],
-            ),
-            GrantNotUsableReason::IntegrationMismatch,
+        context_with(
+            "gommage-test-build",
+            "claude-code",
+            "Bash",
+            '1',
+            '2',
+            &["git.push:refs/heads/main", "proc.exec:git"],
         ),
-        (
-            context_with(
-                "gommage-test-build",
-                "codex",
-                "Shell",
-                '1',
-                '2',
-                &["git.push:refs/heads/main", "proc.exec:git"],
-            ),
-            GrantNotUsableReason::ToolMismatch,
+        context_with(
+            "gommage-test-build",
+            "codex",
+            "Shell",
+            '1',
+            '2',
+            &["git.push:refs/heads/main", "proc.exec:git"],
         ),
-        (
-            context_with(
-                "gommage-test-build",
-                "codex",
-                "Bash",
-                '9',
-                '2',
-                &["git.push:refs/heads/main", "proc.exec:git"],
-            ),
-            GrantNotUsableReason::InputMismatch,
+        context_with(
+            "gommage-test-build",
+            "codex",
+            "Bash",
+            '9',
+            '2',
+            &["git.push:refs/heads/main", "proc.exec:git"],
         ),
-        (
-            context_with(
-                "gommage-test-build",
-                "codex",
-                "Bash",
-                '1',
-                '9',
-                &["git.push:refs/heads/main", "proc.exec:git"],
-            ),
-            GrantNotUsableReason::PolicyMismatch,
+        context_with(
+            "gommage-test-build",
+            "codex",
+            "Bash",
+            '1',
+            '9',
+            &["git.push:refs/heads/main", "proc.exec:git"],
         ),
-        (
-            context_with(
-                "gommage-test-build",
-                "codex",
-                "Bash",
-                '1',
-                '2',
-                &["git.push:refs/heads/main"],
-            ),
-            GrantNotUsableReason::CapabilityMismatch,
+        context_with(
+            "gommage-test-build",
+            "codex",
+            "Bash",
+            '1',
+            '2',
+            &["git.push:refs/heads/main"],
         ),
     ];
 
-    for (index, (context, expected)) in mismatches.into_iter().enumerate() {
-        let mut command = consume_command(index + 10, "grant_1");
+    for (index, context) in mismatches.into_iter().enumerate() {
+        let mut command = consume_command(index + 10);
         command.context = context;
         assert_eq!(
             authority.consume_and_record_allow(&command).unwrap(),
-            ConsumeResult::NotUsable(expected)
+            ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
         );
         let latest = authority
             .latest_state("grant_1")
@@ -353,14 +370,94 @@ fn consumption_requires_the_complete_approved_context_without_spending_on_mismat
             .unwrap();
         assert_eq!(latest.status(), GrantStatusV2::Active);
     }
+    let mut wrong_scope = consume_command(20);
+    wrong_scope.required_scope = "git.push:refs/heads/release".into();
+    assert_eq!(
+        authority.consume_and_record_allow(&wrong_scope).unwrap(),
+        ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
+    );
     assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "4");
     assert!(matches!(
         authority
-            .consume_and_record_allow(&consume_command(99, "grant_1"))
+            .consume_and_record_allow(&consume_command(99))
             .unwrap(),
         ConsumeResult::Consumed { .. }
     ));
     assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "6");
+}
+
+#[test]
+fn sequential_grants_select_the_only_currently_usable_exact_match() {
+    let (_directory, _path, mut authority) = fixture();
+    create_request(&mut authority);
+    approve(&mut authority);
+    assert!(matches!(
+        authority
+            .consume_and_record_allow(&consume_command(1))
+            .unwrap(),
+        ConsumeResult::Consumed { .. }
+    ));
+
+    create_second_request(&mut authority, 1_700_000_040);
+    approve_second_request(&mut authority, 1_700_000_050);
+    let mut command = consume_command(2);
+    command.consumed_at = 1_700_000_060;
+    let state = match authority.consume_and_record_allow(&command).unwrap() {
+        ConsumeResult::Consumed { state, .. } => state,
+        other => panic!("expected the second exact grant to be consumed, got {other:?}"),
+    };
+    assert_eq!(
+        state
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .grant_id(),
+        "grant_2"
+    );
+    assert_eq!(
+        authority
+            .latest_state("grant_1")
+            .unwrap()
+            .unwrap()
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .status(),
+        GrantStatusV2::Spent
+    );
+}
+
+#[test]
+fn duplicate_usable_exact_grants_fail_closed_without_spending_either() {
+    let (_directory, _path, mut authority) = fixture();
+    create_request(&mut authority);
+    approve(&mut authority);
+    create_second_request(&mut authority, 1_700_000_021);
+    approve_second_request(&mut authority, 1_700_000_022);
+
+    assert!(matches!(
+        authority.consume_and_record_allow(&consume_command(1)),
+        Err(AuthorityError::Corrupt(message))
+            if message.contains("multiple usable grants match")
+    ));
+    for grant_id in ["grant_1", "grant_2"] {
+        assert_eq!(
+            authority
+                .latest_state(grant_id)
+                .unwrap()
+                .unwrap()
+                .verify(&grant_key().verifying_key())
+                .unwrap()
+                .status(),
+            GrantStatusV2::Active
+        );
+    }
+    let allow_events = authority
+        .verify_ledger(None)
+        .unwrap()
+        .entries
+        .into_iter()
+        .filter(|entry| entry.entry.event_type() == "decision_allow")
+        .count();
+    assert_eq!(allow_events, 0);
 }
 
 #[test]
@@ -472,7 +569,7 @@ fn one_hundred_concurrent_consumers_yield_one_allow() {
             thread::spawn(move || {
                 let mut authority = open(&path);
                 barrier.wait();
-                authority.consume_and_record_allow(&consume_command(index, "grant_1"))
+                authority.consume_and_record_allow(&consume_command(index))
             })
         })
         .collect();
@@ -493,7 +590,7 @@ fn one_hundred_concurrent_consumers_yield_one_allow() {
             .filter(|result| {
                 matches!(
                     result,
-                    ConsumeResult::NotUsable(GrantNotUsableReason::Terminal)
+                    ConsumeResult::NotUsable(GrantNotUsableReason::Missing)
                 )
             })
             .count(),
@@ -565,7 +662,7 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
             let mut authority = open(&path);
             barrier.wait();
             authority
-                .consume_and_record_allow(&consume_command(10, "grant_1"))
+                .consume_and_record_allow(&consume_command(10))
                 .unwrap()
         })
     };
@@ -790,7 +887,7 @@ fn fixed_commands_produce_byte_identical_signed_artifacts_and_order() {
         create_request(&mut authority);
         approve(&mut authority);
         authority
-            .consume_and_record_allow(&consume_command(1, "grant_1"))
+            .consume_and_record_allow(&consume_command(1))
             .unwrap();
         drop(authority);
         let raw = Connection::open(path).unwrap();
