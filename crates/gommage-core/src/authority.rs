@@ -1,9 +1,10 @@
 //! Transactional Authority v2 for the reference security profile.
 //!
-//! One SQLite writer boundary owns approval deduplication, resolution, exact
-//! single-use grants, state transitions, and signed decision evidence. Every
-//! mutation is serialized by `BEGIN IMMEDIATE` and returns an authorization
-//! result only after the corresponding state and ledger entries commit.
+//! One SQLite writer boundary owns the active release/policy/mapper/protocol
+//! generation, fail-closed maintenance, approval deduplication, exact single-use
+//! grants, state transitions, and signed decision evidence. Every mutation is
+//! serialized by `BEGIN IMMEDIATE` and returns an authorization result only after
+//! the corresponding state and ledger entries commit.
 
 use crate::{
     crypto_envelope::{
@@ -31,6 +32,7 @@ const APPLICATION_ID: i32 = 0x474f_4d32; // ASCII "GOM2".
 const SCHEMA_VERSION: i32 = 2;
 const ZERO_HASH: &str = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const REQUEST_DOMAIN: &str = "gommage.approval.request";
+const GENERATION_DOMAIN: &str = "gommage.authority.generation";
 const LEDGER_DOMAIN: &str = "gommage.ledger.entry";
 const CHECKPOINT_DOMAIN: &str = "gommage.ledger.checkpoint";
 const FORMAT_VERSION: u8 = 2;
@@ -41,6 +43,115 @@ const MAX_CAPABILITY_BYTES: usize = 1_024;
 const MAX_CAPABILITIES: usize = 512;
 const CUTOVER_MARKER: &str = "fresh_v2_no_legacy_active_grants";
 
+/// Immutable identities selected together as one authority generation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorityGenerationV2 {
+    domain: String,
+    version: u8,
+    generation_id: String,
+    release_identity: String,
+    build_identity: String,
+    policy_identity: String,
+    mapper_identity: String,
+    protocol_identity: String,
+}
+
+impl AuthorityGenerationV2 {
+    /// Construct one bounded canonical generation identity.
+    pub fn new(
+        generation_id: String,
+        release_identity: String,
+        build_identity: String,
+        policy_identity: String,
+        mapper_identity: String,
+        protocol_identity: String,
+    ) -> Result<Self, AuthorityError> {
+        let generation = Self {
+            domain: GENERATION_DOMAIN.into(),
+            version: FORMAT_VERSION,
+            generation_id,
+            release_identity,
+            build_identity,
+            policy_identity,
+            mapper_identity,
+            protocol_identity,
+        };
+        generation.validate()?;
+        Ok(generation)
+    }
+
+    /// Return the monotonic canonical generation identifier.
+    pub fn generation_id(&self) -> &str {
+        &self.generation_id
+    }
+
+    /// Return the immutable release identity.
+    pub fn release_identity(&self) -> &str {
+        &self.release_identity
+    }
+
+    /// Return the immutable build identity.
+    pub fn build_identity(&self) -> &str {
+        &self.build_identity
+    }
+
+    /// Return the immutable policy semantic identity.
+    pub fn policy_identity(&self) -> &str {
+        &self.policy_identity
+    }
+
+    /// Return the immutable mapper semantic identity.
+    pub fn mapper_identity(&self) -> &str {
+        &self.mapper_identity
+    }
+
+    /// Return the immutable managed protocol identity.
+    pub fn protocol_identity(&self) -> &str {
+        &self.protocol_identity
+    }
+
+    fn validate(&self) -> Result<(), AuthorityError> {
+        if self.domain != GENERATION_DOMAIN || self.version != FORMAT_VERSION {
+            return Err(AuthorityError::InvalidInput(
+                "incorrect authority generation domain or version".into(),
+            ));
+        }
+        validate_decimal("generation id", &self.generation_id)?;
+        validate_text(
+            "release identity",
+            &self.release_identity,
+            MAX_IDENTITY_BYTES,
+            false,
+        )?;
+        validate_text(
+            "generation build identity",
+            &self.build_identity,
+            MAX_IDENTITY_BYTES,
+            false,
+        )?;
+        validate_text(
+            "generation policy identity",
+            &self.policy_identity,
+            MAX_IDENTITY_BYTES,
+            false,
+        )?;
+        validate_text(
+            "mapper identity",
+            &self.mapper_identity,
+            MAX_IDENTITY_BYTES,
+            false,
+        )?;
+        validate_text(
+            "protocol identity",
+            &self.protocol_identity,
+            MAX_IDENTITY_BYTES,
+            false,
+        )?;
+        Ok(())
+    }
+}
+
 /// Fixed metadata supplied when a v2 authority is first created.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorityConfig {
@@ -48,8 +159,8 @@ pub struct AuthorityConfig {
     pub instance_id: String,
     /// Monotonic installation epoch encoded as canonical decimal text.
     pub epoch: String,
-    /// Stable identifier for the binary or release that created genesis.
-    pub genesis_build_identity: String,
+    /// Immutable generation activated by genesis.
+    pub genesis_generation: AuthorityGenerationV2,
     /// Deterministic ledger event identifier for genesis.
     pub genesis_event_id: String,
     /// Unix timestamp recorded on the genesis event.
@@ -61,12 +172,7 @@ impl AuthorityConfig {
     pub fn validate(&self) -> Result<(), AuthorityError> {
         validate_token("authority instance", &self.instance_id, 160)?;
         validate_decimal("authority epoch", &self.epoch)?;
-        validate_text(
-            "build identity",
-            &self.genesis_build_identity,
-            MAX_IDENTITY_BYTES,
-            false,
-        )?;
+        self.genesis_generation.validate()?;
         validate_token("genesis event id", &self.genesis_event_id, 160)?;
         validate_timestamp(self.genesis_at)?;
         Ok(())
@@ -94,8 +200,8 @@ pub struct AuthorityMetadata {
     pub grant_key_id: String,
     /// Purpose-qualified ledger key identifier.
     pub ledger_key_id: String,
-    /// Build identity bound by genesis.
-    pub genesis_build_identity: String,
+    /// Immutable generation bound by genesis.
+    pub genesis_generation: AuthorityGenerationV2,
     /// Explicit v1-to-v2 cutover state.
     pub cutover: CutoverStateV2,
 }
@@ -111,6 +217,8 @@ pub struct CreateRequestCommand {
     pub created_at: i64,
     /// Complete immutable authorization context observed by the integration.
     pub context: AuthorizationContextV2,
+    /// Exact active generation against which the decision was evaluated.
+    pub generation: AuthorityGenerationV2,
     /// Exact approval scope required by policy.
     pub required_scope: String,
     /// Human-readable reason shown to an operator.
@@ -228,6 +336,7 @@ pub struct ApprovalRequestV2 {
     request_id: String,
     created_at: i64,
     context: AuthorizationContextV2,
+    generation: AuthorityGenerationV2,
     required_scope: String,
     reason: String,
 }
@@ -246,6 +355,11 @@ impl ApprovalRequestV2 {
     /// Return the complete immutable authorization context.
     pub fn context(&self) -> &AuthorizationContextV2 {
         &self.context
+    }
+
+    /// Return the exact authority generation evaluated for this request.
+    pub fn generation(&self) -> &AuthorityGenerationV2 {
+        &self.generation
     }
 
     /// Return the build that observed and mapped the request.
@@ -295,6 +409,7 @@ impl ApprovalRequestV2 {
             request_id: command.request_id.clone(),
             created_at: command.created_at,
             context: command.context.clone(),
+            generation: command.generation.clone(),
             required_scope: command.required_scope.clone(),
             reason: command.reason.clone(),
         };
@@ -311,6 +426,14 @@ impl ApprovalRequestV2 {
         validate_token("request id", &self.request_id, 160)?;
         validate_timestamp(self.created_at)?;
         self.context.validate()?;
+        self.generation.validate()?;
+        if self.context.build_identity() != self.generation.build_identity()
+            || self.context.policy_identity() != self.generation.policy_identity()
+        {
+            return Err(AuthorityError::InvalidInput(
+                "authorization context does not match its declared generation".into(),
+            ));
+        }
         validate_text("required scope", &self.required_scope, 512, false)?;
         validate_text("reason", &self.reason, 1_024, true)?;
         Ok(())
@@ -323,6 +446,7 @@ struct ApprovalDedupeV2<'a> {
     domain: &'static str,
     version: u8,
     context: &'a AuthorizationContextV2,
+    generation: &'a AuthorityGenerationV2,
     required_scope: &'a str,
 }
 
@@ -390,8 +514,6 @@ pub struct ApproveCommand {
     pub reason: String,
     /// Resolution and grant issue timestamp.
     pub resolved_at: i64,
-    /// Build identity executing the approval transaction.
-    pub build_identity: String,
     /// Bounded grant lifetime in seconds.
     pub ttl_seconds: i64,
 }
@@ -423,8 +545,6 @@ pub struct DenyCommand {
     pub reason: String,
     /// Resolution timestamp.
     pub resolved_at: i64,
-    /// Build identity executing the denial transaction.
-    pub build_identity: String,
 }
 
 /// Result of a denial attempt.
@@ -443,12 +563,81 @@ pub struct ConsumeCommand {
     pub required_scope: String,
     /// Complete current context, which must equal the approved request context.
     pub context: AuthorizationContextV2,
+    /// Exact active generation against which the decision was evaluated.
+    pub generation: AuthorityGenerationV2,
     /// State-transition ledger event identifier.
     pub state_event_id: String,
     /// Final allow-decision ledger event identifier.
     pub decision_event_id: String,
     /// Current Unix timestamp.
     pub consumed_at: i64,
+}
+
+/// Administrative activation of one immutable successor generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivateGenerationCommand {
+    /// Complete successor generation identity.
+    pub generation: AuthorityGenerationV2,
+    /// Signed-ledger event identifier.
+    pub event_id: String,
+    /// Authenticated operator principal.
+    pub operator_principal: String,
+    /// Operator rationale.
+    pub reason: String,
+    /// Activation timestamp.
+    pub activated_at: i64,
+}
+
+/// Administrative transition into or out of fail-closed maintenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetMaintenanceCommand {
+    /// `true` enters maintenance; `false` exits it.
+    pub enabled: bool,
+    /// Signed-ledger event identifier.
+    pub event_id: String,
+    /// Authenticated operator principal.
+    pub operator_principal: String,
+    /// Operator rationale.
+    pub reason: String,
+    /// Transition timestamp.
+    pub transitioned_at: i64,
+}
+
+/// Fully verified current generation and maintenance state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorityRuntimeStateV2 {
+    revision: String,
+    active_generation: AuthorityGenerationV2,
+    maintenance: bool,
+    transition_event_id: String,
+    transitioned_at: i64,
+}
+
+impl AuthorityRuntimeStateV2 {
+    /// Return the append-only runtime-state revision.
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+
+    /// Return the currently active immutable generation.
+    pub fn active_generation(&self) -> &AuthorityGenerationV2 {
+        &self.active_generation
+    }
+
+    /// Return whether decision admission is fail-closed for maintenance.
+    pub fn maintenance(&self) -> bool {
+        self.maintenance
+    }
+
+    /// Return the signed ledger event that created this revision.
+    pub fn transition_event_id(&self) -> &str {
+        &self.transition_event_id
+    }
+
+    /// Return the transition timestamp.
+    pub fn transitioned_at(&self) -> i64 {
+        self.transitioned_at
+    }
 }
 
 /// Why a syntactically valid consume request did not authorize.
@@ -536,10 +725,34 @@ pub enum LedgerPayloadV2 {
         ledger_key_id: String,
         /// Gommage core semantic version.
         semantic_version: String,
-        /// Build identity supplied by the control plane.
-        build_identity: String,
+        /// Immutable release/build/policy/mapper/protocol generation.
+        generation: AuthorityGenerationV2,
         /// Explicit migration boundary.
         cutover_marker: String,
+    },
+    /// Activates one immutable successor generation.
+    GenerationActivated {
+        /// Previously active generation identifier.
+        previous_generation_id: String,
+        /// Complete successor generation identity.
+        generation: AuthorityGenerationV2,
+        /// Maintenance state preserved across activation.
+        maintenance: bool,
+        /// Authenticated operator principal.
+        operator_principal: String,
+        /// Operator rationale.
+        reason: String,
+    },
+    /// Enters or exits authoritative fail-closed maintenance.
+    MaintenanceChanged {
+        /// Complete generation active during the transition.
+        generation: AuthorityGenerationV2,
+        /// New maintenance state.
+        enabled: bool,
+        /// Authenticated operator principal.
+        operator_principal: String,
+        /// Operator rationale.
+        reason: String,
     },
     /// Commits one immutable request and its deduplication slot.
     ApprovalRequested {
@@ -594,6 +807,8 @@ pub enum LedgerPayloadV2 {
         input_hash: String,
         /// Complete build/integration/tool/input/policy/capability context.
         context: AuthorizationContextV2,
+        /// Exact generation that remained active through commit.
+        generation: AuthorityGenerationV2,
         /// Signed spent-state hash.
         state_hash: String,
     },
@@ -603,6 +818,9 @@ impl LedgerPayloadV2 {
     fn event_type(&self) -> &'static str {
         match self {
             Self::Genesis { .. } => "genesis",
+            Self::GenerationActivated { .. } => "generation_activated",
+            Self::MaintenanceChanged { enabled: true, .. } => "maintenance_entered",
+            Self::MaintenanceChanged { enabled: false, .. } => "maintenance_exited",
             Self::ApprovalRequested { .. } => "approval_requested",
             Self::ApprovalResolved { .. } => "approval_resolved",
             Self::GrantStateChanged {
@@ -623,7 +841,9 @@ impl LedgerPayloadV2 {
 
     fn subject(&self) -> &str {
         match self {
-            Self::Genesis { .. } => "authority",
+            Self::Genesis { .. }
+            | Self::GenerationActivated { .. }
+            | Self::MaintenanceChanged { .. } => "authority",
             Self::ApprovalRequested { request_id, .. }
             | Self::ApprovalResolved { request_id, .. } => request_id,
             Self::GrantStateChanged { grant_id, .. } | Self::DecisionAllow { grant_id, .. } => {
@@ -638,18 +858,20 @@ impl LedgerPayloadV2 {
         policy_identity: Option<&str>,
     ) -> bool {
         match self {
-            Self::Genesis {
-                build_identity: genesis_build,
-                ..
-            } => build_identity == Some(genesis_build.as_str()) && policy_identity.is_none(),
+            Self::Genesis { generation, .. }
+            | Self::GenerationActivated { generation, .. }
+            | Self::MaintenanceChanged { generation, .. }
+            | Self::DecisionAllow { generation, .. } => {
+                build_identity == Some(generation.build_identity())
+                    && policy_identity == Some(generation.policy_identity())
+            }
             Self::ApprovalRequested { .. } | Self::ApprovalResolved { .. } => {
                 build_identity.is_some() && policy_identity.is_some()
             }
             Self::GrantStateChanged {
                 status: GrantStatusV2::Active | GrantStatusV2::Spent,
                 ..
-            }
-            | Self::DecisionAllow { .. } => build_identity.is_some() && policy_identity.is_some(),
+            } => build_identity.is_some() && policy_identity.is_some(),
             Self::GrantStateChanged {
                 status: GrantStatusV2::Revoked,
                 ..
@@ -759,6 +981,15 @@ impl LedgerEntryV2 {
             return Err(AuthorityError::Corrupt(
                 "ledger subject or build/policy identity shape does not match its payload".into(),
             ));
+        }
+        match &self.payload {
+            LedgerPayloadV2::Genesis { generation, .. }
+            | LedgerPayloadV2::GenerationActivated { generation, .. }
+            | LedgerPayloadV2::MaintenanceChanged { generation, .. }
+            | LedgerPayloadV2::DecisionAllow { generation, .. } => generation.validate()?,
+            LedgerPayloadV2::ApprovalRequested { .. }
+            | LedgerPayloadV2::ApprovalResolved { .. }
+            | LedgerPayloadV2::GrantStateChanged { .. } => {}
         }
         validate_key_identifier(&self.ledger_key_id, "ledger")?;
         Ok(())
@@ -932,6 +1163,19 @@ pub enum AuthorityError {
     /// The file is not the supported Authority v2 schema.
     #[error("unsupported authority schema: {0}")]
     Schema(String),
+    /// A decision was evaluated against a generation that is no longer active.
+    #[error(
+        "stale authority generation: evaluated {evaluated_generation_id}, active {active_generation_id}"
+    )]
+    StaleGeneration {
+        /// Generation declared by the decision.
+        evaluated_generation_id: String,
+        /// Generation active at the serialized admission point.
+        active_generation_id: String,
+    },
+    /// Decision admission is disabled by authoritative maintenance state.
+    #[error("authority decisions are disabled during maintenance")]
+    Maintenance,
 }
 
 /// File-backed reference-profile authorization authority.
@@ -1028,7 +1272,7 @@ impl Authority {
         let metadata = read_metadata(&self.conn)?;
         if metadata.instance_id != self.config.instance_id
             || metadata.epoch != self.config.epoch
-            || metadata.genesis_build_identity != self.config.genesis_build_identity
+            || metadata.genesis_generation != self.config.genesis_generation
             || metadata.grant_key_id != self.grant_key_id
             || metadata.ledger_key_id != self.ledger_key_id
             || metadata.cutover != CutoverStateV2::FreshV2NoLegacyActiveGrants
@@ -1059,6 +1303,7 @@ struct AllowEvidenceLink {
     required_scope: String,
     input_hash: String,
     context: AuthorizationContextV2,
+    generation: AuthorityGenerationV2,
 }
 
 #[derive(Debug, Clone)]
@@ -1070,11 +1315,34 @@ struct LedgerEventLink {
     payload: LedgerPayloadV2,
 }
 
+#[derive(Debug, Clone)]
+struct StoredGeneration {
+    generation: AuthorityGenerationV2,
+    event_id: String,
+    activated_at: i64,
+}
+
+#[derive(Debug)]
+struct VerifiedRuntimeTimeline {
+    transition_events: HashSet<String>,
+    transitions: Vec<(usize, AuthorityRuntimeStateV2)>,
+}
+
+impl VerifiedRuntimeTimeline {
+    fn state_at(&self, ledger_seq: usize) -> Option<&AuthorityRuntimeStateV2> {
+        self.transitions
+            .iter()
+            .rev()
+            .find(|(transition_seq, _)| *transition_seq <= ledger_seq)
+            .map(|(_, state)| state)
+    }
+}
+
 fn read_metadata(conn: &Connection) -> Result<AuthorityMetadata, AuthorityError> {
     let row = conn
         .query_row(
             "SELECT schema_version, instance_id, epoch, grant_key_id, ledger_key_id,
-                    build_identity, cutover_marker
+                    genesis_generation_id, cutover_marker
              FROM authority_meta WHERE singleton = 1",
             [],
             |row| {
@@ -1099,15 +1367,225 @@ fn read_metadata(conn: &Connection) -> Result<AuthorityMetadata, AuthorityError>
             )));
         }
     };
+    let genesis_generation = load_generation(conn, &row.5)?
+        .ok_or_else(|| AuthorityError::Corrupt("metadata genesis generation is missing".into()))?;
     Ok(AuthorityMetadata {
         schema_version: row.0,
         instance_id: row.1,
         epoch: row.2,
         grant_key_id: row.3,
         ledger_key_id: row.4,
-        genesis_build_identity: row.5,
+        genesis_generation: genesis_generation.generation,
         cutover,
     })
+}
+
+fn load_generation(
+    conn: &Connection,
+    generation_id: &str,
+) -> Result<Option<StoredGeneration>, AuthorityError> {
+    let row = conn
+        .query_row(
+            "SELECT generation_jcs, event_id, activated_at
+             FROM authority_generations WHERE generation_id = ?1",
+            [generation_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(|(generation_jcs, event_id, activated_at)| {
+        let generation: AuthorityGenerationV2 = decode_canonical(generation_jcs.as_bytes())?;
+        generation.validate()?;
+        if generation.generation_id() != generation_id {
+            return Err(AuthorityError::Corrupt(
+                "generation row does not match its canonical identifier".into(),
+            ));
+        }
+        validate_token("generation event id", &event_id, 160)?;
+        validate_timestamp(activated_at)?;
+        Ok(StoredGeneration {
+            generation,
+            event_id,
+            activated_at,
+        })
+    })
+    .transpose()
+}
+
+fn load_runtime_states(conn: &Connection) -> Result<Vec<AuthorityRuntimeStateV2>, AuthorityError> {
+    let rows = {
+        let mut statement = conn.prepare(
+            "SELECT revision, generation_id, maintenance, event_id, transitioned_at
+             FROM authority_runtime_states ORDER BY revision ASC",
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    rows.into_iter()
+        .map(
+            |(revision, generation_id, maintenance, transition_event_id, transitioned_at)| {
+                if revision < 0 || !matches!(maintenance, 0 | 1) {
+                    return Err(AuthorityError::Corrupt(
+                        "runtime-state revision or maintenance flag is invalid".into(),
+                    ));
+                }
+                let active_generation =
+                    load_generation(conn, &generation_id)?.ok_or_else(|| {
+                        AuthorityError::Corrupt(
+                            "runtime state references a missing generation".into(),
+                        )
+                    })?;
+                validate_token("runtime transition event id", &transition_event_id, 160)?;
+                validate_timestamp(transitioned_at)?;
+                Ok(AuthorityRuntimeStateV2 {
+                    revision: revision.to_string(),
+                    active_generation: active_generation.generation,
+                    maintenance: maintenance == 1,
+                    transition_event_id,
+                    transitioned_at,
+                })
+            },
+        )
+        .collect()
+}
+
+fn load_current_runtime_state(
+    conn: &Connection,
+) -> Result<AuthorityRuntimeStateV2, AuthorityError> {
+    load_runtime_states(conn)?
+        .pop()
+        .ok_or_else(|| AuthorityError::Corrupt("authority runtime state is missing".into()))
+}
+
+fn insert_generation(
+    conn: &Connection,
+    generation: &AuthorityGenerationV2,
+    event_id: &str,
+    activated_at: i64,
+) -> Result<(), AuthorityError> {
+    generation.validate()?;
+    validate_token("generation event id", event_id, 160)?;
+    validate_timestamp(activated_at)?;
+    let generation_jcs = canonicalize(generation)?;
+    conn.execute(
+        "INSERT INTO authority_generations (
+            generation_id, generation_jcs, event_id, activated_at
+         ) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            generation.generation_id(),
+            String::from_utf8(generation_jcs).map_err(|error| {
+                AuthorityError::Corrupt(format!("generation JCS was not UTF-8: {error}"))
+            })?,
+            event_id,
+            activated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn insert_runtime_state(
+    conn: &Connection,
+    revision: i64,
+    generation_id: &str,
+    maintenance: bool,
+    event_id: &str,
+    transitioned_at: i64,
+) -> Result<(), AuthorityError> {
+    if revision < 0 {
+        return Err(AuthorityError::Corrupt(
+            "runtime-state revision cannot be negative".into(),
+        ));
+    }
+    validate_decimal("runtime-state generation id", generation_id)?;
+    validate_token("runtime transition event id", event_id, 160)?;
+    validate_timestamp(transitioned_at)?;
+    conn.execute(
+        "INSERT INTO authority_runtime_states (
+            revision, generation_id, maintenance, event_id, transitioned_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            revision,
+            generation_id,
+            i64::from(maintenance),
+            event_id,
+            transitioned_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn generation_id_is_newer(candidate: &str, active: &str) -> bool {
+    candidate.len() > active.len() || (candidate.len() == active.len() && candidate > active)
+}
+
+fn ensure_decision_admitted(
+    conn: &Connection,
+    evaluated_generation: &AuthorityGenerationV2,
+) -> Result<(), AuthorityError> {
+    evaluated_generation.validate()?;
+    let current = load_current_runtime_state(conn)?;
+    if current.maintenance {
+        return Err(AuthorityError::Maintenance);
+    }
+    if current.active_generation != *evaluated_generation {
+        return Err(AuthorityError::StaleGeneration {
+            evaluated_generation_id: evaluated_generation.generation_id().into(),
+            active_generation_id: current.active_generation.generation_id().into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_context_generation(
+    context: &AuthorizationContextV2,
+    generation: &AuthorityGenerationV2,
+) -> Result<(), AuthorityError> {
+    context.validate()?;
+    generation.validate()?;
+    if context.build_identity() != generation.build_identity()
+        || context.policy_identity() != generation.policy_identity()
+    {
+        return Err(AuthorityError::InvalidInput(
+            "authorization context does not match its declared generation".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn next_runtime_revision(current: &AuthorityRuntimeStateV2) -> Result<i64, AuthorityError> {
+    current
+        .revision
+        .parse::<i64>()
+        .map_err(|_| AuthorityError::Corrupt("runtime-state revision is not an integer".into()))?
+        .checked_add(1)
+        .ok_or_else(|| AuthorityError::Corrupt("runtime-state revision overflow".into()))
+}
+
+fn validate_admin_transition(
+    event_id: &str,
+    operator_principal: &str,
+    reason: &str,
+    timestamp: i64,
+) -> Result<(), AuthorityError> {
+    validate_token("administrative event id", event_id, 160)?;
+    validate_text("operator principal", operator_principal, 256, false)?;
+    validate_text("administrative reason", reason, 1_024, true)?;
+    validate_timestamp(timestamp)?;
+    Ok(())
 }
 
 struct LedgerEventDraft {
@@ -1220,6 +1698,7 @@ fn load_request(
                 domain: "gommage.approval.dedupe",
                 version: FORMAT_VERSION,
                 context: request.context(),
+                generation: request.generation(),
                 required_scope: request.required_scope(),
             })?;
             if approval_dedupe_hash(&dedupe_jcs) != dedupe_hash {
@@ -1500,7 +1979,7 @@ fn verify_all(
     if metadata.schema_version != SCHEMA_VERSION
         || metadata.instance_id != config.instance_id
         || metadata.epoch != config.epoch
-        || metadata.genesis_build_identity != config.genesis_build_identity
+        || metadata.genesis_generation != config.genesis_generation
         || metadata.grant_key_id != expected_grant_key_id
         || metadata.ledger_key_id != expected_ledger_key_id
         || metadata.cutover != CutoverStateV2::FreshV2NoLegacyActiveGrants
@@ -1644,7 +2123,7 @@ fn verify_genesis(
             grant_key_id,
             ledger_key_id,
             semantic_version,
-            build_identity,
+            generation,
             cutover_marker,
         } if instance_id == &metadata.instance_id
             && epoch == &metadata.epoch
@@ -1654,7 +2133,7 @@ fn verify_genesis(
             && !semantic_version.is_empty()
             && semantic_version.len() <= 64
             && !semantic_version.chars().any(char::is_control)
-            && build_identity == &metadata.genesis_build_identity
+            && generation == &metadata.genesis_generation
             && cutover_marker == CUTOVER_MARKER =>
         {
             Ok(())
@@ -1663,6 +2142,167 @@ fn verify_genesis(
             "genesis payload does not bind current metadata".into(),
         )),
     }
+}
+
+fn verify_authority_runtime(
+    conn: &Connection,
+    config: &AuthorityConfig,
+    events: &HashMap<String, LedgerEventLink>,
+) -> Result<VerifiedRuntimeTimeline, AuthorityError> {
+    let generation_ids = query_strings(
+        conn,
+        "SELECT generation_id FROM authority_generations ORDER BY length(generation_id), generation_id",
+    )?;
+    let mut generations = HashMap::new();
+    for generation_id in generation_ids {
+        let generation = load_generation(conn, &generation_id)?.ok_or_else(|| {
+            AuthorityError::Corrupt("authority generation disappeared during verification".into())
+        })?;
+        generations.insert(generation_id, generation);
+    }
+    let states = load_runtime_states(conn)?;
+    if states.is_empty() || generations.is_empty() {
+        return Err(AuthorityError::Corrupt(
+            "authority generation or runtime-state history is empty".into(),
+        ));
+    }
+    let genesis_state = &states[0];
+    let genesis_generation = generations
+        .get(config.genesis_generation.generation_id())
+        .ok_or_else(|| {
+            AuthorityError::Corrupt("configured genesis generation is missing".into())
+        })?;
+    if genesis_state.revision != "0"
+        || genesis_state.active_generation != config.genesis_generation
+        || genesis_state.maintenance
+        || genesis_state.transition_event_id != config.genesis_event_id
+        || genesis_state.transitioned_at != config.genesis_at
+        || genesis_generation.generation != config.genesis_generation
+        || genesis_generation.event_id != config.genesis_event_id
+        || genesis_generation.activated_at != config.genesis_at
+    {
+        return Err(AuthorityError::Corrupt(
+            "runtime-state genesis does not match the configured generation".into(),
+        ));
+    }
+
+    let mut transition_events = HashSet::new();
+    let mut activation_events = HashSet::new();
+    let mut transitions = Vec::with_capacity(states.len());
+    for (index, state) in states.iter().enumerate() {
+        if state.revision != index.to_string()
+            || !transition_events.insert(state.transition_event_id.clone())
+        {
+            return Err(AuthorityError::Corrupt(
+                "runtime-state revisions or transition events are not unique and contiguous".into(),
+            ));
+        }
+        let event = events.get(&state.transition_event_id).ok_or_else(|| {
+            AuthorityError::Corrupt("runtime state has no signed ledger transition".into())
+        })?;
+        if event.timestamp != state.transitioned_at {
+            return Err(AuthorityError::Corrupt(
+                "runtime-state timestamp does not match its signed ledger event".into(),
+            ));
+        }
+        if index == 0 {
+            if !matches!(event.payload, LedgerPayloadV2::Genesis { .. }) {
+                return Err(AuthorityError::Corrupt(
+                    "runtime-state revision zero is not linked to genesis".into(),
+                ));
+            }
+            transitions.push((event.seq, state.clone()));
+            continue;
+        }
+        let previous = &states[index - 1];
+        let previous_event = events.get(&previous.transition_event_id).ok_or_else(|| {
+            AuthorityError::Corrupt("previous runtime-state event is missing".into())
+        })?;
+        if event.seq <= previous_event.seq {
+            return Err(AuthorityError::Corrupt(
+                "runtime-state transitions are not ordered by the signed ledger".into(),
+            ));
+        }
+        match &event.payload {
+            LedgerPayloadV2::GenerationActivated {
+                previous_generation_id,
+                generation,
+                maintenance,
+                operator_principal,
+                reason,
+            } if previous_generation_id == previous.active_generation.generation_id()
+                && generation == &state.active_generation
+                && state.maintenance == previous.maintenance
+                && *maintenance == state.maintenance
+                && generation_id_is_newer(
+                    generation.generation_id(),
+                    previous.active_generation.generation_id(),
+                ) =>
+            {
+                validate_text(
+                    "generation operator principal",
+                    operator_principal,
+                    256,
+                    false,
+                )?;
+                validate_text("generation activation reason", reason, 1_024, true)?;
+                let stored = generations.get(generation.generation_id()).ok_or_else(|| {
+                    AuthorityError::Corrupt(
+                        "runtime activation references an absent generation".into(),
+                    )
+                })?;
+                if stored.generation != *generation
+                    || stored.event_id != state.transition_event_id
+                    || stored.activated_at != state.transitioned_at
+                    || !activation_events.insert(state.transition_event_id.clone())
+                {
+                    return Err(AuthorityError::Corrupt(
+                        "generation activation does not match its immutable stored generation"
+                            .into(),
+                    ));
+                }
+            }
+            LedgerPayloadV2::MaintenanceChanged {
+                generation,
+                enabled,
+                operator_principal,
+                reason,
+            } if generation == &state.active_generation
+                && state.active_generation == previous.active_generation
+                && *enabled == state.maintenance
+                && state.maintenance != previous.maintenance =>
+            {
+                validate_text(
+                    "maintenance operator principal",
+                    operator_principal,
+                    256,
+                    false,
+                )?;
+                validate_text("maintenance reason", reason, 1_024, true)?;
+            }
+            _ => {
+                return Err(AuthorityError::Corrupt(
+                    "runtime-state transition is not a coherent generation or maintenance event"
+                        .into(),
+                ));
+            }
+        }
+        transitions.push((event.seq, state.clone()));
+    }
+    if generations.len() != activation_events.len().saturating_add(1)
+        || generations.values().any(|generation| {
+            generation.event_id != config.genesis_event_id
+                && !activation_events.contains(&generation.event_id)
+        })
+    {
+        return Err(AuthorityError::Corrupt(
+            "stored generation cardinality does not match signed activation transitions".into(),
+        ));
+    }
+    Ok(VerifiedRuntimeTimeline {
+        transition_events,
+        transitions,
+    })
 }
 
 fn verify_relations(
@@ -1692,6 +2332,7 @@ fn verify_relations(
             "ledger contains duplicate event identifiers".into(),
         ));
     }
+    let runtime = verify_authority_runtime(conn, config, &events)?;
 
     let request_ids = query_strings(conn, "SELECT request_id FROM approval_requests")?;
     let mut requests = HashMap::new();
@@ -1699,7 +2340,13 @@ fn verify_relations(
         let stored = load_request(conn, &request_id)?.ok_or_else(|| {
             AuthorityError::Corrupt("approval request disappeared during verification".into())
         })?;
-        match events.get(&stored.event_id) {
+        let request_event = events.get(&stored.event_id);
+        let request_generation_is_active = request_event
+            .and_then(|event| runtime.state_at(event.seq))
+            .is_some_and(|state| {
+                !state.maintenance && state.active_generation == *stored.request.generation()
+            });
+        match request_event {
             Some(LedgerEventLink {
                 timestamp: event_timestamp,
                 build_identity,
@@ -1716,7 +2363,8 @@ fn verify_relations(
                 && policy_identity.as_deref() == Some(stored.request.policy_identity())
                 && request_id == stored.request.request_id()
                 && request_hash == &stored.request_hash
-                && dedupe_hash == &stored.dedupe_hash => {}
+                && dedupe_hash == &stored.dedupe_hash
+                && request_generation_is_active => {}
             _ => {
                 return Err(AuthorityError::Corrupt(
                     "approval request is not linked by its exact signed ledger event".into(),
@@ -1774,6 +2422,7 @@ fn verify_relations(
             Some(LedgerEventLink {
                 seq: resolution_seq,
                 timestamp: event_timestamp,
+                build_identity,
                 policy_identity,
                 payload:
                     LedgerPayloadV2::ApprovalResolved {
@@ -1788,7 +2437,13 @@ fn verify_relations(
                 ..
             }) if *resolution_seq > request_seq
                 && *event_timestamp == resolution.resolved_at
+                && build_identity.as_deref() == Some(request.request.build_identity())
                 && policy_identity.as_deref() == Some(request.request.policy_identity())
+                && (resolution.kind != ApprovalResolutionKindV2::Approved
+                    || runtime.state_at(*resolution_seq).is_some_and(|state| {
+                        !state.maintenance
+                            && state.active_generation == *request.request.generation()
+                    }))
                 && event_request_id == &request_id
                 && request_hash == &request.request_hash
                 && outcome == resolution.kind.as_str()
@@ -1910,10 +2565,12 @@ fn verify_relations(
                 "grant state references a missing claim".into(),
             ));
         };
-        let approval_policy = requests
+        let approval_request = requests
             .get(claim.approval_request_id())
-            .map(|request| request.request.policy_identity())
             .ok_or_else(|| AuthorityError::Corrupt("state approval request is missing".into()))?;
+        let approval_build = approval_request.request.build_identity();
+        let approval_policy = approval_request.request.policy_identity();
+        let approval_generation = approval_request.request.generation();
         if state.grant_id() != grant_id
             || state.revision() != revision.to_string()
             || status_string(state.status()) != status
@@ -1930,6 +2587,7 @@ fn verify_relations(
         }
         match events.get(state.transition_event_id()) {
             Some(LedgerEventLink {
+                seq: state_seq,
                 timestamp: event_timestamp,
                 build_identity,
                 policy_identity,
@@ -1951,12 +2609,16 @@ fn verify_relations(
                 && event_revision == state.revision()
                 && *event_status == state.status()
                 && match state.status() {
-                    GrantStatusV2::Active => policy_identity.as_deref() == Some(approval_policy),
+                    GrantStatusV2::Active => {
+                        build_identity.as_deref() == Some(approval_build)
+                            && policy_identity.as_deref() == Some(approval_policy)
+                            && runtime.state_at(*state_seq).is_some_and(|runtime_state| {
+                                !runtime_state.maintenance
+                                    && runtime_state.active_generation == *approval_generation
+                            })
+                    }
                     GrantStatusV2::Spent => {
-                        build_identity.as_deref()
-                            == requests
-                                .get(claim.approval_request_id())
-                                .map(|request| request.request.build_identity())
+                        build_identity.as_deref() == Some(approval_build)
                             && policy_identity.as_deref() == Some(approval_policy)
                     }
                     GrantStatusV2::Revoked => true,
@@ -1980,6 +2642,7 @@ fn verify_relations(
                 required_scope,
                 input_hash,
                 context,
+                generation,
                 state_hash,
             } => Some((
                 state_hash.clone(),
@@ -1992,6 +2655,7 @@ fn verify_relations(
                     required_scope: required_scope.clone(),
                     input_hash: input_hash.clone(),
                     context: context.clone(),
+                    generation: generation.clone(),
                 },
             )),
             _ => None,
@@ -2076,6 +2740,19 @@ fn verify_relations(
                                 })?
                                 .request
                                 .context()
+                        || &decisions[0].generation
+                            != requests
+                                .get(claim.approval_request_id())
+                                .ok_or_else(|| {
+                                    AuthorityError::Corrupt(
+                                        "allow decision approval request is missing".into(),
+                                    )
+                                })?
+                                .request
+                                .generation()
+                        || runtime.state_at(decisions[0].seq).is_none_or(|state| {
+                            state.maintenance || state.active_generation != decisions[0].generation
+                        })
                         || decisions[0].build_identity.as_deref()
                             != Some(decisions[0].context.build_identity())
                         || decisions[0].policy_identity.as_deref()
@@ -2128,7 +2805,16 @@ fn verify_relations(
         .collect();
     for (index, verified) in entries.iter().enumerate() {
         let linked = match verified.entry.payload() {
-            LedgerPayloadV2::Genesis { .. } => index == 0,
+            LedgerPayloadV2::Genesis { .. } => {
+                index == 0
+                    && runtime
+                        .transition_events
+                        .contains(verified.entry.event_id())
+            }
+            LedgerPayloadV2::GenerationActivated { .. }
+            | LedgerPayloadV2::MaintenanceChanged { .. } => runtime
+                .transition_events
+                .contains(verified.entry.event_id()),
             LedgerPayloadV2::ApprovalRequested { .. } => {
                 request_events.contains(verified.entry.event_id())
             }
@@ -2202,7 +2888,7 @@ fn initialize_schema(
     tx.execute(
         "INSERT INTO authority_meta (
             singleton, schema_version, instance_id, epoch, head_seq, head_hash,
-            grant_key_id, ledger_key_id, build_identity, cutover_marker
+            grant_key_id, ledger_key_id, genesis_generation_id, cutover_marker
          ) VALUES (1, ?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8)",
         params![
             SCHEMA_VERSION,
@@ -2211,9 +2897,23 @@ fn initialize_schema(
             ZERO_HASH,
             grant_key_id,
             ledger_key_id,
-            config.genesis_build_identity,
+            config.genesis_generation.generation_id(),
             CUTOVER_MARKER,
         ],
+    )?;
+    insert_generation(
+        &tx,
+        &config.genesis_generation,
+        &config.genesis_event_id,
+        config.genesis_at,
+    )?;
+    insert_runtime_state(
+        &tx,
+        0,
+        config.genesis_generation.generation_id(),
+        false,
+        &config.genesis_event_id,
+        config.genesis_at,
     )?;
     append_ledger_entry(
         &tx,
@@ -2222,8 +2922,8 @@ fn initialize_schema(
             event_id: config.genesis_event_id.clone(),
             subject: "authority".into(),
             timestamp: config.genesis_at,
-            build_identity: Some(config.genesis_build_identity.clone()),
-            policy_identity: None,
+            build_identity: Some(config.genesis_generation.build_identity().into()),
+            policy_identity: Some(config.genesis_generation.policy_identity().into()),
             payload: LedgerPayloadV2::Genesis {
                 instance_id: config.instance_id.clone(),
                 epoch: config.epoch.clone(),
@@ -2231,7 +2931,7 @@ fn initialize_schema(
                 grant_key_id: grant_key_id.into(),
                 ledger_key_id: ledger_key_id.into(),
                 semantic_version: env!("CARGO_PKG_VERSION").into(),
-                build_identity: config.genesis_build_identity.clone(),
+                generation: config.genesis_generation.clone(),
                 cutover_marker: CUTOVER_MARKER.into(),
             },
         },
@@ -2250,8 +2950,23 @@ CREATE TABLE authority_meta (
     head_hash       TEXT NOT NULL CHECK (length(head_hash) = 71),
     grant_key_id    TEXT NOT NULL CHECK (length(grant_key_id) = 77),
     ledger_key_id   TEXT NOT NULL CHECK (length(ledger_key_id) = 78),
-    build_identity  TEXT NOT NULL CHECK (length(build_identity) BETWEEN 1 AND 256),
+    genesis_generation_id TEXT NOT NULL CHECK (length(genesis_generation_id) BETWEEN 1 AND 40),
     cutover_marker  TEXT NOT NULL CHECK (cutover_marker = 'fresh_v2_no_legacy_active_grants')
+) STRICT;
+
+CREATE TABLE authority_generations (
+    generation_id  TEXT PRIMARY KEY CHECK (length(generation_id) BETWEEN 1 AND 40),
+    generation_jcs TEXT NOT NULL UNIQUE,
+    event_id       TEXT NOT NULL UNIQUE CHECK (length(event_id) BETWEEN 1 AND 160),
+    activated_at   INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE authority_runtime_states (
+    revision        INTEGER PRIMARY KEY CHECK (revision >= 0),
+    generation_id   TEXT NOT NULL REFERENCES authority_generations(generation_id),
+    maintenance     INTEGER NOT NULL CHECK (maintenance IN (0, 1)),
+    event_id        TEXT NOT NULL UNIQUE CHECK (length(event_id) BETWEEN 1 AND 160),
+    transitioned_at INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE ledger_entries (
@@ -2309,6 +3024,15 @@ CREATE TABLE grant_states (
 CREATE INDEX approval_requests_dedupe_idx ON approval_requests(dedupe_hash);
 CREATE INDEX grant_states_latest_idx ON grant_states(grant_id, revision DESC);
 
+CREATE TRIGGER authority_generations_no_update BEFORE UPDATE ON authority_generations
+BEGIN SELECT RAISE(ABORT, 'authority generations are immutable'); END;
+CREATE TRIGGER authority_generations_no_delete BEFORE DELETE ON authority_generations
+BEGIN SELECT RAISE(ABORT, 'authority generations are immutable'); END;
+CREATE TRIGGER authority_runtime_states_no_update BEFORE UPDATE ON authority_runtime_states
+BEGIN SELECT RAISE(ABORT, 'authority runtime states are append-only'); END;
+CREATE TRIGGER authority_runtime_states_no_delete BEFORE DELETE ON authority_runtime_states
+BEGIN SELECT RAISE(ABORT, 'authority runtime states are append-only'); END;
+
 CREATE TRIGGER ledger_entries_no_update BEFORE UPDATE ON ledger_entries
 BEGIN SELECT RAISE(ABORT, 'ledger entries are append-only'); END;
 CREATE TRIGGER ledger_entries_no_delete BEFORE DELETE ON ledger_entries
@@ -2332,6 +3056,141 @@ BEGIN SELECT RAISE(ABORT, 'grant states are append-only'); END;
 "#;
 
 impl Authority {
+    /// Activate one immutable successor generation through the serialized authority ledger.
+    pub fn activate_generation(
+        &mut self,
+        command: &ActivateGenerationCommand,
+    ) -> Result<AuthorityRuntimeStateV2, AuthorityError> {
+        command.generation.validate()?;
+        validate_admin_transition(
+            &command.event_id,
+            &command.operator_principal,
+            &command.reason,
+            command.activated_at,
+        )?;
+        let ledger_key = self.ledger_key.clone();
+        let grant_vk = self.grant_key.verifying_key();
+        let ledger_vk = self.ledger_key.verifying_key();
+        let config = self.config.clone();
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        let current = load_current_runtime_state(&tx)?;
+        if !generation_id_is_newer(
+            command.generation.generation_id(),
+            current.active_generation.generation_id(),
+        ) {
+            return Err(AuthorityError::InvalidInput(
+                "successor generation id must be strictly greater than the active id".into(),
+            ));
+        }
+        if load_generation(&tx, command.generation.generation_id())?.is_some() {
+            return Err(AuthorityError::InvalidInput(
+                "generation id is already present".into(),
+            ));
+        }
+        let revision = next_runtime_revision(&current)?;
+        insert_generation(
+            &tx,
+            &command.generation,
+            &command.event_id,
+            command.activated_at,
+        )?;
+        insert_runtime_state(
+            &tx,
+            revision,
+            command.generation.generation_id(),
+            current.maintenance,
+            &command.event_id,
+            command.activated_at,
+        )?;
+        append_ledger_entry(
+            &tx,
+            &ledger_key,
+            LedgerEventDraft {
+                event_id: command.event_id.clone(),
+                subject: "authority".into(),
+                timestamp: command.activated_at,
+                build_identity: Some(command.generation.build_identity().into()),
+                policy_identity: Some(command.generation.policy_identity().into()),
+                payload: LedgerPayloadV2::GenerationActivated {
+                    previous_generation_id: current.active_generation.generation_id().into(),
+                    generation: command.generation.clone(),
+                    maintenance: current.maintenance,
+                    operator_principal: command.operator_principal.clone(),
+                    reason: command.reason.clone(),
+                },
+            },
+        )?;
+        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        let activated = load_current_runtime_state(&tx)?;
+        tx.commit()?;
+        Ok(activated)
+    }
+
+    /// Enter or leave fail-closed maintenance as one signed authority transition.
+    pub fn set_maintenance(
+        &mut self,
+        command: &SetMaintenanceCommand,
+    ) -> Result<AuthorityRuntimeStateV2, AuthorityError> {
+        validate_admin_transition(
+            &command.event_id,
+            &command.operator_principal,
+            &command.reason,
+            command.transitioned_at,
+        )?;
+        let ledger_key = self.ledger_key.clone();
+        let grant_vk = self.grant_key.verifying_key();
+        let ledger_vk = self.ledger_key.verifying_key();
+        let config = self.config.clone();
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        let current = load_current_runtime_state(&tx)?;
+        if current.maintenance == command.enabled {
+            return Err(AuthorityError::InvalidInput(format!(
+                "authority maintenance is already {}",
+                if command.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            )));
+        }
+        let revision = next_runtime_revision(&current)?;
+        insert_runtime_state(
+            &tx,
+            revision,
+            current.active_generation.generation_id(),
+            command.enabled,
+            &command.event_id,
+            command.transitioned_at,
+        )?;
+        append_ledger_entry(
+            &tx,
+            &ledger_key,
+            LedgerEventDraft {
+                event_id: command.event_id.clone(),
+                subject: "authority".into(),
+                timestamp: command.transitioned_at,
+                build_identity: Some(current.active_generation.build_identity().into()),
+                policy_identity: Some(current.active_generation.policy_identity().into()),
+                payload: LedgerPayloadV2::MaintenanceChanged {
+                    generation: current.active_generation.clone(),
+                    enabled: command.enabled,
+                    operator_principal: command.operator_principal.clone(),
+                    reason: command.reason.clone(),
+                },
+            },
+        )?;
+        verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        let changed = load_current_runtime_state(&tx)?;
+        tx.commit()?;
+        Ok(changed)
+    }
+
     /// Create one request or return the already-open equivalent request.
     pub fn create_or_get_request(
         &mut self,
@@ -2347,6 +3206,7 @@ impl Authority {
             domain: "gommage.approval.dedupe",
             version: FORMAT_VERSION,
             context: request.context(),
+            generation: request.generation(),
             required_scope: request.required_scope(),
         })?;
         let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
@@ -2358,6 +3218,7 @@ impl Authority {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        ensure_decision_admitted(&tx, &command.generation)?;
         let existing_request_id = tx
             .query_row(
                 "SELECT request_id FROM open_approvals WHERE dedupe_hash = ?1",
@@ -2369,6 +3230,7 @@ impl Authority {
             let existing = load_request(&tx, &existing_request_id)?.ok_or_else(|| {
                 AuthorityError::Corrupt("open approval points to a missing request".into())
             })?;
+            ensure_decision_admitted(&tx, &command.generation)?;
             tx.commit()?;
             return Ok(CreateRequestResult::Existing(existing.request));
         }
@@ -2407,6 +3269,7 @@ impl Authority {
                 },
             },
         )?;
+        ensure_decision_admitted(&tx, &command.generation)?;
         tx.commit()?;
         Ok(CreateRequestResult::Created(request))
     }
@@ -2422,12 +3285,6 @@ impl Authority {
         validate_token("grant id", &command.grant_id, 160)?;
         validate_token("resolution event id", &command.resolution_event_id, 160)?;
         validate_token("activation event id", &command.activation_event_id, 160)?;
-        validate_text(
-            "build identity",
-            &command.build_identity,
-            MAX_IDENTITY_BYTES,
-            false,
-        )?;
         if command.ttl_seconds <= 0 || command.ttl_seconds > MAX_GRANT_TTL_SECONDS {
             return Err(AuthorityError::InvalidInput(format!(
                 "grant TTL must be between 1 and {MAX_GRANT_TTL_SECONDS} seconds"
@@ -2455,11 +3312,14 @@ impl Authority {
         let stored = load_request(&tx, &command.request_id)?
             .ok_or_else(|| AuthorityError::InvalidInput("approval request not found".into()))?;
         ensure_request_is_open(&tx, &stored)?;
+        ensure_decision_admitted(&tx, stored.request.generation())?;
         if command.resolved_at < stored.request.created_at() {
             return Err(AuthorityError::InvalidInput(
                 "approval cannot predate its request".into(),
             ));
         }
+        let request_generation = stored.request.generation().clone();
+        let request_build_identity = stored.request.build_identity().to_owned();
         let claim = GrantClaimV2::new(GrantClaimFields {
             authority_instance: config.instance_id.clone(),
             authority_epoch: config.epoch.clone(),
@@ -2525,7 +3385,7 @@ impl Authority {
                 event_id: command.resolution_event_id.clone(),
                 subject: command.request_id.clone(),
                 timestamp: command.resolved_at,
-                build_identity: Some(command.build_identity.clone()),
+                build_identity: Some(request_build_identity.clone()),
                 policy_identity: Some(stored.request.policy_identity().into()),
                 payload: LedgerPayloadV2::ApprovalResolved {
                     request_id: command.request_id.clone(),
@@ -2545,7 +3405,7 @@ impl Authority {
                 event_id: command.activation_event_id.clone(),
                 subject: command.grant_id.clone(),
                 timestamp: command.resolved_at,
-                build_identity: Some(command.build_identity.clone()),
+                build_identity: Some(request_build_identity),
                 policy_identity: Some(stored.request.policy_identity().into()),
                 payload: LedgerPayloadV2::GrantStateChanged {
                     grant_id: command.grant_id.clone(),
@@ -2558,6 +3418,7 @@ impl Authority {
                 },
             },
         )?;
+        ensure_decision_admitted(&tx, &request_generation)?;
         tx.commit()?;
         Ok(ApproveResult::Approved {
             claim: signed_claim,
@@ -2574,12 +3435,6 @@ impl Authority {
             command.resolved_at,
         )?;
         validate_token("denial event id", &command.event_id, 160)?;
-        validate_text(
-            "build identity",
-            &command.build_identity,
-            MAX_IDENTITY_BYTES,
-            false,
-        )?;
         let ledger_key = self.ledger_key.clone();
         let grant_vk = self.grant_key.verifying_key();
         let ledger_vk = self.ledger_key.verifying_key();
@@ -2628,7 +3483,7 @@ impl Authority {
                 event_id: command.event_id.clone(),
                 subject: command.request_id.clone(),
                 timestamp: command.resolved_at,
-                build_identity: Some(command.build_identity.clone()),
+                build_identity: Some(stored.request.build_identity().into()),
                 policy_identity: Some(stored.request.policy_identity().into()),
                 payload: LedgerPayloadV2::ApprovalResolved {
                     request_id: command.request_id.clone(),
@@ -2660,7 +3515,7 @@ impl Authority {
         command: &ConsumeCommand,
     ) -> Result<ConsumeResult, AuthorityError> {
         validate_text("required scope", &command.required_scope, 512, false)?;
-        command.context.validate()?;
+        validate_context_generation(&command.context, &command.generation)?;
         validate_token("state event id", &command.state_event_id, 160)?;
         validate_token("decision event id", &command.decision_event_id, 160)?;
         validate_timestamp(command.consumed_at)?;
@@ -2673,11 +3528,13 @@ impl Authority {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        ensure_decision_admitted(&tx, &command.generation)?;
 
         let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
             domain: "gommage.approval.dedupe",
             version: FORMAT_VERSION,
             context: &command.context,
+            generation: &command.generation,
             required_scope: &command.required_scope,
         })?;
         let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
@@ -2706,6 +3563,7 @@ impl Authority {
                     AuthorityError::Corrupt("grant claim approval request is missing".into())
                 })?;
             if stored_request.request.context() != &command.context
+                || stored_request.request.generation() != &command.generation
                 || stored_request.request.required_scope() != command.required_scope.as_str()
             {
                 continue;
@@ -2738,6 +3596,7 @@ impl Authority {
             ));
         }
         let Some((grant_id, signed_claim, signed_previous, previous)) = usable.pop() else {
+            ensure_decision_admitted(&tx, &command.generation)?;
             tx.commit()?;
             return Ok(ConsumeResult::NotUsable(
                 temporal_reason.unwrap_or(GrantNotUsableReason::Missing),
@@ -2786,10 +3645,12 @@ impl Authority {
                     required_scope: command.required_scope.clone(),
                     input_hash: command.context.input_hash().into(),
                     context: command.context.clone(),
+                    generation: command.generation.clone(),
                     state_hash: signed_spent.state_hash().into(),
                 },
             },
         )?;
+        ensure_decision_admitted(&tx, &command.generation)?;
         tx.commit()?;
         Ok(ConsumeResult::Consumed {
             state: signed_spent,
@@ -2935,6 +3796,21 @@ impl Authority {
         Ok(state)
     }
 
+    /// Return the fully verified active generation and maintenance state.
+    pub fn runtime_state(&self) -> Result<AuthorityRuntimeStateV2, AuthorityError> {
+        let tx = self.conn.unchecked_transaction()?;
+        verify_all(
+            &tx,
+            &self.config,
+            &self.grant_key.verifying_key(),
+            &self.ledger_key.verifying_key(),
+            None,
+        )?;
+        let state = load_current_runtime_state(&tx)?;
+        tx.commit()?;
+        Ok(state)
+    }
+
     /// Verify every ledger, request, resolution, claim, state, and cross-link.
     ///
     /// Without `trusted_checkpoint`, the chain is internally authenticated but
@@ -3018,6 +3894,15 @@ mod tests {
                     request_id: "request_property".into(),
                     event_id: "event_property".into(),
                     created_at: 1_700_000_000,
+                    generation: AuthorityGenerationV2::new(
+                        "1".into(),
+                        "gommage-property-release".into(),
+                        "gommage-property-build".into(),
+                        format!("sha256:{}", "2".repeat(64)),
+                        format!("sha256:{}", "3".repeat(64)),
+                        "gommage-managed-v2".into(),
+                    )
+                    .unwrap(),
                     context,
                     required_scope: scope,
                     reason,
