@@ -25,7 +25,7 @@ fn start_fake_ready_daemon(home: &std::path::Path) -> FakeReadyDaemon {
     use gommage_core::runtime::{Expedition, HomeLayout, default_policy_env, load_active_policy};
     use std::{
         io::{BufRead, BufReader, ErrorKind, Write},
-        os::unix::net::UnixListener,
+        os::unix::net::{UnixListener, UnixStream},
         sync::mpsc,
         time::Duration,
     };
@@ -37,14 +37,41 @@ fn start_fake_ready_daemon(home: &std::path::Path) -> FakeReadyDaemon {
     let layout = HomeLayout::at(home);
     let (stop, stopped) = mpsc::channel();
     let worker = std::thread::spawn(move || {
+        let write_response =
+            |stream: &mut UnixStream, response: &str| match writeln!(stream, "{response}") {
+                Ok(()) => true,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::BrokenPipe
+                            | ErrorKind::ConnectionReset
+                            | ErrorKind::ConnectionAborted
+                    ) =>
+                {
+                    false
+                }
+                Err(error) => panic!("fake readiness daemon response failed: {error}"),
+            };
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
                     stream.set_nonblocking(false).unwrap();
                     let mut request = String::new();
-                    BufReader::new(&stream).read_line(&mut request).unwrap();
+                    match BufReader::new(&stream).read_line(&mut request) {
+                        Ok(0) => continue,
+                        Ok(_) => {}
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted
+                            ) =>
+                        {
+                            continue;
+                        }
+                        Err(error) => panic!("fake readiness daemon request failed: {error}"),
+                    }
                     if request.contains(r#""op":"reload""#) {
-                        writeln!(stream, r#"{{"ok":true,"result":"policy reloaded"}}"#).unwrap();
+                        write_response(&mut stream, r#"{"ok":true,"result":"policy reloaded"}"#);
                         continue;
                     }
                     assert!(request.contains(r#""op":"decide""#), "{request}");
@@ -58,7 +85,7 @@ fn start_fake_ready_daemon(home: &std::path::Path) -> FakeReadyDaemon {
                         "ok": true,
                         "result": { "policy_version": policy.version_hash }
                     });
-                    writeln!(stream, "{response}").unwrap();
+                    write_response(&mut stream, &response.to_string());
                 }
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
                     if stopped.recv_timeout(Duration::from_millis(5)).is_ok() {
