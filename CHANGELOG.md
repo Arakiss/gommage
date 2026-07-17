@@ -117,6 +117,13 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   `checkpoint` and `admit_checkpoint` methods have been removed. Hosts must
   provide durable, idempotent compare-and-swap retention and establish whether
   it is independent from the SQLite rollback domain.
+- Authority v2 now holds one stable sibling writer lock for its complete
+  lifetime, opens SQLite with `SQLITE_OPEN_NOFOLLOW`, and retains the database
+  inode so path replacement fails closed before a result is returned. Database
+  and lock files must be owned by the effective UID, mode `0600`, regular, and
+  single-linked; their parent directory must not be group- or world-writable.
+  This is cooperative single-writer enforcement, not protection from a hostile
+  process running as the same UID with directory write access.
 - Pinned `serde_json_canonicalizer` as a determinism-critical dependency for
   Authority v2's RFC 8785 signed envelopes.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow

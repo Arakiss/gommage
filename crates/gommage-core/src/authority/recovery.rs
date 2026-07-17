@@ -1,6 +1,5 @@
 use super::*;
 use rusqlite::OpenFlags;
-use std::fs::OpenOptions;
 
 impl Authority {
     /// Exclusively create, durably anchor, and return a usable Authority v2.
@@ -33,6 +32,8 @@ impl Authority {
         mut retention: Box<dyn CheckpointRetentionV2>,
         runtime_source: Arc<dyn AuthorityRuntimeSource>,
     ) -> Result<Self, AuthorityError> {
+        validate_authority_inputs(path, &config, &grant_key, &ledger_key)?;
+        let writer = AuthorityWriterGuard::acquire(path)?;
         if retention
             .load()
             .map_err(|outcome| AuthorityError::Retention {
@@ -45,19 +46,14 @@ impl Authority {
                 "bootstrap requires empty checkpoint retention".into(),
             ));
         }
-        validate_authority_inputs(path, &config, &grant_key, &ledger_key)?;
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|error| {
-                AuthorityError::InvalidInput(format!(
-                    "bootstrap requires a new authority database path: {error}"
-                ))
-            })?;
+        let database = writer.create_database()?;
         let grant_key_id = key_id(KeyPurpose::Grant, &grant_key.verifying_key());
         let ledger_key_id = key_id(KeyPurpose::Ledger, &ledger_key.verifying_key());
-        let mut conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let mut conn = Connection::open_with_flags(
+            writer.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        writer.verify_database(&database)?;
         configure_connection(&conn)?;
         let current_application_id: i32 =
             conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
@@ -108,6 +104,8 @@ impl Authority {
                 operation: CheckpointRetentionOperationV2::Promote,
                 outcome,
             })?;
+        writer.verify_database(&database)?;
+        let storage = writer.bind_database(database)?;
 
         Ok(Self {
             conn,
@@ -120,6 +118,7 @@ impl Authority {
             retention,
             health: AuthorityHealthV2::Ready,
             runtime_source,
+            storage,
         })
     }
 
@@ -151,9 +150,15 @@ impl Authority {
         runtime_source: Arc<dyn AuthorityRuntimeSource>,
     ) -> Result<Self, AuthorityError> {
         validate_authority_inputs(path, &config, &grant_key, &ledger_key)?;
+        let writer = AuthorityWriterGuard::acquire(path)?;
+        let database = writer.open_database()?;
         let grant_key_id = key_id(KeyPurpose::Grant, &grant_key.verifying_key());
         let ledger_key_id = key_id(KeyPurpose::Ledger, &ledger_key.verifying_key());
-        let mut conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let mut conn = Connection::open_with_flags(
+            writer.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        writer.verify_database(&database)?;
         configure_connection(&conn)?;
         verify_open_schema(&conn)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -173,6 +178,8 @@ impl Authority {
             retention.as_mut(),
         )?;
         tx.commit()?;
+        writer.verify_database(&database)?;
+        let storage = writer.bind_database(database)?;
 
         Ok(Self {
             conn,
@@ -185,6 +192,7 @@ impl Authority {
             retention,
             health: AuthorityHealthV2::Ready,
             runtime_source,
+            storage,
         })
     }
 }

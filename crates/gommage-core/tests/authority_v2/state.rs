@@ -134,38 +134,39 @@ fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
 
 #[test]
 fn generation_activation_linearizes_with_concurrent_approval() {
-    let (_directory, path, mut authority) = fixture();
+    let (_directory, _path, mut authority) = fixture();
     let request = create_request(&mut authority);
     let request_id = request.request_id().to_owned();
     let resolved_at = request.created_at();
-    drop(authority);
+    let authority = Arc::new(Mutex::new(authority));
 
     let barrier = Arc::new(Barrier::new(2));
     let approve_handle = {
-        let path = path.clone();
+        let authority = Arc::clone(&authority);
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
             let mut command = approve_command(1);
             command.request_id = request_id;
             command.resolved_at = resolved_at;
-            authority.approve(&command)
+            authority.lock().unwrap().approve(&command)
         })
     };
     let activate_handle = {
-        let path = path.clone();
+        let authority = Arc::clone(&authority);
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
-            authority.activate_generation(&activate_command("2", 2, 1_700_000_025))
+            authority
+                .lock()
+                .unwrap()
+                .activate_generation(&activate_command("2", 2, 1_700_000_025))
         })
     };
     let approve_result = approve_handle.join().unwrap();
     activate_handle.join().unwrap().unwrap();
 
-    let authority = open(&path);
+    let authority = authority.lock().unwrap();
     let verification = authority.verify_ledger().unwrap();
     let generation_seq = verification
         .entries
@@ -238,35 +239,39 @@ fn maintenance_blocks_decisions_without_mutation_until_signed_exit() {
 
 #[test]
 fn generation_activation_linearizes_with_concurrent_allow() {
-    let (_directory, path, mut authority) = fixture();
+    let (_directory, _path, mut authority) = fixture();
     let request = create_request(&mut authority);
     approve(&mut authority, &request);
-    drop(authority);
+    let authority = Arc::new(Mutex::new(authority));
 
     let barrier = Arc::new(Barrier::new(2));
     let consume_handle = {
-        let path = path.clone();
+        let authority = Arc::clone(&authority);
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
-            authority.commit_decision(&consume_command(20))
+            authority
+                .lock()
+                .unwrap()
+                .commit_decision(&consume_command(20))
         })
     };
     let activate_handle = {
-        let path = path.clone();
+        let authority = Arc::clone(&authority);
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
-            authority.activate_generation(&activate_command("2", 2, 1_700_000_025))
+            authority
+                .lock()
+                .unwrap()
+                .activate_generation(&activate_command("2", 2, 1_700_000_025))
         })
     };
     let consume_result = consume_handle.join().unwrap();
     let activated = activate_handle.join().unwrap().unwrap();
     assert_eq!(activated.active_generation(), &generation("2"));
 
-    let verification = open(&path).verify_ledger().unwrap();
+    let verification = authority.lock().unwrap().verify_ledger().unwrap();
     let activation_seq = verification
         .entries
         .iter()

@@ -964,6 +964,7 @@ dependencies = [
  "globset",
  "gommage-stdlib",
  "hex",
+ "libc",
  "proptest",
  "rand_core 0.6.4",
  "regex",

@@ -412,6 +412,7 @@ impl Authority {
         self.verify_ready(&tx)?;
         let request = load_request(&tx, request_id)?.map(|stored| stored.request);
         tx.commit()?;
+        self.storage.verify()?;
         Ok(request)
     }
 
@@ -424,6 +425,7 @@ impl Authority {
         self.verify_ready(&tx)?;
         let resolution = load_resolution(&tx, request_id)?;
         tx.commit()?;
+        self.storage.verify()?;
         Ok(resolution)
     }
 
@@ -434,6 +436,7 @@ impl Authority {
         let claim =
             load_claim(&tx, grant_id, &self.grant_key.verifying_key())?.map(|(signed, _)| signed);
         tx.commit()?;
+        self.storage.verify()?;
         Ok(claim)
     }
 
@@ -447,6 +450,7 @@ impl Authority {
         let state = load_latest_state(&tx, grant_id, &self.grant_key.verifying_key())?
             .map(|(signed, _)| signed);
         tx.commit()?;
+        self.storage.verify()?;
         Ok(state)
     }
 
@@ -456,6 +460,7 @@ impl Authority {
         self.verify_ready(&tx)?;
         let state = load_current_runtime_state(&tx)?;
         tx.commit()?;
+        self.storage.verify()?;
         Ok(state)
     }
 
@@ -471,6 +476,7 @@ impl Authority {
         let tx = self.conn.unchecked_transaction()?;
         let verification = self.verify_ready(&tx)?;
         tx.commit()?;
+        self.storage.verify()?;
         Ok(verification)
     }
 

@@ -25,6 +25,7 @@ base64.workspace = true
 time.workspace = true
 uuid.workspace = true
 dirs.workspace = true
+libc.workspace = true
 brush-parser.workspace = true
 
 [dev-dependencies]

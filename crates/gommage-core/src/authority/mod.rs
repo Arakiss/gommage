@@ -66,6 +66,7 @@ mod retained_commit;
 mod retention;
 mod schema;
 mod state;
+mod storage;
 mod verify;
 
 pub use decision_types::*;
@@ -81,6 +82,7 @@ use ledger_store::*;
 use retained_commit::*;
 use schema::*;
 use state::*;
+use storage::*;
 use verify::*;
 
 #[cfg(test)]
@@ -143,6 +145,12 @@ pub enum AuthorityError {
     /// The live instance encountered an indeterminate retention/commit outcome.
     #[error("authority instance is poisoned")]
     Poisoned,
+    /// Authority storage ownership, permissions, or pathname identity is unsafe.
+    #[error("authority storage failure: {0}")]
+    Storage(String),
+    /// Another cooperative process owns the Authority writer lock.
+    #[error("another authority writer already owns this database")]
+    WriterBusy,
 }
 
 /// Trusted source of wall-clock time and unique identifier entropy for Authority.
@@ -173,6 +181,19 @@ impl AuthorityRuntimeSource for SystemAuthorityRuntimeSource {
 
 /// File-backed reference-profile authorization authority.
 ///
+/// One stable sibling lock file is held for the complete lifetime of an
+/// Authority, so cooperative callers cannot open a second writer for the same
+/// database. The database and lock must be regular, single-link, mode-0600
+/// files owned by the effective UID inside a directory that is not group- or
+/// world-writable. SQLite is opened without following the final path component,
+/// and every operation verifies the retained database, directory, and lock
+/// identities before returning. The stable lock file is intentionally never
+/// unlinked.
+///
+/// These checks do not claim isolation from a hostile process running as the
+/// same UID with write access to the database directory. That boundary requires
+/// a separately protected service identity or operating-system sandbox.
+///
 /// Every mutation verifies the full signed history before writing, so mutation
 /// cost is linear in ledger length. This favors a simple fail-closed reference
 /// boundary; long-lived deployments should benchmark incremental proof caching
@@ -195,6 +216,9 @@ pub struct Authority {
     retention: Box<dyn CheckpointRetentionV2>,
     health: AuthorityHealthV2,
     runtime_source: Arc<dyn AuthorityRuntimeSource>,
+    // Must remain last: the SQLite connection and every other field drop before
+    // the stable writer lock held by this guard.
+    storage: AuthorityStorageGuard,
 }
 
 impl Authority {
@@ -204,6 +228,7 @@ impl Authority {
         self.verify_ready(&tx)?;
         let metadata = read_metadata(&tx)?;
         tx.commit()?;
+        self.storage.verify()?;
         Ok(metadata)
     }
 }

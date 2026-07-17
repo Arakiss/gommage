@@ -651,39 +651,39 @@ fn policy_allow_linearizes_before_or_fails_after_generation_activation() {
     let policy = decision_policy();
     let first = policy_generation("1", &policy.version_hash);
     let second = policy_generation("2", &policy.version_hash);
-    drop(open_policy_authority(&path, first.clone()));
+    let authority = Arc::new(Mutex::new(open_policy_authority(&path, first.clone())));
     let barrier = Arc::new(Barrier::new(2));
     let commit_handle = {
-        let path = path.clone();
+        let authority = Arc::clone(&authority);
         let policy = decision_policy();
         let first = first.clone();
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open_policy_authority(&path, first.clone());
             let command = evaluated_command(&first, &policy, "test.allow", "true");
             barrier.wait();
-            authority.commit_decision(&command)
+            authority.lock().unwrap().commit_decision(&command)
         })
     };
     let activation_handle = {
-        let path = path.clone();
-        let first = first.clone();
+        let authority = Arc::clone(&authority);
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open_policy_authority(&path, first);
             barrier.wait();
-            authority.activate_generation(&ActivateGenerationCommand {
-                generation: second,
-                event_id: "event_generation_2".into(),
-                operator_principal: "uid:501".into(),
-                reason: "activate successor".into(),
-                activated_at: 1_700_000_030,
-            })
+            authority
+                .lock()
+                .unwrap()
+                .activate_generation(&ActivateGenerationCommand {
+                    generation: second,
+                    event_id: "event_generation_2".into(),
+                    operator_principal: "uid:501".into(),
+                    reason: "activate successor".into(),
+                    activated_at: 1_700_000_030,
+                })
         })
     };
     let commit = commit_handle.join().unwrap();
     activation_handle.join().unwrap().unwrap();
-    let verification = open_policy_authority(&path, first).verify_ledger().unwrap();
+    let verification = authority.lock().unwrap().verify_ledger().unwrap();
     let activation_index = verification
         .entries
         .iter()

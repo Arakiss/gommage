@@ -21,6 +21,12 @@ enforced by `cargo-semver-checks` in CI.
   must provide durable, idempotent compare-and-swap semantics and document
   whether their storage is independent from the Authority database's rollback
   domain.
+* Authority now owns a stable sibling writer lock for its full lifetime, opens
+  SQLite with `SQLITE_OPEN_NOFOLLOW`, and retains the database file identity so
+  pathname replacement fails closed. The database and lock must be owned by
+  the effective UID, regular, single-link, mode-0600 files in a directory that
+  is not group- or world-writable. This is a cooperative writer boundary and
+  does not claim isolation from a hostile process under the same UID.
 
 ## [0.17.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.16.1-alpha.1...gommage-core-v0.17.0-alpha.1) (2026-07-13)
 

@@ -20,6 +20,7 @@ impl Authority {
         conn: &Connection,
     ) -> Result<LedgerVerification, AuthorityError> {
         self.ensure_ready()?;
+        self.storage.verify()?;
         self.require_cached_checkpoint_is_durably_active()?;
         let verification = verify_all(
             conn,
@@ -35,6 +36,7 @@ impl Authority {
             &self.ledger_key.verifying_key(),
         )?;
         self.require_cached_checkpoint_is_durably_active()?;
+        self.storage.verify()?;
         Ok(verification)
     }
 
@@ -68,6 +70,7 @@ impl Authority {
         operation: impl FnOnce(&Connection, &LedgerVerification) -> Result<T, AuthorityError>,
     ) -> Result<T, AuthorityError> {
         self.ensure_ready()?;
+        self.verify_storage_or_poison()?;
         let config = self.config.clone();
         let grant_key = self.grant_key.clone();
         let ledger_key = self.ledger_key.clone();
@@ -121,6 +124,7 @@ impl Authority {
                     self.health = AuthorityHealthV2::Poisoned;
                     return Err(AuthorityError::CommitOutcomeIndeterminate);
                 }
+                self.verify_storage_or_poison()?;
                 return Err(error);
             }
         };
@@ -137,6 +141,7 @@ impl Authority {
                     self.health = AuthorityHealthV2::Poisoned;
                     return Err(AuthorityError::CommitOutcomeIndeterminate);
                 }
+                self.verify_storage_or_poison()?;
                 return Err(error);
             }
         };
@@ -145,6 +150,7 @@ impl Authority {
                 self.health = AuthorityHealthV2::Poisoned;
                 return Err(AuthorityError::CommitOutcomeIndeterminate);
             }
+            self.verify_storage_or_poison()?;
             return Ok(result);
         }
 
@@ -159,6 +165,7 @@ impl Authority {
                     self.health = AuthorityHealthV2::Poisoned;
                     return Err(AuthorityError::CommitOutcomeIndeterminate);
                 }
+                self.verify_storage_or_poison()?;
                 return Err(error);
             }
         };
@@ -169,6 +176,7 @@ impl Authority {
                     self.health = AuthorityHealthV2::Poisoned;
                     return Err(AuthorityError::CommitOutcomeIndeterminate);
                 }
+                self.verify_storage_or_poison()?;
                 return Err(AuthorityError::Retention {
                     operation: CheckpointRetentionOperationV2::Stage,
                     outcome: CheckpointRetentionErrorV2::Rejected,
@@ -198,7 +206,16 @@ impl Authority {
             });
         }
         self.active_checkpoint = next;
+        self.verify_storage_or_poison()?;
         Ok(result)
+    }
+
+    fn verify_storage_or_poison(&mut self) -> Result<(), AuthorityError> {
+        if let Err(error) = self.storage.verify() {
+            self.health = AuthorityHealthV2::Poisoned;
+            return Err(error);
+        }
+        Ok(())
     }
 }
 

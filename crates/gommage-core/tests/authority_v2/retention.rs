@@ -173,10 +173,9 @@ fn promote_failure_poisons_and_active_with_pending_db_at_pending_recovers() {
 }
 
 #[test]
-fn promote_failure_during_live_reconciliation_poisons_that_instance() {
+fn writer_lock_blocks_peer_until_failed_promotion_is_reconciled() {
     let (_directory, path, mut writer) = fixture();
     let retention = retention_for(&path);
-    let mut peer = open(&path);
     retention.inject_promote(RetentionFault::Rejected);
     assert!(matches!(
         writer.commit_decision(&authorize_command()),
@@ -185,19 +184,19 @@ fn promote_failure_during_live_reconciliation_poisons_that_instance() {
             ..
         })
     ));
+    assert!(matches!(try_open(&path), Err(AuthorityError::WriterBusy)));
+    drop(writer);
 
     retention.inject_promote(RetentionFault::Rejected);
     assert!(matches!(
-        peer.set_maintenance(&maintenance_command(true, 1, 1_700_000_031)),
+        try_open(&path),
         Err(AuthorityError::Retention {
             operation: CheckpointRetentionOperationV2::Promote,
             outcome: CheckpointRetentionErrorV2::Rejected,
         })
     ));
-    assert!(matches!(
-        peer.verify_ledger(),
-        Err(AuthorityError::Poisoned)
-    ));
+    let recovered = open(&path);
+    assert_eq!(recovered.verify_ledger().unwrap().head_seq, "3");
 }
 
 #[test]

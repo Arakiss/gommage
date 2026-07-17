@@ -96,10 +96,6 @@ impl TestRetention {
         self.inner.lock().unwrap().promote_faults.push_back(fault);
     }
 
-    fn pause_next_promote(&self, entered: Arc<Barrier>, release: Arc<Barrier>) {
-        self.inner.lock().unwrap().promote_pause = Some((entered, release));
-    }
-
     fn calls(&self) -> (usize, usize) {
         let inner = self.inner.lock().unwrap();
         (inner.stage_calls, inner.promote_calls)
@@ -375,6 +371,36 @@ fn fixture() -> (TempDir, PathBuf, Authority) {
     let path = directory.path().join("authority.sqlite3");
     let authority = open(&path);
     (directory, path, authority)
+}
+
+fn concurrently_on_authority<T, F>(
+    authority: Authority,
+    workers: usize,
+    operation: F,
+) -> (Arc<Mutex<Authority>>, Vec<T>)
+where
+    T: Send + 'static,
+    F: Fn(usize, &mut Authority) -> T + Send + Sync + 'static,
+{
+    let authority = Arc::new(Mutex::new(authority));
+    let barrier = Arc::new(Barrier::new(workers));
+    let operation = Arc::new(operation);
+    let handles: Vec<_> = (0..workers)
+        .map(|index| {
+            let authority = Arc::clone(&authority);
+            let barrier = Arc::clone(&barrier);
+            let operation = Arc::clone(&operation);
+            thread::spawn(move || {
+                barrier.wait();
+                operation(index, &mut authority.lock().unwrap())
+            })
+        })
+        .collect();
+    let results = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect();
+    (authority, results)
 }
 
 fn hash(byte: char) -> String {

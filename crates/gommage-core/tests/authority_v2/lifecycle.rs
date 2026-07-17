@@ -93,6 +93,77 @@ fn bootstrap_rejects_a_preexisting_symlink_without_touching_its_target() {
     assert_eq!(std::fs::metadata(&target).unwrap().len(), 0);
 }
 
+#[cfg(unix)]
+#[test]
+fn authority_database_and_stable_writer_lock_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (directory, path, authority) = fixture();
+    let lock_path = directory.path().join("authority.sqlite3.gommage.lock");
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        std::fs::metadata(&lock_path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+
+    drop(authority);
+    assert!(
+        lock_path.is_file(),
+        "the stable lock inode must never be unlinked"
+    );
+    open(&path).verify_ledger().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn open_rejects_symlink_hardlink_and_permissive_database_paths() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let (directory, path, authority) = fixture();
+    drop(authority);
+
+    let target = directory.path().join("authority-target.sqlite3");
+    std::fs::rename(&path, &target).unwrap();
+    symlink(&target, &path).unwrap();
+    assert!(matches!(try_open(&path), Err(AuthorityError::Storage(_))));
+    std::fs::remove_file(&path).unwrap();
+    std::fs::rename(&target, &path).unwrap();
+
+    let alias = directory.path().join("authority-hardlink.sqlite3");
+    std::fs::hard_link(&path, &alias).unwrap();
+    assert!(matches!(try_open(&path), Err(AuthorityError::Storage(_))));
+    std::fs::remove_file(&alias).unwrap();
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+    assert!(matches!(try_open(&path), Err(AuthorityError::Storage(_))));
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    open(&path).verify_ledger().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn bootstrap_rejects_a_group_writable_database_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o770)).unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    assert!(matches!(
+        Authority::bootstrap(
+            &path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(TestRetention::default()),
+        ),
+        Err(AuthorityError::Storage(message)) if message.contains("group- or world-writable")
+    ));
+    assert!(!path.exists());
+}
+
 #[test]
 fn authority_owns_a_durable_checkpoint_for_every_committed_head() {
     let (_directory, path, mut authority) = fixture();

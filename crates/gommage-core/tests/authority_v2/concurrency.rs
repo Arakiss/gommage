@@ -1,89 +1,58 @@
 use super::*;
 
 #[test]
-fn a_live_authority_fails_closed_after_another_instance_advances_the_head() {
-    let (_directory, path, mut writer) = fixture();
-    let stale = open(&path);
+fn one_live_authority_excludes_every_other_cooperative_writer() {
+    let (_directory, path, writer) = fixture();
+    assert!(matches!(try_open(&path), Err(AuthorityError::WriterBusy)));
+    assert_eq!(writer.verify_ledger().unwrap().head_seq, "1");
 
-    create_request(&mut writer);
-    assert!(matches!(
-        stale.verify_ledger(),
-        Err(AuthorityError::RollbackDetected(_))
-    ));
-    assert_eq!(writer.verify_ledger().unwrap().head_seq, "3");
-
-    drop(stale);
     drop(writer);
-    assert_eq!(open(&path).verify_ledger().unwrap().head_seq, "3");
+    assert_eq!(open(&path).verify_ledger().unwrap().head_seq, "1");
 }
 
 #[test]
-fn stale_reader_rejects_a_database_restored_to_its_cached_checkpoint() {
-    let (directory, path, mut writer) = fixture();
-    let snapshot = directory.path().join("genesis.snapshot.sqlite3");
-    let stale = open(&path);
+fn live_authority_rejects_database_path_replacement() {
+    let (directory, path, writer) = fixture();
+    let replacement = directory.path().join("replacement.sqlite3");
     Connection::open(&path)
         .unwrap()
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
         .unwrap();
-    std::fs::copy(&path, &snapshot).unwrap();
-
-    create_request(&mut writer);
-    Connection::open(&path)
-        .unwrap()
-        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
-        .unwrap();
-    std::fs::copy(&snapshot, &path).unwrap();
+    std::fs::copy(&path, &replacement).unwrap();
+    std::fs::rename(&replacement, &path).unwrap();
 
     assert!(matches!(
-        stale.verify_ledger(),
-        Err(AuthorityError::RollbackDetected(message))
-            if message.contains("durable active checkpoint")
+        writer.verify_ledger(),
+        Err(AuthorityError::Storage(message)) if message.contains("changed identity")
     ));
-    drop(stale);
+    assert!(matches!(try_open(&path), Err(AuthorityError::WriterBusy)));
     drop(writer);
-    assert!(matches!(
-        try_open(&path),
-        Err(AuthorityError::RollbackDetected(_))
-    ));
+    assert_eq!(open(&path).verify_ledger().unwrap().head_seq, "1");
 }
 
 #[test]
 fn late_promote_cannot_rewind_a_newer_durable_checkpoint() {
-    let (_directory, path, authority) = fixture();
-    drop(authority);
+    let (_directory, path, mut authority) = fixture();
     let retention = retention_for(&path);
-    let entered = Arc::new(Barrier::new(2));
-    let release = Arc::new(Barrier::new(2));
-    retention.pause_next_promote(Arc::clone(&entered), Arc::clone(&release));
-
-    let first_path = path.clone();
-    let first = thread::spawn(move || {
-        let mut authority = open(&first_path);
-        authority.commit_decision(&authorize_command())
-    });
-    entered.wait();
-
-    let mut second = open(&path);
-    let mut allow = authorize_command();
-    allow.call.input["command"] = json!("second-writer-after-recovery");
-    allow.evaluation = resolved_evaluation(&generation("1"), Decision::Allow, &["test.allow"]);
-    assert!(matches!(
-        second.commit_decision(&allow).unwrap(),
-        CommittedDecisionV2::AllowedByPolicy { .. }
-    ));
+    let CheckpointRetentionStateV2::Active(genesis) = retention.state() else {
+        panic!("bootstrap must leave genesis active");
+    };
+    create_request(&mut authority);
+    let CheckpointRetentionStateV2::Active(first_successor) = retention.state() else {
+        panic!("first mutation must leave one active successor");
+    };
+    authority
+        .set_maintenance(&maintenance_command(true, 1, 1_700_000_031))
+        .unwrap();
     let newest = retention.state();
 
-    release.wait();
+    let mut delayed_backend = retention.clone();
     assert!(matches!(
-        first.join().unwrap(),
-        Err(AuthorityError::Retention {
-            operation: CheckpointRetentionOperationV2::Promote,
-            outcome: CheckpointRetentionErrorV2::Rejected,
-        })
+        delayed_backend.promote(Some(&genesis), &first_successor),
+        Err(CheckpointRetentionErrorV2::Rejected)
     ));
     assert_eq!(retention.state(), newest);
-    let verification = second.verify_ledger().unwrap();
+    let verification = authority.verify_ledger().unwrap();
     let CheckpointRetentionStateV2::Active(active) = retention.state() else {
         panic!("newest checkpoint must remain active");
     };
@@ -94,24 +63,11 @@ fn late_promote_cannot_rewind_a_newer_durable_checkpoint() {
 
 #[test]
 fn concurrent_decision_asks_share_one_request_but_record_every_attempt() {
-    let (_directory, path, authority) = fixture();
-    drop(authority);
-    let barrier = Arc::new(Barrier::new(32));
-    let handles: Vec<_> = (0..32)
-        .map(|_| {
-            let barrier = Arc::clone(&barrier);
-            let path = path.clone();
-            thread::spawn(move || {
-                let mut authority = open(&path);
-                barrier.wait();
-                authority.commit_decision(&authorize_command())
-            })
-        })
-        .collect();
-    let results: Vec<_> = handles
-        .into_iter()
-        .map(|handle| handle.join().unwrap().unwrap())
-        .collect();
+    let (_directory, _path, authority) = fixture();
+    let (authority, results) = concurrently_on_authority(authority, 32, |_, authority| {
+        authority.commit_decision(&authorize_command())
+    });
+    let results: Vec<_> = results.into_iter().map(Result::unwrap).collect();
     assert_eq!(
         results
             .iter()
@@ -132,8 +88,7 @@ fn concurrent_decision_asks_share_one_request_but_record_every_attempt() {
             .count(),
         31
     );
-    let authority = open(&path);
-    let verification = authority.verify_ledger().unwrap();
+    let verification = authority.lock().unwrap().verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "34");
     assert_eq!(
         verification
@@ -159,28 +114,13 @@ fn thirty_two_concurrent_approvers_create_exactly_one_grant() {
     let request = create_request(&mut authority);
     let request_id = request.request_id().to_owned();
     let resolved_at = request.created_at();
-    drop(authority);
-
-    let barrier = Arc::new(Barrier::new(32));
-    let handles: Vec<_> = (0..32)
-        .map(|index| {
-            let barrier = Arc::clone(&barrier);
-            let path = path.clone();
-            let request_id = request_id.clone();
-            thread::spawn(move || {
-                let mut authority = open(&path);
-                barrier.wait();
-                let mut command = approve_command(index);
-                command.request_id = request_id;
-                command.resolved_at = resolved_at;
-                authority.approve(&command)
-            })
-        })
-        .collect();
-    let results: Vec<_> = handles
-        .into_iter()
-        .map(|handle| handle.join().unwrap().unwrap())
-        .collect();
+    let (authority, results) = concurrently_on_authority(authority, 32, move |index, authority| {
+        let mut command = approve_command(index);
+        command.request_id = request_id.clone();
+        command.resolved_at = resolved_at;
+        authority.approve(&command)
+    });
+    let results: Vec<_> = results.into_iter().map(Result::unwrap).collect();
     assert_eq!(
         results
             .iter()
@@ -200,32 +140,18 @@ fn thirty_two_concurrent_approvers_create_exactly_one_grant() {
         .query_row("SELECT count(*) FROM grant_claims", [], |row| row.get(0))
         .unwrap();
     assert_eq!(grants, 1);
-    open(&path).verify_ledger().unwrap();
+    authority.lock().unwrap().verify_ledger().unwrap();
 }
 
 #[test]
 fn thirty_two_concurrent_decisions_yield_one_allow_and_record_every_retry() {
-    let (_directory, path, mut authority) = fixture();
+    let (_directory, _path, mut authority) = fixture();
     let request = create_request(&mut authority);
     approve(&mut authority, &request);
-    drop(authority);
-
-    let barrier = Arc::new(Barrier::new(32));
-    let handles: Vec<_> = (0..32)
-        .map(|index| {
-            let barrier = Arc::clone(&barrier);
-            let path = path.clone();
-            thread::spawn(move || {
-                let mut authority = open(&path);
-                barrier.wait();
-                authority.commit_decision(&consume_command(index))
-            })
-        })
-        .collect();
-    let results: Vec<_> = handles
-        .into_iter()
-        .map(|handle| handle.join().unwrap().unwrap())
-        .collect();
+    let (authority, results) = concurrently_on_authority(authority, 32, |index, authority| {
+        authority.commit_decision(&consume_command(index))
+    });
+    let results: Vec<_> = results.into_iter().map(Result::unwrap).collect();
     assert_eq!(
         results
             .iter()
@@ -240,8 +166,9 @@ fn thirty_two_concurrent_decisions_yield_one_allow_and_record_every_retry() {
             .count(),
         31
     );
-    let authority = open(&path);
     let allow_events = authority
+        .lock()
+        .unwrap()
         .verify_ledger()
         .unwrap()
         .entries
@@ -269,25 +196,10 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
         request.created_at(),
         4,
     );
-    drop(authority);
-
-    let barrier = Arc::new(Barrier::new(32));
-    let handles: Vec<_> = (0..32)
-        .map(|_| {
-            let barrier = Arc::clone(&barrier);
-            let path = path.clone();
-            let command = command.clone();
-            thread::spawn(move || {
-                let mut authority = open(&path);
-                barrier.wait();
-                authority.commit_decision(&command)
-            })
-        })
-        .collect();
-    let results: Vec<_> = handles
-        .into_iter()
-        .map(|handle| handle.join().unwrap().unwrap())
-        .collect();
+    let (authority, results) = concurrently_on_authority(authority, 32, move |_, authority| {
+        authority.commit_decision(&command)
+    });
+    let results: Vec<_> = results.into_iter().map(Result::unwrap).collect();
     assert_eq!(
         results
             .iter()
@@ -329,8 +241,7 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
             .all(|request_id| *request_id == request_ids[0])
     );
 
-    let authority = open(&path);
-    let verification = authority.verify_ledger().unwrap();
+    let verification = authority.lock().unwrap().verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "39");
     assert_eq!(
         verification
@@ -356,33 +267,33 @@ fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
 
 #[test]
 fn approve_deny_and_consume_revoke_races_have_one_winner() {
-    let (_directory, path, mut authority) = fixture();
+    let (_directory, _path, mut authority) = fixture();
     let request = create_request(&mut authority);
     let request_id = request.request_id().to_owned();
     let resolved_at = request.created_at();
-    drop(authority);
+    let authority = Arc::new(Mutex::new(authority));
     let barrier = Arc::new(Barrier::new(2));
     let approve_handle = {
-        let path = path.clone();
+        let authority = Arc::clone(&authority);
         let barrier = Arc::clone(&barrier);
         let request_id = request_id.clone();
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
             let mut command = approve_command(1);
             command.request_id = request_id;
             command.resolved_at = resolved_at;
-            authority.approve(&command).unwrap()
+            authority.lock().unwrap().approve(&command).unwrap()
         })
     };
     let deny_handle = {
-        let path = path.clone();
+        let authority = Arc::clone(&authority);
         let barrier = Arc::clone(&barrier);
         let request_id = request_id.clone();
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
             authority
+                .lock()
+                .unwrap()
                 .deny(&deny_command(&request_id, 1, resolved_at))
                 .unwrap()
         })
@@ -394,30 +305,34 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
             + usize::from(matches!(deny_result, DenyResult::Denied(_))),
         1
     );
-    open(&path).verify_ledger().unwrap();
+    authority.lock().unwrap().verify_ledger().unwrap();
 
-    let (_terminal_directory, terminal_path, mut terminal_authority) = fixture();
+    let (_terminal_directory, _terminal_path, mut terminal_authority) = fixture();
     let terminal_request = create_request(&mut terminal_authority);
     approve(&mut terminal_authority, &terminal_request);
-    drop(terminal_authority);
+    let terminal_authority = Arc::new(Mutex::new(terminal_authority));
 
     let barrier = Arc::new(Barrier::new(2));
     let consume_handle = {
-        let path = terminal_path.clone();
+        let authority = Arc::clone(&terminal_authority);
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
-            authority.commit_decision(&consume_command(10)).unwrap()
+            authority
+                .lock()
+                .unwrap()
+                .commit_decision(&consume_command(10))
+                .unwrap()
         })
     };
     let revoke_handle = {
-        let path = terminal_path.clone();
+        let authority = Arc::clone(&terminal_authority);
         let barrier = Arc::clone(&barrier);
         thread::spawn(move || {
-            let mut authority = open(&path);
             barrier.wait();
             authority
+                .lock()
+                .unwrap()
                 .revoke(&RevokeCommand {
                     grant_id: "grant_1".into(),
                     event_id: "event_revoke".into(),
@@ -438,5 +353,5 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
         )) + usize::from(matches!(revoke_result, RevokeResult::Revoked(_))),
         1
     );
-    open(&terminal_path).verify_ledger().unwrap();
+    terminal_authority.lock().unwrap().verify_ledger().unwrap();
 }

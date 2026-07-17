@@ -37,6 +37,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 clap       = { version = "4", features = ["derive", "env"] }
 tokio      = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "fs", "signal", "sync", "time"] }
 dirs       = "6"
+libc       = "0.2"
 # Interactive TUI only. Default features bundle the crossterm backend, which we
 # consume via `ratatui::crossterm` (no separate crossterm pin). MIT-licensed.
 ratatui    = "0.30"

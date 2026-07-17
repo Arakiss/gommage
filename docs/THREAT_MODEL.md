@@ -201,6 +201,16 @@ instead of `/`, preventing project-scoped patterns from broadening to `/**`.
 
 ## 6. User-mode authority limit
 
+The opt-in Authority v2 core holds a stable per-database writer lock for each
+live instance, refuses symbolic or multiply linked database and lock files,
+opens SQLite with `SQLITE_OPEN_NOFOLLOW`, and checks the retained file identity
+around every operation. Those controls prevent accidental competing Authority
+writers and pathname substitution by users who cannot write the private
+directory. They do not turn same-UID advisory locks into a privilege boundary:
+a hostile process with that UID can ignore the lock, invoke SQLite directly,
+or modify directory entries. Reference deployment therefore still requires a
+separate service identity or sandbox in addition to the core storage checks.
+
 The shipped daemon, CLI, key, policy, approval inbox, picto database, and Unix
 socket are user-local. A process under the same UID can edit policy and state,
 read or replace the signing key, invoke daemon reload, or replace the binaries.
