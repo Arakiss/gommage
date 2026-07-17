@@ -37,18 +37,17 @@ pub(super) fn verify_pragmas(conn: &Connection) -> Result<(), AuthorityError> {
     Ok(())
 }
 
-pub(super) fn initialize_schema(
-    conn: &mut Connection,
+pub(super) fn initialize_schema_in_transaction(
+    conn: &Connection,
     config: &AuthorityConfig,
     grant_key_id: &str,
     ledger_key_id: &str,
     ledger_key: &SigningKey,
 ) -> Result<(), AuthorityError> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.pragma_update(None, "application_id", APPLICATION_ID)?;
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    tx.execute_batch(SCHEMA_SQL)?;
-    tx.execute(
+    conn.pragma_update(None, "application_id", APPLICATION_ID)?;
+    conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    conn.execute_batch(SCHEMA_SQL)?;
+    conn.execute(
         "INSERT INTO authority_meta (
             singleton, schema_version, instance_id, epoch, head_seq, head_hash,
             grant_key_id, ledger_key_id, genesis_generation_id, cutover_marker
@@ -65,13 +64,13 @@ pub(super) fn initialize_schema(
         ],
     )?;
     insert_generation(
-        &tx,
+        conn,
         &config.genesis_generation,
         &config.genesis_event_id,
         config.genesis_at,
     )?;
     insert_runtime_state(
-        &tx,
+        conn,
         0,
         config.genesis_generation.generation_id(),
         false,
@@ -79,7 +78,7 @@ pub(super) fn initialize_schema(
         config.genesis_at,
     )?;
     append_ledger_entry(
-        &tx,
+        conn,
         ledger_key,
         LedgerEventDraft {
             event_id: config.genesis_event_id.clone(),
@@ -99,7 +98,6 @@ pub(super) fn initialize_schema(
             },
         },
     )?;
-    tx.commit()?;
     Ok(())
 }
 

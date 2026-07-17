@@ -5,25 +5,47 @@ fn bootstrap_requires_an_exclusive_new_database_path() {
     let directory = tempfile::tempdir().unwrap();
     let empty_path = directory.path().join("empty.sqlite3");
     std::fs::File::create(&empty_path).unwrap();
+    let empty_retention = TestRetention::default();
     assert!(matches!(
-        Authority::bootstrap(&empty_path, &config(), &grant_key(), &ledger_key()),
+        Authority::bootstrap(
+            &empty_path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(empty_retention),
+        ),
         Err(AuthorityError::InvalidInput(message))
             if message.contains("new authority database path")
     ));
     assert_eq!(std::fs::metadata(&empty_path).unwrap().len(), 0);
 
     let initialized_path = directory.path().join("initialized.sqlite3");
-    let checkpoint =
-        Authority::bootstrap(&initialized_path, &config(), &grant_key(), &ledger_key()).unwrap();
+    let retention = retention_for(&initialized_path);
+    let authority = Authority::bootstrap(
+        &initialized_path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        Box::new(retention.clone()),
+    )
+    .unwrap();
     assert!(
-        Authority::bootstrap(&initialized_path, &config(), &grant_key(), &ledger_key()).is_err()
+        Authority::bootstrap(
+            &initialized_path,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(retention.clone()),
+        )
+        .is_err()
     );
+    drop(authority);
     Authority::open(
         &initialized_path,
         config(),
         grant_key(),
         ledger_key(),
-        checkpoint.clone(),
+        Box::new(retention.clone()),
     )
     .unwrap();
 
@@ -34,7 +56,7 @@ fn bootstrap_requires_an_exclusive_new_database_path() {
             config(),
             grant_key(),
             ledger_key(),
-            checkpoint,
+            Box::new(retention),
         )
         .is_err()
     );
@@ -52,7 +74,16 @@ fn bootstrap_rejects_a_preexisting_symlink_without_touching_its_target() {
     std::fs::File::create(&target).unwrap();
     symlink(&target, &link).unwrap();
 
-    assert!(Authority::bootstrap(&link, &config(), &grant_key(), &ledger_key()).is_err());
+    assert!(
+        Authority::bootstrap(
+            &link,
+            config(),
+            grant_key(),
+            ledger_key(),
+            Box::new(TestRetention::default()),
+        )
+        .is_err()
+    );
     assert!(
         std::fs::symlink_metadata(&link)
             .unwrap()
@@ -63,34 +94,29 @@ fn bootstrap_rejects_a_preexisting_symlink_without_touching_its_target() {
 }
 
 #[test]
-fn checkpoint_admission_requires_the_exact_current_head_and_strict_progress() {
-    let (_directory, _path, mut authority) = fixture();
+fn authority_owns_a_durable_checkpoint_for_every_committed_head() {
+    let (_directory, path, mut authority) = fixture();
+    let retention = retention_for(&path);
+    assert_eq!(retention.calls(), (1, 1));
+
     create_request(&mut authority);
-    let stale = authority
-        .checkpoint("checkpoint_stale", 1_700_000_020)
-        .unwrap();
-    create_second_request(&mut authority);
-
-    assert!(matches!(
-        authority.admit_checkpoint(stale),
-        Err(AuthorityError::RollbackDetected(_))
-    ));
+    let verification = authority.verify_ledger().unwrap();
+    let CheckpointRetentionStateV2::Active(signed) = retention.state() else {
+        panic!("successful mutation must leave one active checkpoint");
+    };
+    let checkpoint = signed.verify(&ledger_key().verifying_key()).unwrap();
+    assert_eq!(checkpoint.head_seq(), verification.head_seq);
+    assert_eq!(checkpoint.head_hash(), verification.head_hash);
+    assert_eq!(checkpoint.created_at(), 1_700_000_030);
     assert_eq!(
-        authority.verify_ledger().unwrap().freshness,
-        FreshnessVerdict::Anchored {
-            checkpoint_seq: "1".into()
-        }
+        checkpoint.checkpoint_id(),
+        format!(
+            "head:{}:{}",
+            verification.head_seq,
+            verification.head_hash.trim_start_matches("sha256:")
+        )
     );
-
-    let current = authority
-        .checkpoint("checkpoint_current", 1_700_000_021)
-        .unwrap();
-    authority.admit_checkpoint(current.clone()).unwrap();
-    assert!(matches!(
-        authority.admit_checkpoint(current),
-        Err(AuthorityError::InvalidInput(message))
-            if message.contains("strictly advance")
-    ));
+    assert_eq!(retention.calls(), (2, 2));
 }
 
 #[test]
@@ -268,8 +294,6 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
         authority.commit_decision(&consume_command(2)).unwrap(),
         CommittedDecisionV2::ApprovalRequired { created: true, .. }
     ));
-    let checkpoint = authority.checkpoint("checkpoint_1", 1_700_000_040).unwrap();
-    authority.admit_checkpoint(checkpoint.clone()).unwrap();
     let anchored = authority.verify_ledger().unwrap();
     assert_eq!(anchored.head_seq, "12");
     assert_eq!(
@@ -280,7 +304,7 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
     );
     drop(authority);
 
-    let reopened = Authority::open(&path, config(), grant_key(), ledger_key(), checkpoint).unwrap();
+    let reopened = open(&path);
     let verification = reopened.verify_ledger().unwrap();
     assert_eq!(verification.head_seq, "12");
     assert!(reopened.grant("grant_1").unwrap().is_some());
@@ -330,7 +354,7 @@ fn signed_ledger_pages_are_bounded_and_keep_one_snapshot_head() {
     assert_eq!(
         first.freshness,
         FreshnessVerdict::Anchored {
-            checkpoint_seq: "1".into()
+            checkpoint_seq: "7".into()
         }
     );
     let first_cursor = first.next_cursor.unwrap();

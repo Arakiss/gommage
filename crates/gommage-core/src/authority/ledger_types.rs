@@ -321,21 +321,21 @@ pub struct VerifiedLedgerEntryV2 {
     pub entry_hash: String,
 }
 
-/// Freshness statement produced by local-chain verification.
+/// Freshness statement produced by signed-chain verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FreshnessVerdict {
-    /// A bootstrap/internal verifier has no external rollback anchor.
+    /// A bootstrap/internal verifier has no durable rollback anchor yet.
     ///
     /// Public runtime Authority operations never return this verdict because
     /// they cannot open without a retained checkpoint.
     Unanchored,
-    /// The chain contains and extends the supplied trusted checkpoint.
+    /// The chain contains the supplied durably retained checkpoint.
     ///
-    /// This proves the prefix through `checkpoint_seq`. A rollback confined to
-    /// later entries cannot be detected until a later checkpoint is retained
-    /// outside the authority database and admitted by the runtime.
+    /// Internal recovery may verify a retained prefix while reconciling a
+    /// staged successor. Public Authority reads require `checkpoint_seq` to be
+    /// the exact verified database head.
     Anchored {
-        /// Trusted external checkpoint sequence.
+        /// Durably retained checkpoint sequence.
         checkpoint_seq: String,
     },
 }
@@ -349,11 +349,11 @@ pub struct LedgerVerification {
     pub head_seq: String,
     /// Verified signature-inclusive database head hash.
     pub head_hash: String,
-    /// Explicit bootstrap-only or externally anchored prefix result.
+    /// Explicit bootstrap-only or durably anchored result.
     pub freshness: FreshnessVerdict,
 }
 
-/// Signed checkpoint content intended for storage outside the authority database.
+/// Signed checkpoint content intended for a host-provided durable retention adapter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LedgerCheckpointV2 {
@@ -369,7 +369,7 @@ pub struct LedgerCheckpointV2 {
 }
 
 impl LedgerCheckpointV2 {
-    /// Return the external checkpoint identifier.
+    /// Return the deterministic authority-owned checkpoint identifier.
     pub fn checkpoint_id(&self) -> &str {
         &self.checkpoint_id
     }
@@ -576,7 +576,7 @@ pub struct LedgerPageV2 {
     pub snapshot_head_seq: String,
     /// Snapshot head hash shared by every page in this traversal.
     pub snapshot_head_hash: String,
-    /// Local-only or externally anchored freshness verdict for the current store.
+    /// Bootstrap-only or durably anchored freshness verdict for the current store.
     pub freshness: FreshnessVerdict,
     /// Signed continuation cursor, absent when the snapshot is exhausted.
     pub next_cursor: Option<SignedLedgerCursorV2>,

@@ -1,75 +1,95 @@
 use super::*;
 
-struct LockHoldingRuntimeSource {
-    entered: Arc<Barrier>,
-    release: Arc<Barrier>,
-    next_nonce: AtomicU64,
-}
+#[test]
+fn a_live_authority_fails_closed_after_another_instance_advances_the_head() {
+    let (_directory, path, mut writer) = fixture();
+    let stale = open(&path);
 
-impl AuthorityRuntimeSource for LockHoldingRuntimeSource {
-    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
-        self.entered.wait();
-        self.release.wait();
-        Ok(1_700_000_030)
-    }
+    create_request(&mut writer);
+    assert!(matches!(
+        stale.verify_ledger(),
+        Err(AuthorityError::RollbackDetected(_))
+    ));
+    assert_eq!(writer.verify_ledger().unwrap().head_seq, "3");
 
-    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
-        let nonce = self.next_nonce.fetch_add(1, Ordering::SeqCst);
-        Ok(format!("serialized{nonce:016x}"))
-    }
+    drop(stale);
+    drop(writer);
+    assert_eq!(open(&path).verify_ledger().unwrap().head_seq, "3");
 }
 
 #[test]
-fn checkpoint_admission_serializes_behind_an_inflight_writer() {
-    let (_directory, path, mut authority) = fixture();
-    create_request(&mut authority);
-    let candidate = authority
-        .checkpoint("checkpoint_before_writer", 1_700_000_020)
+fn stale_reader_rejects_a_database_restored_to_its_cached_checkpoint() {
+    let (directory, path, mut writer) = fixture();
+    let snapshot = directory.path().join("genesis.snapshot.sqlite3");
+    let stale = open(&path);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
         .unwrap();
-    drop(authority);
+    std::fs::copy(&path, &snapshot).unwrap();
 
+    create_request(&mut writer);
+    Connection::open(&path)
+        .unwrap()
+        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .unwrap();
+    std::fs::copy(&snapshot, &path).unwrap();
+
+    assert!(matches!(
+        stale.verify_ledger(),
+        Err(AuthorityError::RollbackDetected(message))
+            if message.contains("durable active checkpoint")
+    ));
+    drop(stale);
+    drop(writer);
+    assert!(matches!(
+        try_open(&path),
+        Err(AuthorityError::RollbackDetected(_))
+    ));
+}
+
+#[test]
+fn late_promote_cannot_rewind_a_newer_durable_checkpoint() {
+    let (_directory, path, authority) = fixture();
+    drop(authority);
+    let retention = retention_for(&path);
     let entered = Arc::new(Barrier::new(2));
     let release = Arc::new(Barrier::new(2));
-    let mut writer = open_with_source(
-        &path,
-        config(),
-        Arc::new(LockHoldingRuntimeSource {
-            entered: Arc::clone(&entered),
-            release: Arc::clone(&release),
-            next_nonce: AtomicU64::new(1),
-        }),
-    );
-    let mut admitting = open(&path);
-    let writer_handle = thread::spawn(move || writer.commit_decision(&authorize_command()));
+    retention.pause_next_promote(Arc::clone(&entered), Arc::clone(&release));
+
+    let first_path = path.clone();
+    let first = thread::spawn(move || {
+        let mut authority = open(&first_path);
+        authority.commit_decision(&authorize_command())
+    });
     entered.wait();
 
-    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
-    let admission_handle = thread::spawn(move || {
-        ready_tx.send(()).unwrap();
-        done_tx.send(admitting.admit_checkpoint(candidate)).unwrap();
-    });
-    ready_rx.recv().unwrap();
-    assert!(
-        done_rx
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .is_err(),
-        "checkpoint admission must wait for the existing immediate writer"
-    );
+    let mut second = open(&path);
+    let mut allow = authorize_command();
+    allow.call.input["command"] = json!("second-writer-after-recovery");
+    allow.evaluation = resolved_evaluation(&generation("1"), Decision::Allow, &["test.allow"]);
+    assert!(matches!(
+        second.commit_decision(&allow).unwrap(),
+        CommittedDecisionV2::AllowedByPolicy { .. }
+    ));
+    let newest = retention.state();
 
     release.wait();
     assert!(matches!(
-        writer_handle.join().unwrap().unwrap(),
-        CommittedDecisionV2::ApprovalRequired { created: false, .. }
+        first.join().unwrap(),
+        Err(AuthorityError::Retention {
+            operation: CheckpointRetentionOperationV2::Promote,
+            outcome: CheckpointRetentionErrorV2::Rejected,
+        })
     ));
-    assert!(matches!(
-        done_rx
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .unwrap(),
-        Err(AuthorityError::RollbackDetected(_))
-    ));
-    admission_handle.join().unwrap();
-    assert_eq!(open(&path).verify_ledger().unwrap().head_seq, "4");
+    assert_eq!(retention.state(), newest);
+    let verification = second.verify_ledger().unwrap();
+    let CheckpointRetentionStateV2::Active(active) = retention.state() else {
+        panic!("newest checkpoint must remain active");
+    };
+    let checkpoint = active.verify(&ledger_key().verifying_key()).unwrap();
+    assert_eq!(checkpoint.head_seq(), verification.head_seq);
+    assert_eq!(checkpoint.head_hash(), verification.head_hash);
 }
 
 #[test]

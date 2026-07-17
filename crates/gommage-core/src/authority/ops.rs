@@ -14,76 +14,56 @@ impl Authority {
             command.activated_at,
         )?;
         let ledger_key = self.ledger_key.clone();
-        let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        let current = load_current_runtime_state(&tx)?;
-        if !generation_id_is_newer(
-            command.generation.generation_id(),
-            current.active_generation.generation_id(),
-        ) {
-            return Err(AuthorityError::InvalidInput(
-                "successor generation id must be strictly greater than the active id".into(),
-            ));
-        }
-        if load_generation(&tx, command.generation.generation_id())?.is_some() {
-            return Err(AuthorityError::InvalidInput(
-                "generation id is already present".into(),
-            ));
-        }
-        let revision = next_runtime_revision(&current)?;
-        insert_generation(
-            &tx,
-            &command.generation,
-            &command.event_id,
-            command.activated_at,
-        )?;
-        insert_runtime_state(
-            &tx,
-            revision,
-            command.generation.generation_id(),
-            current.maintenance,
-            &command.event_id,
-            command.activated_at,
-        )?;
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.event_id.clone(),
-                subject: "authority".into(),
-                timestamp: command.activated_at,
-                build_identity: Some(command.generation.build_identity().into()),
-                policy_identity: Some(command.generation.policy_identity().into()),
-                payload: LedgerPayloadV2::GenerationActivated {
-                    previous_generation_id: current.active_generation.generation_id().into(),
-                    generation: command.generation.clone(),
-                    maintenance: current.maintenance,
-                    operator_principal: command.operator_principal.clone(),
-                    reason: command.reason.clone(),
+        self.retained_commit(|tx, _| {
+            let current = load_current_runtime_state(tx)?;
+            if !generation_id_is_newer(
+                command.generation.generation_id(),
+                current.active_generation.generation_id(),
+            ) {
+                return Err(AuthorityError::InvalidInput(
+                    "successor generation id must be strictly greater than the active id".into(),
+                ));
+            }
+            if load_generation(tx, command.generation.generation_id())?.is_some() {
+                return Err(AuthorityError::InvalidInput(
+                    "generation id is already present".into(),
+                ));
+            }
+            let revision = next_runtime_revision(&current)?;
+            insert_generation(
+                tx,
+                &command.generation,
+                &command.event_id,
+                command.activated_at,
+            )?;
+            insert_runtime_state(
+                tx,
+                revision,
+                command.generation.generation_id(),
+                current.maintenance,
+                &command.event_id,
+                command.activated_at,
+            )?;
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: command.event_id.clone(),
+                    subject: "authority".into(),
+                    timestamp: command.activated_at,
+                    build_identity: Some(command.generation.build_identity().into()),
+                    policy_identity: Some(command.generation.policy_identity().into()),
+                    payload: LedgerPayloadV2::GenerationActivated {
+                        previous_generation_id: current.active_generation.generation_id().into(),
+                        generation: command.generation.clone(),
+                        maintenance: current.maintenance,
+                        operator_principal: command.operator_principal.clone(),
+                        reason: command.reason.clone(),
+                    },
                 },
-            },
-        )?;
-        verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        let activated = load_current_runtime_state(&tx)?;
-        tx.commit()?;
-        Ok(activated)
+            )?;
+            load_current_runtime_state(tx)
+        })
     }
 
     /// Enter or leave fail-closed maintenance as one signed authority transition.
@@ -98,66 +78,46 @@ impl Authority {
             command.transitioned_at,
         )?;
         let ledger_key = self.ledger_key.clone();
-        let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        let current = load_current_runtime_state(&tx)?;
-        if current.maintenance == command.enabled {
-            return Err(AuthorityError::InvalidInput(format!(
-                "authority maintenance is already {}",
-                if command.enabled {
-                    "enabled"
-                } else {
-                    "disabled"
-                }
-            )));
-        }
-        let revision = next_runtime_revision(&current)?;
-        insert_runtime_state(
-            &tx,
-            revision,
-            current.active_generation.generation_id(),
-            command.enabled,
-            &command.event_id,
-            command.transitioned_at,
-        )?;
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.event_id.clone(),
-                subject: "authority".into(),
-                timestamp: command.transitioned_at,
-                build_identity: Some(current.active_generation.build_identity().into()),
-                policy_identity: Some(current.active_generation.policy_identity().into()),
-                payload: LedgerPayloadV2::MaintenanceChanged {
-                    generation: current.active_generation.clone(),
-                    enabled: command.enabled,
-                    operator_principal: command.operator_principal.clone(),
-                    reason: command.reason.clone(),
+        self.retained_commit(|tx, _| {
+            let current = load_current_runtime_state(tx)?;
+            if current.maintenance == command.enabled {
+                return Err(AuthorityError::InvalidInput(format!(
+                    "authority maintenance is already {}",
+                    if command.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                )));
+            }
+            let revision = next_runtime_revision(&current)?;
+            insert_runtime_state(
+                tx,
+                revision,
+                current.active_generation.generation_id(),
+                command.enabled,
+                &command.event_id,
+                command.transitioned_at,
+            )?;
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: command.event_id.clone(),
+                    subject: "authority".into(),
+                    timestamp: command.transitioned_at,
+                    build_identity: Some(current.active_generation.build_identity().into()),
+                    policy_identity: Some(current.active_generation.policy_identity().into()),
+                    payload: LedgerPayloadV2::MaintenanceChanged {
+                        generation: current.active_generation.clone(),
+                        enabled: command.enabled,
+                        operator_principal: command.operator_principal.clone(),
+                        reason: command.reason.clone(),
+                    },
                 },
-            },
-        )?;
-        verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        let changed = load_current_runtime_state(&tx)?;
-        tx.commit()?;
-        Ok(changed)
+            )?;
+            load_current_runtime_state(tx)
+        })
     }
 
     /// Resolve an open request as approved and atomically create its active grant.
@@ -183,139 +143,127 @@ impl Authority {
         validate_timestamp(expires_at)?;
         let grant_key = self.grant_key.clone();
         let ledger_key = self.ledger_key.clone();
-        let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
         let config = self.config.clone();
         let grant_key_id = self.grant_key_id.clone();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        if let Some(resolution) = load_resolution(&tx, &command.request_id)? {
-            tx.commit()?;
-            return Ok(ApproveResult::AlreadyResolved(resolution));
-        }
-        let stored = load_request(&tx, &command.request_id)?
-            .ok_or_else(|| AuthorityError::InvalidInput("approval request not found".into()))?;
-        ensure_request_is_open(&tx, &stored)?;
-        ensure_decision_admitted(&tx, stored.request.generation())?;
-        if command.resolved_at < stored.request.created_at() {
-            return Err(AuthorityError::InvalidInput(
-                "approval cannot predate its request".into(),
-            ));
-        }
-        let request_generation = stored.request.generation().clone();
-        let request_build_identity = stored.request.build_identity().to_owned();
-        let claim = GrantClaimV2::new(GrantClaimFields {
-            authority_instance: config.instance_id.clone(),
-            authority_epoch: config.epoch.clone(),
-            grant_id: command.grant_id.clone(),
-            issued_at: command.resolved_at,
-            not_before: command.resolved_at,
-            expires_at,
-            required_scope: stored.request.required_scope().into(),
-            input_hash: stored.request.input_hash().into(),
-            binding: stored.request.binding(),
-            approval_request_id: stored.request.request_id().into(),
-            request_hash: stored.request_hash.clone(),
-            operator_principal: command.operator_principal.clone(),
-            reason: command.reason.clone(),
-            grant_key_id,
-        })?;
-        let signed_claim = SignedGrantClaimV2::sign(&claim, &grant_key)?;
-        let active = GrantStateV2::active(
-            &claim,
-            signed_claim.claim_hash(),
-            command.activation_event_id.clone(),
-            command.resolved_at,
-        )?;
-        let signed_state = SignedGrantStateV2::sign(&active, &grant_key)?;
-        tx.execute(
-            "INSERT INTO approval_resolutions (
+        self.retained_commit(|tx, _| {
+            if let Some(resolution) = load_resolution(tx, &command.request_id)? {
+                return Ok(ApproveResult::AlreadyResolved(resolution));
+            }
+            let stored = load_request(tx, &command.request_id)?
+                .ok_or_else(|| AuthorityError::InvalidInput("approval request not found".into()))?;
+            ensure_request_is_open(tx, &stored)?;
+            ensure_decision_admitted(tx, stored.request.generation())?;
+            if command.resolved_at < stored.request.created_at() {
+                return Err(AuthorityError::InvalidInput(
+                    "approval cannot predate its request".into(),
+                ));
+            }
+            let request_generation = stored.request.generation().clone();
+            let request_build_identity = stored.request.build_identity().to_owned();
+            let claim = GrantClaimV2::new(GrantClaimFields {
+                authority_instance: config.instance_id.clone(),
+                authority_epoch: config.epoch.clone(),
+                grant_id: command.grant_id.clone(),
+                issued_at: command.resolved_at,
+                not_before: command.resolved_at,
+                expires_at,
+                required_scope: stored.request.required_scope().into(),
+                input_hash: stored.request.input_hash().into(),
+                binding: stored.request.binding(),
+                approval_request_id: stored.request.request_id().into(),
+                request_hash: stored.request_hash.clone(),
+                operator_principal: command.operator_principal.clone(),
+                reason: command.reason.clone(),
+                grant_key_id,
+            })?;
+            let signed_claim = SignedGrantClaimV2::sign(&claim, &grant_key)?;
+            let active = GrantStateV2::active(
+                &claim,
+                signed_claim.claim_hash(),
+                command.activation_event_id.clone(),
+                command.resolved_at,
+            )?;
+            let signed_state = SignedGrantStateV2::sign(&active, &grant_key)?;
+            tx.execute(
+                "INSERT INTO approval_resolutions (
                 request_id, outcome, operator_principal, reason, resolved_at, grant_id, event_id
              ) VALUES (?1, 'approved', ?2, ?3, ?4, ?5, ?6)",
-            params![
-                command.request_id,
-                command.operator_principal,
-                command.reason,
-                command.resolved_at,
-                command.grant_id,
-                command.resolution_event_id,
-            ],
-        )?;
-        tx.execute(
-            "INSERT INTO grant_claims (
+                params![
+                    command.request_id,
+                    command.operator_principal,
+                    command.reason,
+                    command.resolved_at,
+                    command.grant_id,
+                    command.resolution_event_id,
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO grant_claims (
                 grant_id, request_id, claim_jcs, signature_b64, claim_hash
              ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                command.grant_id,
-                command.request_id,
-                signed_claim.envelope().jcs(),
-                signed_claim.envelope().signature_b64(),
-                signed_claim.claim_hash(),
-            ],
-        )?;
-        insert_state(&tx, &active, &signed_state)?;
-        let deleted = tx.execute(
-            "DELETE FROM open_approvals WHERE request_id = ?1",
-            [&command.request_id],
-        )?;
-        if deleted != 1 {
-            return Err(AuthorityError::Corrupt(
-                "approved request did not own exactly one open slot".into(),
-            ));
-        }
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.resolution_event_id.clone(),
-                subject: command.request_id.clone(),
-                timestamp: command.resolved_at,
-                build_identity: Some(request_build_identity.clone()),
-                policy_identity: Some(stored.request.policy_identity().into()),
-                payload: LedgerPayloadV2::ApprovalResolved {
-                    request_id: command.request_id.clone(),
-                    request_hash: stored.request_hash,
-                    outcome: ApprovalResolutionKindV2::Approved.as_str().into(),
-                    grant_id: Some(command.grant_id.clone()),
-                    claim_hash: Some(signed_claim.claim_hash().into()),
-                    operator_principal: command.operator_principal.clone(),
-                    reason: command.reason.clone(),
+                params![
+                    command.grant_id,
+                    command.request_id,
+                    signed_claim.envelope().jcs(),
+                    signed_claim.envelope().signature_b64(),
+                    signed_claim.claim_hash(),
+                ],
+            )?;
+            insert_state(tx, &active, &signed_state)?;
+            let deleted = tx.execute(
+                "DELETE FROM open_approvals WHERE request_id = ?1",
+                [&command.request_id],
+            )?;
+            if deleted != 1 {
+                return Err(AuthorityError::Corrupt(
+                    "approved request did not own exactly one open slot".into(),
+                ));
+            }
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: command.resolution_event_id.clone(),
+                    subject: command.request_id.clone(),
+                    timestamp: command.resolved_at,
+                    build_identity: Some(request_build_identity.clone()),
+                    policy_identity: Some(stored.request.policy_identity().into()),
+                    payload: LedgerPayloadV2::ApprovalResolved {
+                        request_id: command.request_id.clone(),
+                        request_hash: stored.request_hash,
+                        outcome: ApprovalResolutionKindV2::Approved.as_str().into(),
+                        grant_id: Some(command.grant_id.clone()),
+                        claim_hash: Some(signed_claim.claim_hash().into()),
+                        operator_principal: command.operator_principal.clone(),
+                        reason: command.reason.clone(),
+                    },
                 },
-            },
-        )?;
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.activation_event_id.clone(),
-                subject: command.grant_id.clone(),
-                timestamp: command.resolved_at,
-                build_identity: Some(request_build_identity),
-                policy_identity: Some(stored.request.policy_identity().into()),
-                payload: LedgerPayloadV2::GrantStateChanged {
-                    grant_id: command.grant_id.clone(),
-                    claim_hash: signed_claim.claim_hash().into(),
-                    state_hash: signed_state.state_hash().into(),
-                    revision: active.revision().into(),
-                    status: GrantStatusV2::Active,
-                    operator_principal: None,
-                    reason: None,
+            )?;
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: command.activation_event_id.clone(),
+                    subject: command.grant_id.clone(),
+                    timestamp: command.resolved_at,
+                    build_identity: Some(request_build_identity),
+                    policy_identity: Some(stored.request.policy_identity().into()),
+                    payload: LedgerPayloadV2::GrantStateChanged {
+                        grant_id: command.grant_id.clone(),
+                        claim_hash: signed_claim.claim_hash().into(),
+                        state_hash: signed_state.state_hash().into(),
+                        revision: active.revision().into(),
+                        status: GrantStatusV2::Active,
+                        operator_principal: None,
+                        reason: None,
+                    },
                 },
-            },
-        )?;
-        ensure_decision_admitted(&tx, &request_generation)?;
-        tx.commit()?;
-        Ok(ApproveResult::Approved {
-            claim: signed_claim,
-            state: signed_state,
+            )?;
+            ensure_decision_admitted(tx, &request_generation)?;
+            Ok(ApproveResult::Approved {
+                claim: signed_claim,
+                state: signed_state,
+            })
         })
     }
 
@@ -329,83 +277,70 @@ impl Authority {
         )?;
         validate_token("denial event id", &command.event_id, 160)?;
         let ledger_key = self.ledger_key.clone();
-        let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        if let Some(resolution) = load_resolution(&tx, &command.request_id)? {
-            tx.commit()?;
-            return Ok(DenyResult::AlreadyResolved(resolution));
-        }
-        let stored = load_request(&tx, &command.request_id)?
-            .ok_or_else(|| AuthorityError::InvalidInput("approval request not found".into()))?;
-        ensure_request_is_open(&tx, &stored)?;
-        if command.resolved_at < stored.request.created_at() {
-            return Err(AuthorityError::InvalidInput(
-                "denial cannot predate its request".into(),
-            ));
-        }
-        tx.execute(
-            "INSERT INTO approval_resolutions (
+        self.retained_commit(|tx, _| {
+            if let Some(resolution) = load_resolution(tx, &command.request_id)? {
+                return Ok(DenyResult::AlreadyResolved(resolution));
+            }
+            let stored = load_request(tx, &command.request_id)?
+                .ok_or_else(|| AuthorityError::InvalidInput("approval request not found".into()))?;
+            ensure_request_is_open(tx, &stored)?;
+            if command.resolved_at < stored.request.created_at() {
+                return Err(AuthorityError::InvalidInput(
+                    "denial cannot predate its request".into(),
+                ));
+            }
+            tx.execute(
+                "INSERT INTO approval_resolutions (
                 request_id, outcome, operator_principal, reason, resolved_at, grant_id, event_id
              ) VALUES (?1, 'denied', ?2, ?3, ?4, NULL, ?5)",
-            params![
-                command.request_id,
-                command.operator_principal,
-                command.reason,
-                command.resolved_at,
-                command.event_id,
-            ],
-        )?;
-        let deleted = tx.execute(
-            "DELETE FROM open_approvals WHERE request_id = ?1",
-            [&command.request_id],
-        )?;
-        if deleted != 1 {
-            return Err(AuthorityError::Corrupt(
-                "denied request did not own exactly one open slot".into(),
-            ));
-        }
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.event_id.clone(),
-                subject: command.request_id.clone(),
-                timestamp: command.resolved_at,
-                build_identity: Some(stored.request.build_identity().into()),
-                policy_identity: Some(stored.request.policy_identity().into()),
-                payload: LedgerPayloadV2::ApprovalResolved {
-                    request_id: command.request_id.clone(),
-                    request_hash: stored.request_hash,
-                    outcome: ApprovalResolutionKindV2::Denied.as_str().into(),
-                    grant_id: None,
-                    claim_hash: None,
-                    operator_principal: command.operator_principal.clone(),
-                    reason: command.reason.clone(),
+                params![
+                    command.request_id,
+                    command.operator_principal,
+                    command.reason,
+                    command.resolved_at,
+                    command.event_id,
+                ],
+            )?;
+            let deleted = tx.execute(
+                "DELETE FROM open_approvals WHERE request_id = ?1",
+                [&command.request_id],
+            )?;
+            if deleted != 1 {
+                return Err(AuthorityError::Corrupt(
+                    "denied request did not own exactly one open slot".into(),
+                ));
+            }
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: command.event_id.clone(),
+                    subject: command.request_id.clone(),
+                    timestamp: command.resolved_at,
+                    build_identity: Some(stored.request.build_identity().into()),
+                    policy_identity: Some(stored.request.policy_identity().into()),
+                    payload: LedgerPayloadV2::ApprovalResolved {
+                        request_id: command.request_id.clone(),
+                        request_hash: stored.request_hash,
+                        outcome: ApprovalResolutionKindV2::Denied.as_str().into(),
+                        grant_id: None,
+                        claim_hash: None,
+                        operator_principal: command.operator_principal.clone(),
+                        reason: command.reason.clone(),
+                    },
                 },
-            },
-        )?;
-        let resolution = ApprovalResolutionV2 {
-            request_id: command.request_id.clone(),
-            kind: ApprovalResolutionKindV2::Denied,
-            operator_principal: command.operator_principal.clone(),
-            reason: command.reason.clone(),
-            resolved_at: command.resolved_at,
-            grant_id: None,
-            event_id: command.event_id.clone(),
-        };
-        tx.commit()?;
-        Ok(DenyResult::Denied(resolution))
+            )?;
+            let resolution = ApprovalResolutionV2 {
+                request_id: command.request_id.clone(),
+                kind: ApprovalResolutionKindV2::Denied,
+                operator_principal: command.operator_principal.clone(),
+                reason: command.reason.clone(),
+                resolved_at: command.resolved_at,
+                grant_id: None,
+                event_id: command.event_id.clone(),
+            };
+            Ok(DenyResult::Denied(resolution))
+        })
     }
 
     /// Revoke an active grant through the same serialized state boundary.
@@ -429,71 +364,52 @@ impl Authority {
         let grant_key = self.grant_key.clone();
         let ledger_key = self.ledger_key.clone();
         let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        let Some((signed_claim, _claim)) = load_claim(&tx, &command.grant_id, &grant_vk)? else {
-            tx.commit()?;
-            return Ok(RevokeResult::NotUsable(GrantNotUsableReason::Missing));
-        };
-        let (signed_previous, previous) = load_latest_state(&tx, &command.grant_id, &grant_vk)?
-            .ok_or_else(|| AuthorityError::Corrupt("grant claim has no signed state".into()))?;
-        if previous.status() != GrantStatusV2::Active {
-            tx.commit()?;
-            return Ok(RevokeResult::NotUsable(GrantNotUsableReason::Terminal));
-        }
-        let revoked = GrantStateV2::terminal(
-            &previous,
-            signed_previous.state_hash(),
-            GrantStatusV2::Revoked,
-            command.event_id.clone(),
-            command.revoked_at,
-        )?;
-        let signed_revoked = SignedGrantStateV2::sign(&revoked, &grant_key)?;
-        insert_state(&tx, &revoked, &signed_revoked)?;
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.event_id.clone(),
-                subject: command.grant_id.clone(),
-                timestamp: command.revoked_at,
-                build_identity: Some(command.build_identity.clone()),
-                policy_identity: None,
-                payload: LedgerPayloadV2::GrantStateChanged {
-                    grant_id: command.grant_id.clone(),
-                    claim_hash: signed_claim.claim_hash().into(),
-                    state_hash: signed_revoked.state_hash().into(),
-                    revision: revoked.revision().into(),
-                    status: GrantStatusV2::Revoked,
-                    operator_principal: Some(command.operator_principal.clone()),
-                    reason: Some(command.reason.clone()),
+        self.retained_commit(|tx, _| {
+            let Some((signed_claim, _claim)) = load_claim(tx, &command.grant_id, &grant_vk)? else {
+                return Ok(RevokeResult::NotUsable(GrantNotUsableReason::Missing));
+            };
+            let (signed_previous, previous) = load_latest_state(tx, &command.grant_id, &grant_vk)?
+                .ok_or_else(|| AuthorityError::Corrupt("grant claim has no signed state".into()))?;
+            if previous.status() != GrantStatusV2::Active {
+                return Ok(RevokeResult::NotUsable(GrantNotUsableReason::Terminal));
+            }
+            let revoked = GrantStateV2::terminal(
+                &previous,
+                signed_previous.state_hash(),
+                GrantStatusV2::Revoked,
+                command.event_id.clone(),
+                command.revoked_at,
+            )?;
+            let signed_revoked = SignedGrantStateV2::sign(&revoked, &grant_key)?;
+            insert_state(tx, &revoked, &signed_revoked)?;
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: command.event_id.clone(),
+                    subject: command.grant_id.clone(),
+                    timestamp: command.revoked_at,
+                    build_identity: Some(command.build_identity.clone()),
+                    policy_identity: None,
+                    payload: LedgerPayloadV2::GrantStateChanged {
+                        grant_id: command.grant_id.clone(),
+                        claim_hash: signed_claim.claim_hash().into(),
+                        state_hash: signed_revoked.state_hash().into(),
+                        revision: revoked.revision().into(),
+                        status: GrantStatusV2::Revoked,
+                        operator_principal: Some(command.operator_principal.clone()),
+                        reason: Some(command.reason.clone()),
+                    },
                 },
-            },
-        )?;
-        tx.commit()?;
-        Ok(RevokeResult::Revoked(signed_revoked))
+            )?;
+            Ok(RevokeResult::Revoked(signed_revoked))
+        })
     }
 
     /// Read and verify one immutable request and its signed-ledger link.
     pub fn request(&self, request_id: &str) -> Result<Option<ApprovalRequestV2>, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
-        verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
+        self.verify_ready(&tx)?;
         let request = load_request(&tx, request_id)?.map(|stored| stored.request);
         tx.commit()?;
         Ok(request)
@@ -505,13 +421,7 @@ impl Authority {
         request_id: &str,
     ) -> Result<Option<ApprovalResolutionV2>, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
-        verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
+        self.verify_ready(&tx)?;
         let resolution = load_resolution(&tx, request_id)?;
         tx.commit()?;
         Ok(resolution)
@@ -520,13 +430,7 @@ impl Authority {
     /// Read and cryptographically verify one immutable grant claim.
     pub fn grant(&self, grant_id: &str) -> Result<Option<SignedGrantClaimV2>, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
-        verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
+        self.verify_ready(&tx)?;
         let claim =
             load_claim(&tx, grant_id, &self.grant_key.verifying_key())?.map(|(signed, _)| signed);
         tx.commit()?;
@@ -539,13 +443,7 @@ impl Authority {
         grant_id: &str,
     ) -> Result<Option<SignedGrantStateV2>, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
-        verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
+        self.verify_ready(&tx)?;
         let state = load_latest_state(&tx, grant_id, &self.grant_key.verifying_key())?
             .map(|(signed, _)| signed);
         tx.commit()?;
@@ -555,13 +453,7 @@ impl Authority {
     /// Return the fully verified active generation and maintenance state.
     pub fn runtime_state(&self) -> Result<AuthorityRuntimeStateV2, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
-        verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
+        self.verify_ready(&tx)?;
         let state = load_current_runtime_state(&tx)?;
         tx.commit()?;
         Ok(state)
@@ -573,17 +465,11 @@ impl Authority {
     /// attestation and its internal reduction. It does not replay the policy or
     /// mapper artifacts identified by the signed generation.
     ///
-    /// Verification always applies the externally retained checkpoint supplied
-    /// at open (or subsequently admitted with [`Authority::admit_checkpoint`]).
+    /// Verification requires the database head to equal the durable active
+    /// checkpoint owned by this Authority instance.
     pub fn verify_ledger(&self) -> Result<LedgerVerification, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
-        let verification = verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
+        let verification = self.verify_ready(&tx)?;
         tx.commit()?;
         Ok(verification)
     }
@@ -696,96 +582,5 @@ impl Authority {
             freshness: verification.freshness,
             next_cursor,
         })
-    }
-
-    /// Produce a ledger-purpose signed checkpoint for an external trust store.
-    ///
-    /// Until the caller persists and admits this checkpoint, rollback detection
-    /// remains bounded by the previously retained checkpoint sequence.
-    pub fn checkpoint(
-        &self,
-        checkpoint_id: &str,
-        created_at: i64,
-    ) -> Result<SignedLedgerCheckpointV2, AuthorityError> {
-        validate_token("checkpoint id", checkpoint_id, 160)?;
-        validate_timestamp(created_at)?;
-        let verification = self.verify_ledger()?;
-        sign_checkpoint(
-            &self.config,
-            &self.ledger_key_id,
-            &self.ledger_key,
-            checkpoint_id,
-            created_at,
-            verification.head_seq,
-            verification.head_hash,
-        )
-    }
-
-    /// Admit a newer checkpoint after the caller has persisted it externally.
-    ///
-    /// The checkpoint must be a strict successor of the retained anchor and
-    /// commit the exact currently verified database head. The retained anchor is
-    /// replaced only after both the old and candidate checkpoints have verified
-    /// against the same immediate database transaction. Once admitted, rollback
-    /// detection covers the prefix through the candidate sequence; a later
-    /// uncheckpointed suffix still requires a subsequent retained checkpoint.
-    pub fn admit_checkpoint(
-        &mut self,
-        candidate: SignedLedgerCheckpointV2,
-    ) -> Result<(), AuthorityError> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
-        let retained = self
-            .retained_checkpoint
-            .verify(&self.ledger_key.verifying_key())?;
-        let next = candidate.verify(&self.ledger_key.verifying_key())?;
-        if next.authority_instance() != self.config.instance_id
-            || next.authority_epoch() != self.config.epoch
-            || next.ledger_key_id() != self.ledger_key_id
-        {
-            return Err(AuthorityError::RollbackDetected(
-                "candidate checkpoint belongs to another authority".into(),
-            ));
-        }
-        let retained_seq = retained
-            .head_seq()
-            .parse::<u64>()
-            .map_err(|_| AuthorityError::Corrupt("retained checkpoint sequence overflow".into()))?;
-        let next_seq = next.head_seq().parse::<u64>().map_err(|_| {
-            AuthorityError::Corrupt("candidate checkpoint sequence overflow".into())
-        })?;
-        if next_seq <= retained_seq {
-            return Err(AuthorityError::InvalidInput(
-                "candidate checkpoint must strictly advance the retained checkpoint".into(),
-            ));
-        }
-        if next.created_at() < retained.created_at() {
-            return Err(AuthorityError::InvalidInput(
-                "candidate checkpoint timestamp predates the retained checkpoint".into(),
-            ));
-        }
-        if next.head_seq() != current.head_seq || next.head_hash() != current.head_hash {
-            return Err(AuthorityError::RollbackDetected(
-                "candidate checkpoint does not commit the current database head".into(),
-            ));
-        }
-        verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&candidate),
-        )?;
-        tx.commit()?;
-        self.retained_checkpoint = candidate;
-        Ok(())
     }
 }

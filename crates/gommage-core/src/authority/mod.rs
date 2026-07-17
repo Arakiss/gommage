@@ -4,7 +4,8 @@
 //! generation, fail-closed maintenance, approval deduplication, exact single-use
 //! grants, state transitions, and signed decision evidence. Every mutation is
 //! serialized by `BEGIN IMMEDIATE` and returns an authorization result only after
-//! the corresponding state and ledger entries commit.
+//! the corresponding state and ledger entries commit and their exact head
+//! checkpoint is durably promoted.
 
 use crate::{
     crypto_envelope::{
@@ -20,11 +21,10 @@ use crate::{
     picto::PictoBinding,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    fs::OpenOptions,
     path::Path,
     sync::Arc,
     time::Duration,
@@ -41,7 +41,6 @@ const GENERATION_DOMAIN: &str = "gommage.authority.generation";
 const LEDGER_DOMAIN: &str = "gommage.ledger.entry";
 const CHECKPOINT_DOMAIN: &str = "gommage.ledger.checkpoint";
 const CURSOR_DOMAIN: &str = "gommage.ledger.cursor";
-const GENESIS_CHECKPOINT_ID: &str = "genesis";
 const FORMAT_VERSION: u8 = 2;
 const MAX_INTEGRATION_BYTES: usize = 128;
 const MAX_TOOL_BYTES: usize = 256;
@@ -62,6 +61,9 @@ mod ledger_store;
 mod ledger_types;
 mod model;
 mod ops;
+mod recovery;
+mod retained_commit;
+mod retention;
 mod schema;
 mod state;
 mod verify;
@@ -69,12 +71,14 @@ mod verify;
 pub use decision_types::*;
 pub use ledger_types::*;
 pub use model::*;
+pub use retention::*;
 
 use approvals::*;
 use common::*;
 use decision_verify::*;
 use grants::*;
 use ledger_store::*;
+use retained_commit::*;
 use schema::*;
 use state::*;
 use verify::*;
@@ -100,7 +104,7 @@ pub enum AuthorityError {
     /// Stored rows, hashes, signatures, or links are inconsistent.
     #[error("authority integrity failure: {0}")]
     Corrupt(String),
-    /// The database predates or contradicts a trusted external checkpoint.
+    /// The database predates or contradicts a durably retained checkpoint.
     #[error("authority rollback detected: {0}")]
     RollbackDetected(String),
     /// The file is not the supported Authority v2 schema.
@@ -122,6 +126,23 @@ pub enum AuthorityError {
     /// Trusted runtime time or identifier generation failed closed.
     #[error("authority runtime source failure: {0}")]
     RuntimeSource(String),
+    /// Durable checkpoint retention failed with bounded operation context.
+    #[error("checkpoint retention {operation} failed: {outcome}")]
+    Retention {
+        /// Retention operation that failed.
+        operation: CheckpointRetentionOperationV2,
+        /// Whether the failure guarantees no effects or has an unknown outcome.
+        outcome: CheckpointRetentionErrorV2,
+    },
+    /// SQLite commit outcome cannot be proven and the live instance is fail-stop.
+    #[error("authority commit outcome is indeterminate; instance is poisoned")]
+    CommitOutcomeIndeterminate,
+    /// Recovery state cannot be reconciled without operator intervention.
+    #[error("authority recovery is ambiguous: {0}")]
+    RecoveryAmbiguous(String),
+    /// The live instance encountered an indeterminate retention/commit outcome.
+    #[error("authority instance is poisoned")]
+    Poisoned,
 }
 
 /// Trusted source of wall-clock time and unique identifier entropy for Authority.
@@ -136,7 +157,7 @@ pub trait AuthorityRuntimeSource: Send + Sync {
     fn identifier_nonce(&self) -> Result<String, AuthorityError>;
 }
 
-/// Operating-system runtime source used by [`Authority::open`].
+/// Operating-system runtime source used by Authority bootstrap and open.
 #[derive(Debug, Default)]
 pub struct SystemAuthorityRuntimeSource;
 
@@ -154,8 +175,8 @@ impl AuthorityRuntimeSource for SystemAuthorityRuntimeSource {
 ///
 /// Every mutation verifies the full signed history before writing, so mutation
 /// cost is linear in ledger length. This favors a simple fail-closed reference
-/// boundary; long-lived deployments should benchmark and later add verified
-/// checkpoints or incremental proof caching without weakening the invariant.
+/// boundary; long-lived deployments should benchmark incremental proof caching
+/// without weakening exact durable checkpoint retention.
 ///
 /// Approval requests have no public construction command; they are created
 /// only as part of [`Authority::commit_decision`].
@@ -170,181 +191,19 @@ pub struct Authority {
     ledger_key: SigningKey,
     grant_key_id: String,
     ledger_key_id: String,
-    retained_checkpoint: SignedLedgerCheckpointV2,
+    active_checkpoint: SignedLedgerCheckpointV2,
+    retention: Box<dyn CheckpointRetentionV2>,
+    health: AuthorityHealthV2,
     runtime_source: Arc<dyn AuthorityRuntimeSource>,
 }
 
 impl Authority {
-    /// Create a new Authority v2 database and return its signed genesis checkpoint.
-    ///
-    /// Bootstrap never returns a usable Authority. The caller must durably retain
-    /// the returned checkpoint outside the database before calling [`Authority::open`].
-    /// Existing databases are rejected so bootstrap cannot mint a replacement
-    /// trust root for rolled-back state.
-    pub fn bootstrap(
-        path: &Path,
-        config: &AuthorityConfig,
-        grant_key: &SigningKey,
-        ledger_key: &SigningKey,
-    ) -> Result<SignedLedgerCheckpointV2, AuthorityError> {
-        validate_authority_inputs(path, config, grant_key, ledger_key)?;
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|error| {
-                AuthorityError::InvalidInput(format!(
-                    "bootstrap requires a new authority database path: {error}"
-                ))
-            })?;
-        let grant_key_id = key_id(KeyPurpose::Grant, &grant_key.verifying_key());
-        let ledger_key_id = key_id(KeyPurpose::Ledger, &ledger_key.verifying_key());
-        // Failure after exclusive creation intentionally leaves the file in
-        // place. Bootstrap never removes a path because it cannot safely prove
-        // pathname identity after handing it to SQLite.
-        let mut conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-        configure_connection(&conn)?;
-        let current_application_id: i32 =
-            conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
-        let current_user_version: i32 =
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current_application_id != 0 || current_user_version != 0 {
-            return Err(AuthorityError::Schema(
-                "bootstrap path changed before schema initialization".into(),
-            ));
-        }
-        initialize_schema(&mut conn, config, &grant_key_id, &ledger_key_id, ledger_key)?;
-        let verification = verify_all(
-            &conn,
-            config,
-            &grant_key.verifying_key(),
-            &ledger_key.verifying_key(),
-            None,
-        )?;
-        sign_checkpoint(
-            config,
-            &ledger_key_id,
-            ledger_key,
-            GENESIS_CHECKPOINT_ID,
-            config.genesis_at,
-            verification.head_seq,
-            verification.head_hash,
-        )
-    }
-
-    /// Open an initialized file-backed Authority v2 database under an external checkpoint.
-    ///
-    /// Keys, paths, and the externally retained checkpoint are supplied by the
-    /// managed control plane; the core never infers filesystem ownership or
-    /// permits an unanchored runtime Authority.
-    pub fn open(
-        path: &Path,
-        config: AuthorityConfig,
-        grant_key: SigningKey,
-        ledger_key: SigningKey,
-        retained_checkpoint: SignedLedgerCheckpointV2,
-    ) -> Result<Self, AuthorityError> {
-        Self::open_with_runtime_source(
-            path,
-            config,
-            grant_key,
-            ledger_key,
-            retained_checkpoint,
-            Arc::new(SystemAuthorityRuntimeSource),
-        )
-    }
-
-    /// Open Authority with an explicitly selected trusted runtime source.
-    ///
-    /// This is a control-plane trust boundary intended for managed runtimes and
-    /// deterministic tests. Untrusted IPC clients must never select this source.
-    pub fn open_with_runtime_source(
-        path: &Path,
-        config: AuthorityConfig,
-        grant_key: SigningKey,
-        ledger_key: SigningKey,
-        retained_checkpoint: SignedLedgerCheckpointV2,
-        runtime_source: Arc<dyn AuthorityRuntimeSource>,
-    ) -> Result<Self, AuthorityError> {
-        validate_authority_inputs(path, &config, &grant_key, &ledger_key)?;
-        let grant_key_id = key_id(KeyPurpose::Grant, &grant_key.verifying_key());
-        let ledger_key_id = key_id(KeyPurpose::Ledger, &ledger_key.verifying_key());
-        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-        configure_connection(&conn)?;
-        let current_application_id: i32 =
-            conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
-        let current_user_version: i32 =
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-        if current_application_id != APPLICATION_ID || current_user_version != SCHEMA_VERSION {
-            return Err(AuthorityError::Schema(format!(
-                "expected application_id {APPLICATION_ID} and user_version {SCHEMA_VERSION}, got {current_application_id} and {current_user_version}"
-            )));
-        }
-        let authority = Self {
-            conn,
-            config,
-            grant_key,
-            ledger_key,
-            grant_key_id,
-            ledger_key_id,
-            retained_checkpoint,
-            runtime_source,
-        };
-        authority.verify_metadata()?;
-        authority.verify_ledger()?;
-        Ok(authority)
-    }
-
     /// Return verified schema, key, instance, and migration-boundary metadata.
     pub fn metadata(&self) -> Result<AuthorityMetadata, AuthorityError> {
         let tx = self.conn.unchecked_transaction()?;
-        verify_all(
-            &tx,
-            &self.config,
-            &self.grant_key.verifying_key(),
-            &self.ledger_key.verifying_key(),
-            Some(&self.retained_checkpoint),
-        )?;
+        self.verify_ready(&tx)?;
         let metadata = read_metadata(&tx)?;
         tx.commit()?;
         Ok(metadata)
     }
-
-    fn verify_metadata(&self) -> Result<(), AuthorityError> {
-        verify_pragmas(&self.conn)?;
-        let metadata = read_metadata(&self.conn)?;
-        if metadata.instance_id != self.config.instance_id
-            || metadata.epoch != self.config.epoch
-            || metadata.genesis_generation != self.config.genesis_generation
-            || metadata.grant_key_id != self.grant_key_id
-            || metadata.ledger_key_id != self.ledger_key_id
-            || metadata.cutover != CutoverStateV2::FreshV2NoLegacyActiveGrants
-        {
-            return Err(AuthorityError::Corrupt(
-                "opened metadata does not match supplied instance, build, cutover, or keys".into(),
-            ));
-        }
-        Ok(())
-    }
-}
-
-fn validate_authority_inputs(
-    path: &Path,
-    config: &AuthorityConfig,
-    grant_key: &SigningKey,
-    ledger_key: &SigningKey,
-) -> Result<(), AuthorityError> {
-    config.validate()?;
-    let path_text = path.to_string_lossy();
-    if path.as_os_str().is_empty() || path_text == ":memory:" || path_text.starts_with("file:") {
-        return Err(AuthorityError::InvalidInput(
-            "reference authority requires a regular file path".into(),
-        ));
-    }
-    if grant_key.verifying_key() == ledger_key.verifying_key() {
-        return Err(AuthorityError::InvalidInput(
-            "grant and ledger keys must be distinct".into(),
-        ));
-    }
-    Ok(())
 }

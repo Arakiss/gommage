@@ -4,6 +4,71 @@ use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone)]
+struct MemoryRetention(Arc<Mutex<CheckpointRetentionStateV2>>);
+
+impl Default for MemoryRetention {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(CheckpointRetentionStateV2::Empty)))
+    }
+}
+
+impl CheckpointRetentionV2 for MemoryRetention {
+    fn load(&self) -> Result<CheckpointRetentionStateV2, CheckpointRetentionErrorV2> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+
+    fn stage(
+        &mut self,
+        expected_active: Option<&SignedLedgerCheckpointV2>,
+        pending: &SignedLedgerCheckpointV2,
+    ) -> Result<(), CheckpointRetentionErrorV2> {
+        let mut state = self.0.lock().unwrap();
+        *state = match (expected_active, &*state) {
+            (None, CheckpointRetentionStateV2::Empty) => {
+                CheckpointRetentionStateV2::BootstrapPending(pending.clone())
+            }
+            (Some(expected), CheckpointRetentionStateV2::Active(active)) if expected == active => {
+                CheckpointRetentionStateV2::ActiveWithPending {
+                    active: active.clone(),
+                    pending: pending.clone(),
+                }
+            }
+            _ => return Err(CheckpointRetentionErrorV2::Rejected),
+        };
+        Ok(())
+    }
+
+    fn promote(
+        &mut self,
+        expected_active: Option<&SignedLedgerCheckpointV2>,
+        pending: &SignedLedgerCheckpointV2,
+    ) -> Result<(), CheckpointRetentionErrorV2> {
+        let mut state = self.0.lock().unwrap();
+        match (expected_active, &*state) {
+            (None, CheckpointRetentionStateV2::BootstrapPending(existing))
+                if existing == pending =>
+            {
+                *state = CheckpointRetentionStateV2::Active(pending.clone());
+                Ok(())
+            }
+            (
+                Some(expected),
+                CheckpointRetentionStateV2::ActiveWithPending {
+                    active,
+                    pending: existing,
+                },
+            ) if active == expected && existing == pending => {
+                *state = CheckpointRetentionStateV2::Active(pending.clone());
+                Ok(())
+            }
+            (_, CheckpointRetentionStateV2::Active(existing)) if existing == pending => Ok(()),
+            _ => Err(CheckpointRetentionErrorV2::Rejected),
+        }
+    }
+}
 
 #[derive(Serialize)]
 struct LegacyApprovalRequest<'a> {
@@ -90,93 +155,84 @@ fn insert_legacy_approval(
     .unwrap();
     let signed_active = SignedGrantStateV2::sign(&active, grant_key).unwrap();
 
-    let grant_vk = grant_key.verifying_key();
-    let ledger_vk = ledger_key.verifying_key();
-    let tx = authority
-        .conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .unwrap();
-    verify_all(&tx, config, &grant_vk, &ledger_vk, None).unwrap();
-    tx.execute(
-        "INSERT INTO approval_resolutions (
+    authority
+        .retained_commit(|tx, _| {
+            tx.execute(
+                "INSERT INTO approval_resolutions (
             request_id, outcome, operator_principal, reason, resolved_at, grant_id, event_id
          ) VALUES (?1, 'approved', ?2, ?3, ?4, ?5, ?6)",
-        params![
-            request.request_id(),
-            "uid:501",
-            "reviewed legacy request",
-            1_700_000_020_i64,
-            "legacy_grant",
-            "legacy_resolution",
-        ],
-    )
-    .unwrap();
-    tx.execute(
-        "INSERT INTO grant_claims (
+                params![
+                    request.request_id(),
+                    "uid:501",
+                    "reviewed legacy request",
+                    1_700_000_020_i64,
+                    "legacy_grant",
+                    "legacy_resolution",
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO grant_claims (
             grant_id, request_id, claim_jcs, signature_b64, claim_hash
          ) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            "legacy_grant",
-            request.request_id(),
-            signed_claim.envelope().jcs(),
-            signed_claim.envelope().signature_b64(),
-            signed_claim.claim_hash(),
-        ],
-    )
-    .unwrap();
-    insert_state(&tx, &active, &signed_active).unwrap();
-    assert_eq!(
-        tx.execute(
-            "DELETE FROM open_approvals WHERE request_id = ?1",
-            [request.request_id()],
-        )
-        .unwrap(),
-        1
-    );
-    append_ledger_entry(
-        &tx,
-        ledger_key,
-        LedgerEventDraft {
-            event_id: "legacy_resolution".into(),
-            subject: request.request_id().into(),
-            timestamp: 1_700_000_020,
-            build_identity: Some(request.build_identity().into()),
-            policy_identity: Some(request.policy_identity().into()),
-            payload: LedgerPayloadV2::ApprovalResolved {
-                request_id: request.request_id().into(),
-                request_hash: request_hash.into(),
-                outcome: "approved".into(),
-                grant_id: Some("legacy_grant".into()),
-                claim_hash: Some(signed_claim.claim_hash().into()),
-                operator_principal: "uid:501".into(),
-                reason: "reviewed legacy request".into(),
-            },
-        },
-    )
-    .unwrap();
-    append_ledger_entry(
-        &tx,
-        ledger_key,
-        LedgerEventDraft {
-            event_id: "legacy_activation".into(),
-            subject: "legacy_grant".into(),
-            timestamp: 1_700_000_020,
-            build_identity: Some(request.build_identity().into()),
-            policy_identity: Some(request.policy_identity().into()),
-            payload: LedgerPayloadV2::GrantStateChanged {
-                grant_id: "legacy_grant".into(),
-                claim_hash: signed_claim.claim_hash().into(),
-                state_hash: signed_active.state_hash().into(),
-                revision: active.revision().into(),
-                status: GrantStatusV2::Active,
-                operator_principal: None,
-                reason: None,
-            },
-        },
-    )
-    .unwrap();
-    verify_all(&tx, config, &grant_vk, &ledger_vk, None).unwrap();
-    tx.commit().unwrap();
+                params![
+                    "legacy_grant",
+                    request.request_id(),
+                    signed_claim.envelope().jcs(),
+                    signed_claim.envelope().signature_b64(),
+                    signed_claim.claim_hash(),
+                ],
+            )?;
+            insert_state(tx, &active, &signed_active)?;
+            assert_eq!(
+                tx.execute(
+                    "DELETE FROM open_approvals WHERE request_id = ?1",
+                    [request.request_id()],
+                )?,
+                1
+            );
+            append_ledger_entry(
+                tx,
+                ledger_key,
+                LedgerEventDraft {
+                    event_id: "legacy_resolution".into(),
+                    subject: request.request_id().into(),
+                    timestamp: 1_700_000_020,
+                    build_identity: Some(request.build_identity().into()),
+                    policy_identity: Some(request.policy_identity().into()),
+                    payload: LedgerPayloadV2::ApprovalResolved {
+                        request_id: request.request_id().into(),
+                        request_hash: request_hash.into(),
+                        outcome: "approved".into(),
+                        grant_id: Some("legacy_grant".into()),
+                        claim_hash: Some(signed_claim.claim_hash().into()),
+                        operator_principal: "uid:501".into(),
+                        reason: "reviewed legacy request".into(),
+                    },
+                },
+            )?;
+            append_ledger_entry(
+                tx,
+                ledger_key,
+                LedgerEventDraft {
+                    event_id: "legacy_activation".into(),
+                    subject: "legacy_grant".into(),
+                    timestamp: 1_700_000_020,
+                    build_identity: Some(request.build_identity().into()),
+                    policy_identity: Some(request.policy_identity().into()),
+                    payload: LedgerPayloadV2::GrantStateChanged {
+                        grant_id: "legacy_grant".into(),
+                        claim_hash: signed_claim.claim_hash().into(),
+                        state_hash: signed_active.state_hash().into(),
+                        revision: active.revision().into(),
+                        status: GrantStatusV2::Active,
+                        operator_principal: None,
+                        reason: None,
+                    },
+                },
+            )?;
+            Ok(())
+        })
+        .unwrap();
     (signed_claim, signed_active)
 }
 
@@ -239,13 +295,13 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
     let generation = generation(&policy.version_hash);
     let config = config(generation.clone());
     let (grant_key, ledger_key) = keys();
-    let genesis_checkpoint = Authority::bootstrap(&path, &config, &grant_key, &ledger_key).unwrap();
-    let mut authority = Authority::open(
+    let retention = MemoryRetention::default();
+    let mut authority = Authority::bootstrap(
         &path,
         config.clone(),
         grant_key.clone(),
         ledger_key.clone(),
-        genesis_checkpoint,
+        Box::new(retention.clone()),
     )
     .unwrap();
 
@@ -290,49 +346,44 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
     })
     .unwrap();
     let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
-    {
-        let tx = authority
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .unwrap();
-        tx.execute(
-            "INSERT INTO approval_requests (
+    authority
+        .retained_commit(|tx, _| {
+            tx.execute(
+                "INSERT INTO approval_requests (
                 request_id, dedupe_hash, request_jcs, request_hash, event_id, created_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                request.request_id(),
-                dedupe_hash,
-                String::from_utf8(request_jcs).unwrap(),
-                request_hash,
-                "legacy_request_event",
-                request.created_at(),
-            ],
-        )
-        .unwrap();
-        tx.execute(
-            "INSERT INTO open_approvals (dedupe_hash, request_id) VALUES (?1, ?2)",
-            params![dedupe_hash, request.request_id()],
-        )
-        .unwrap();
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: "legacy_request_event".into(),
-                subject: request.request_id().into(),
-                timestamp: request.created_at(),
-                build_identity: Some(generation.build_identity().into()),
-                policy_identity: Some(generation.policy_identity().into()),
-                payload: LedgerPayloadV2::ApprovalRequested {
-                    request_id: request.request_id().into(),
-                    request_hash: request_hash.clone(),
-                    dedupe_hash: dedupe_hash.clone(),
+                params![
+                    request.request_id(),
+                    dedupe_hash,
+                    String::from_utf8(request_jcs).unwrap(),
+                    request_hash,
+                    "legacy_request_event",
+                    request.created_at(),
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO open_approvals (dedupe_hash, request_id) VALUES (?1, ?2)",
+                params![dedupe_hash, request.request_id()],
+            )?;
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: "legacy_request_event".into(),
+                    subject: request.request_id().into(),
+                    timestamp: request.created_at(),
+                    build_identity: Some(generation.build_identity().into()),
+                    policy_identity: Some(generation.policy_identity().into()),
+                    payload: LedgerPayloadV2::ApprovalRequested {
+                        request_id: request.request_id().into(),
+                        request_hash: request_hash.clone(),
+                        dedupe_hash: dedupe_hash.clone(),
+                    },
                 },
-            },
-        )
+            )?;
+            Ok(())
+        })
         .unwrap();
-        tx.commit().unwrap();
-    }
 
     let (legacy_claim, legacy_active) = insert_legacy_approval(
         &mut authority,
@@ -351,68 +402,61 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
         "0cc1cf98b74abc17494604736e5eca5fcdd06ff5f14770904f2e465b208808fa"
     );
 
-    {
-        let grant_vk = grant_key.verifying_key();
-        let ledger_vk = ledger_key.verifying_key();
-        let tx = authority
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .unwrap();
-        verify_all(&tx, &config, &grant_vk, &ledger_vk, None).unwrap();
-        let binding = PictoBinding::ExactInput {
-            input_hash: context.input_hash().into(),
-        };
-        let (selected, _) = select_usable_grant(
-            &tx,
-            GrantSelectionInput {
-                context: &context,
-                generation: &generation,
-                required_scope: "test.ask",
-                binding: &binding,
-                reason: "legacy exact approval",
-                at: 1_700_000_030,
-            },
-            &grant_vk,
-        )
-        .unwrap();
-        let spent = spend_grant(
-            &tx,
-            selected.unwrap(),
-            SpendGrantInput {
-                context: &context,
-                consumed_at: 1_700_000_030,
-                state_event_id: "legacy_spend",
-            },
-            &grant_key,
-            &ledger_key,
-        )
-        .unwrap();
-        assert_eq!(
-            hex::encode(Sha256::digest(spent.state.envelope().jcs().as_bytes())),
-            "45a09aaf5ad0ec52cfeebeaf0df1c60a627888692cd9eb9ccd9a88af399a73f4"
-        );
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: "legacy_decision".into(),
-                subject: "legacy_grant".into(),
-                timestamp: 1_700_000_030,
-                build_identity: Some(generation.build_identity().into()),
-                policy_identity: Some(generation.policy_identity().into()),
-                payload: LedgerPayloadV2::DecisionAllow {
-                    grant_id: "legacy_grant".into(),
-                    required_scope: "test.ask".into(),
-                    input_hash: context.input_hash().into(),
-                    context: context.clone(),
-                    generation: generation.clone(),
-                    state_hash: spent.state.state_hash().into(),
+    authority
+        .retained_commit(|tx, _| {
+            let grant_vk = grant_key.verifying_key();
+            let binding = PictoBinding::ExactInput {
+                input_hash: context.input_hash().into(),
+            };
+            let (selected, _) = select_usable_grant(
+                tx,
+                GrantSelectionInput {
+                    context: &context,
+                    generation: &generation,
+                    required_scope: "test.ask",
+                    binding: &binding,
+                    reason: "legacy exact approval",
+                    at: 1_700_000_030,
                 },
-            },
-        )
+                &grant_vk,
+            )?;
+            let spent = spend_grant(
+                tx,
+                selected.unwrap(),
+                SpendGrantInput {
+                    context: &context,
+                    consumed_at: 1_700_000_030,
+                    state_event_id: "legacy_spend",
+                },
+                &grant_key,
+                &ledger_key,
+            )?;
+            assert_eq!(
+                hex::encode(Sha256::digest(spent.state.envelope().jcs().as_bytes())),
+                "45a09aaf5ad0ec52cfeebeaf0df1c60a627888692cd9eb9ccd9a88af399a73f4"
+            );
+            append_ledger_entry(
+                tx,
+                &ledger_key,
+                LedgerEventDraft {
+                    event_id: "legacy_decision".into(),
+                    subject: "legacy_grant".into(),
+                    timestamp: 1_700_000_030,
+                    build_identity: Some(generation.build_identity().into()),
+                    policy_identity: Some(generation.policy_identity().into()),
+                    payload: LedgerPayloadV2::DecisionAllow {
+                        grant_id: "legacy_grant".into(),
+                        required_scope: "test.ask".into(),
+                        input_hash: context.input_hash().into(),
+                        context: context.clone(),
+                        generation: generation.clone(),
+                        state_hash: spent.state.state_hash().into(),
+                    },
+                },
+            )?;
+            Ok(())
+        })
         .unwrap();
-        tx.commit().unwrap();
-    }
 
     let legacy_before: (String, String, String) = authority
         .conn
@@ -442,10 +486,6 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
             evaluation: evaluate(&[Capability::new("test.allow")], &policy),
         })
         .unwrap();
-    let checkpoint = authority
-        .checkpoint("mixed_checkpoint", 2_000_000_000)
-        .unwrap();
-    authority.admit_checkpoint(checkpoint.clone()).unwrap();
     assert!(matches!(
         authority.verify_ledger().unwrap().freshness,
         FreshnessVerdict::Anchored { .. }
@@ -468,7 +508,8 @@ fn legacy_decision_allow_remains_byte_stable_inside_a_mixed_ledger() {
     assert_eq!(legacy_after, legacy_before);
     drop(authority);
 
-    let reopened = Authority::open(&path, config, grant_key, ledger_key, checkpoint).unwrap();
+    let reopened =
+        Authority::open(&path, config, grant_key, ledger_key, Box::new(retention)).unwrap();
     let verification = reopened.verify_ledger().unwrap();
     assert!(
         verification.entries.iter().any(|entry| {

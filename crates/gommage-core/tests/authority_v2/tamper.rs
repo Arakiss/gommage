@@ -337,31 +337,27 @@ fn resigned_request_and_spent_state_links_fail_closed() {
 fn trusted_checkpoint_detects_whole_store_rollback() {
     let older_directory = tempfile::tempdir().unwrap();
     let older_path = older_directory.path().join("older.sqlite3");
-    let mut older = open(&older_path);
+    let older = open(&older_path);
     assert_eq!(older.verify_ledger().unwrap().head_seq, "1");
 
     let newer_directory = tempfile::tempdir().unwrap();
     let newer_path = newer_directory.path().join("newer.sqlite3");
     let mut newer = open(&newer_path);
     create_request(&mut newer);
-    let checkpoint = newer.checkpoint("checkpoint_newer", 1_700_000_020).unwrap();
-    newer.admit_checkpoint(checkpoint.clone()).unwrap();
     assert_eq!(newer.verify_ledger().unwrap().head_seq, "3");
+    let newer_retention = retention_for(&newer_path).state();
+    drop(newer);
+    drop(older);
 
+    retention_for(&older_path).force_state(newer_retention);
     assert!(matches!(
-        older.admit_checkpoint(checkpoint),
+        try_open(&older_path),
         Err(AuthorityError::RollbackDetected(_))
     ));
-    assert_eq!(
-        older.verify_ledger().unwrap().freshness,
-        FreshnessVerdict::Anchored {
-            checkpoint_seq: "1".into()
-        }
-    );
 }
 
 #[test]
-fn admitted_checkpoint_blocks_snapshot_rollback_on_live_commit_and_reopen() {
+fn durable_checkpoint_blocks_snapshot_rollback_on_live_commit_and_reopen() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("authority.sqlite3");
     let snapshot = directory.path().join("approved.snapshot.sqlite3");
@@ -382,10 +378,6 @@ fn admitted_checkpoint_blocks_snapshot_rollback_on_live_commit_and_reopen() {
         authority.commit_decision(&consume_command(1)).unwrap(),
         CommittedDecisionV2::AllowedByGrant { .. }
     ));
-    let checkpoint = authority
-        .checkpoint("checkpoint_after_spend", 1_700_000_040)
-        .unwrap();
-    authority.admit_checkpoint(checkpoint.clone()).unwrap();
     Connection::open(&path)
         .unwrap()
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
@@ -408,7 +400,7 @@ fn admitted_checkpoint_blocks_snapshot_rollback_on_live_commit_and_reopen() {
     drop(authority);
 
     assert!(matches!(
-        Authority::open(&path, config(), grant_key(), ledger_key(), checkpoint),
+        try_open(&path),
         Err(AuthorityError::RollbackDetected(_))
     ));
 }

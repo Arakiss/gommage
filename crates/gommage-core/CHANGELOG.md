@@ -7,18 +7,20 @@ enforced by `cargo-semver-checks` in CI.
 
 ### Changed
 
-* Authority v2 database creation now uses an exclusive bootstrap operation
-  that returns a signed genesis checkpoint without returning a usable
-  Authority. Runtime open, verification, pagination, reads, and mutations
-  require the retained external checkpoint. Admitting a newer checkpoint is
-  monotonic and requires it to commit the exact verified database head. The
-  retained checkpoint detects rollback only through its sequence; a later
-  uncheckpointed suffix requires another externally retained checkpoint.
-* **Breaking pre-1.0 migration:** replace initialization through `open` with
-  `bootstrap -> retain the signed checkpoint outside the database -> open with
-  that checkpoint`. The same checkpoint argument is mandatory for
-  `open_with_runtime_source`; `verify_ledger` and `ledger_page` now use the
-  retained checkpoint instead of accepting an optional per-call anchor.
+* Authority v2 now owns a host-provided `CheckpointRetentionV2` backend.
+  Bootstrap and every mutation durably stage the exact successor checkpoint
+  before committing SQLite, promote it afterward, and return no result before
+  promotion. Ambiguous stage, commit, or promotion outcomes poison the live
+  instance. Reads compare the durable active state before and after verifying
+  SQLite, while promotion is fenced by the exact previous active checkpoint.
+* **Breaking pre-1.0 migration:** `bootstrap` now takes owned configuration,
+  keys, and `Box<dyn CheckpointRetentionV2>` and returns a usable `Authority`
+  after genesis promotion. `open` and `open_with_runtime_source` take the
+  retention backend instead of a signed checkpoint. The public `checkpoint`
+  and `admit_checkpoint` methods have been removed. Retention implementations
+  must provide durable, idempotent compare-and-swap semantics and document
+  whether their storage is independent from the Authority database's rollback
+  domain.
 
 ## [0.17.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.16.1-alpha.1...gommage-core-v0.17.0-alpha.1) (2026-07-13)
 

@@ -24,151 +24,143 @@ impl Authority {
         let grant_key = self.grant_key.clone();
         let ledger_key = self.ledger_key.clone();
         let grant_vk = self.grant_key.verifying_key();
-        let ledger_vk = self.ledger_key.verifying_key();
-        let config = self.config.clone();
         let runtime_source = Arc::clone(&self.runtime_source);
-        let tx = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let verification = verify_all(
-            &tx,
-            &config,
-            &grant_vk,
-            &ledger_vk,
-            Some(&self.retained_checkpoint),
-        )?;
-        ensure_decision_admitted(&tx, &prepared.generation)?;
-        let decided_at = authority_now(runtime_source.as_ref())?;
-        ensure_evidence_time_not_regressed(decided_at, &verification)?;
+        self.retained_commit(|tx, verification| {
+            ensure_decision_admitted(tx, &prepared.generation)?;
+            let decided_at = authority_now(runtime_source.as_ref())?;
+            ensure_evidence_time_not_regressed(decided_at, verification)?;
 
-        let result = match &prepared.evaluated.decision {
-            Decision::Allow => {
-                let decision_event_id = authority_id(runtime_source.as_ref(), "decision")?;
-                append_recorded_decision(
-                    &tx,
-                    &ledger_key,
-                    &decision_event_id,
-                    decided_at,
-                    &prepared,
-                    AuthorityDecisionOutcomeV2::AllowedByPolicy,
-                )?;
-                CommittedDecisionV2::AllowedByPolicy { decision_event_id }
-            }
-            Decision::Gommage { .. } => {
-                let decision_event_id = authority_id(runtime_source.as_ref(), "decision")?;
-                append_recorded_decision(
-                    &tx,
-                    &ledger_key,
-                    &decision_event_id,
-                    decided_at,
-                    &prepared,
-                    AuthorityDecisionOutcomeV2::Denied,
-                )?;
-                CommittedDecisionV2::Denied { decision_event_id }
-            }
-            Decision::AskPicto {
-                required_scope,
-                reason,
-                bind_input,
-            } => {
-                let binding = binding_for_decision(*bind_input, prepared.context.input_hash());
-                let (selected, not_usable) = select_usable_grant(
-                    &tx,
-                    GrantSelectionInput {
-                        context: &prepared.authorization_context,
-                        generation: &prepared.generation,
-                        required_scope,
-                        binding: &binding,
-                        reason,
-                        at: decided_at,
-                    },
-                    &grant_vk,
-                )?;
-                if let Some(selected) = selected {
-                    let state_event_id = authority_id(runtime_source.as_ref(), "state_spend")?;
+            let result = match &prepared.evaluated.decision {
+                Decision::Allow => {
                     let decision_event_id = authority_id(runtime_source.as_ref(), "decision")?;
-                    let recorded = spend_grant(
-                        &tx,
-                        selected,
-                        SpendGrantInput {
+                    append_recorded_decision(
+                        tx,
+                        &ledger_key,
+                        &decision_event_id,
+                        decided_at,
+                        &prepared,
+                        AuthorityDecisionOutcomeV2::AllowedByPolicy,
+                    )?;
+                    CommittedDecisionV2::AllowedByPolicy { decision_event_id }
+                }
+                Decision::Gommage { .. } => {
+                    let decision_event_id = authority_id(runtime_source.as_ref(), "decision")?;
+                    append_recorded_decision(
+                        tx,
+                        &ledger_key,
+                        &decision_event_id,
+                        decided_at,
+                        &prepared,
+                        AuthorityDecisionOutcomeV2::Denied,
+                    )?;
+                    CommittedDecisionV2::Denied { decision_event_id }
+                }
+                Decision::AskPicto {
+                    required_scope,
+                    reason,
+                    bind_input,
+                } => {
+                    let binding = binding_for_decision(*bind_input, prepared.context.input_hash());
+                    let (selected, not_usable) = select_usable_grant(
+                        tx,
+                        GrantSelectionInput {
                             context: &prepared.authorization_context,
-                            consumed_at: decided_at,
-                            state_event_id: &state_event_id,
+                            generation: &prepared.generation,
+                            required_scope,
+                            binding: &binding,
+                            reason,
+                            at: decided_at,
                         },
-                        &grant_key,
-                        &ledger_key,
+                        &grant_vk,
                     )?;
-                    append_recorded_decision(
-                        &tx,
-                        &ledger_key,
-                        &decision_event_id,
-                        decided_at,
-                        &prepared,
-                        AuthorityDecisionOutcomeV2::AllowedByGrant {
-                            grant_id: recorded.grant_id,
-                            request_id: recorded.request_id,
-                            state_hash: recorded.state.state_hash().to_string(),
-                        },
-                    )?;
-                    CommittedDecisionV2::AllowedByGrant {
-                        state: recorded.state,
-                        decision_event_id,
-                    }
-                } else {
-                    if not_usable == GrantNotUsableReason::NotYetValid {
-                        return Err(AuthorityError::RuntimeSource(
-                            "matching grant validity begins after authoritative time".into(),
-                        ));
-                    }
-                    let request_id = authority_id(runtime_source.as_ref(), "request")?;
-                    let request_event_id =
-                        authority_id(runtime_source.as_ref(), "approval_request")?;
-                    let prepared_request = prepare_approval_request(&CreateRequestCommand {
-                        request_id,
-                        event_id: request_event_id,
-                        created_at: decided_at,
-                        context: prepared.authorization_context.clone(),
-                        binding,
-                        generation: prepared.generation.clone(),
-                        required_scope: required_scope.clone(),
-                        reason: reason.clone(),
-                    })?;
-                    let request =
-                        create_or_get_request_in_transaction(&tx, &ledger_key, prepared_request)?;
-                    let (request, created) = match request {
-                        CreateRequestResult::Created(request) => (request, true),
-                        CreateRequestResult::Existing(request) => (request, false),
-                    };
-                    let stored = load_request(&tx, request.request_id())?.ok_or_else(|| {
-                        AuthorityError::Corrupt(
-                            "committed approval request disappeared before decision evidence"
-                                .into(),
-                        )
-                    })?;
-                    let decision_event_id = authority_id(runtime_source.as_ref(), "decision")?;
-                    append_recorded_decision(
-                        &tx,
-                        &ledger_key,
-                        &decision_event_id,
-                        decided_at,
-                        &prepared,
-                        AuthorityDecisionOutcomeV2::ApprovalRequired {
-                            request_id: request.request_id().to_string(),
-                            request_hash: stored.request_hash,
-                        },
-                    )?;
-                    CommittedDecisionV2::ApprovalRequired {
-                        request: Box::new(request),
-                        created,
-                        decision_event_id,
+                    if let Some(selected) = selected {
+                        let state_event_id = authority_id(runtime_source.as_ref(), "state_spend")?;
+                        let decision_event_id = authority_id(runtime_source.as_ref(), "decision")?;
+                        let recorded = spend_grant(
+                            tx,
+                            selected,
+                            SpendGrantInput {
+                                context: &prepared.authorization_context,
+                                consumed_at: decided_at,
+                                state_event_id: &state_event_id,
+                            },
+                            &grant_key,
+                            &ledger_key,
+                        )?;
+                        append_recorded_decision(
+                            tx,
+                            &ledger_key,
+                            &decision_event_id,
+                            decided_at,
+                            &prepared,
+                            AuthorityDecisionOutcomeV2::AllowedByGrant {
+                                grant_id: recorded.grant_id,
+                                request_id: recorded.request_id,
+                                state_hash: recorded.state.state_hash().to_string(),
+                            },
+                        )?;
+                        CommittedDecisionV2::AllowedByGrant {
+                            state: recorded.state,
+                            decision_event_id,
+                        }
+                    } else {
+                        if not_usable == GrantNotUsableReason::NotYetValid {
+                            return Err(AuthorityError::RuntimeSource(
+                                "matching grant validity begins after authoritative time".into(),
+                            ));
+                        }
+                        let request_id = authority_id(runtime_source.as_ref(), "request")?;
+                        let request_event_id =
+                            authority_id(runtime_source.as_ref(), "approval_request")?;
+                        let prepared_request = prepare_approval_request(&CreateRequestCommand {
+                            request_id,
+                            event_id: request_event_id,
+                            created_at: decided_at,
+                            context: prepared.authorization_context.clone(),
+                            binding,
+                            generation: prepared.generation.clone(),
+                            required_scope: required_scope.clone(),
+                            reason: reason.clone(),
+                        })?;
+                        let request = create_or_get_request_in_transaction(
+                            tx,
+                            &ledger_key,
+                            prepared_request,
+                        )?;
+                        let (request, created) = match request {
+                            CreateRequestResult::Created(request) => (request, true),
+                            CreateRequestResult::Existing(request) => (request, false),
+                        };
+                        let stored = load_request(tx, request.request_id())?.ok_or_else(|| {
+                            AuthorityError::Corrupt(
+                                "committed approval request disappeared before decision evidence"
+                                    .into(),
+                            )
+                        })?;
+                        let decision_event_id = authority_id(runtime_source.as_ref(), "decision")?;
+                        append_recorded_decision(
+                            tx,
+                            &ledger_key,
+                            &decision_event_id,
+                            decided_at,
+                            &prepared,
+                            AuthorityDecisionOutcomeV2::ApprovalRequired {
+                                request_id: request.request_id().to_string(),
+                                request_hash: stored.request_hash,
+                            },
+                        )?;
+                        CommittedDecisionV2::ApprovalRequired {
+                            request: Box::new(request),
+                            created,
+                            decision_event_id,
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        ensure_decision_admitted(&tx, &prepared.generation)?;
-        tx.commit()?;
-        Ok(result)
+            ensure_decision_admitted(tx, &prepared.generation)?;
+            Ok(result)
+        })
     }
 }
 

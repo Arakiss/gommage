@@ -103,18 +103,20 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   MCP, shell-analysis, policy, Picto, and integration-test modules were split
   by responsibility so the limit applies to the whole current tree rather
   than only to new files.
-- Authority v2 now separates exclusive database bootstrap from runtime open.
-  Bootstrap creates only a new path and returns a signed genesis checkpoint;
-  every runtime open, read, and mutation requires and verifies an externally
-  retained checkpoint. A newer checkpoint can replace the retained anchor only
-  when it strictly advances it and commits the exact verified database head.
-  This detects rollback through the retained checkpoint sequence; rollback
-  confined to a later, not-yet-checkpointed suffix remains indistinguishable
-  until a subsequent checkpoint is retained and admitted.
-  **Breaking pre-1.0 migration:** call `Authority::bootstrap`, persist the
-  returned signed checkpoint outside the authority database, then pass it to
-  `Authority::open` (or `open_with_runtime_source`). Existing callers that
-  relied on `open` to initialize a database must adopt this three-step flow.
+- Authority v2 now requires a host-provided `CheckpointRetentionV2` backend
+  and durably retains every committed database head. Bootstrap stages genesis
+  before the SQLite commit, promotes it afterward, and returns a usable
+  Authority only after promotion. Every mutation follows the same
+  stage-commit-promote order; ambiguous outcomes poison the live instance, and
+  reads verify the durable active checkpoint before and after SQLite. Promotion
+  is fenced by the exact previous active checkpoint so a late writer cannot
+  rewind a newer anchor.
+  **Breaking pre-1.0 migration:** `bootstrap` now takes owned configuration,
+  signing keys, and a boxed retention backend and returns `Authority`; `open`
+  takes the same backend instead of a checkpoint envelope. The public
+  `checkpoint` and `admit_checkpoint` methods have been removed. Hosts must
+  provide durable, idempotent compare-and-swap retention and establish whether
+  it is independent from the SQLite rollback domain.
 - Pinned `serde_json_canonicalizer` as a determinism-critical dependency for
   Authority v2's RFC 8785 signed envelopes.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
@@ -221,9 +223,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   states, and `DecisionAllow` entries remain verifiable. Tool-call commitments
   are bounded by canonical bytes, JSON depth, and node count before Authority
   reads time or opens a transaction. Runtime Authority handles always verify an
-  externally retained checkpoint prefix; protecting a later suffix requires
-  retaining and admitting another checkpoint. Existing Picto and approval paths
-  remain unchanged until a later control-plane migration integrates the API.
+  exact durably retained checkpoint at every committed head. Existing Picto and
+  approval paths remain unchanged until a later control-plane migration
+  integrates the API.
 - `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes
   only the canonical observed tool input as well as its scope.
 - `gommage daemon reload` reloads policy and capability mappers in the running

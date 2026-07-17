@@ -4,19 +4,22 @@ use gommage_core::{
     ActivateGenerationCommand, ApprovalRequestV2, ApproveCommand, ApproveResult, Authority,
     AuthorityConfig, AuthorityDecisionOutcomeV2, AuthorityError, AuthorityGenerationV2,
     AuthorityRuntimeSource, Capability, CapabilityProvenance, CapabilityProvenanceStatus,
-    CommitDecisionCommandV2, CommittedDecisionV2, Decision, DenyCommand, DenyResult, EvalResult,
-    FreshnessVerdict, GrantStatusV2, LedgerPayloadV2, MAX_CANONICAL_TOOL_CALL_BYTES,
-    MAX_LEDGER_PAGE_ENTRIES, MatchedRule, PictoBinding, Policy, RevokeCommand, RevokeResult,
-    RuleContribution, SetMaintenanceCommand, SignedGrantClaimV2, SignedGrantStateV2, SignedJcs,
-    SignedLedgerCheckpointV2, SignedLedgerCursorV2, ToolCall, evaluate,
+    CheckpointRetentionErrorV2, CheckpointRetentionOperationV2, CheckpointRetentionStateV2,
+    CheckpointRetentionV2, CommitDecisionCommandV2, CommittedDecisionV2, Decision, DenyCommand,
+    DenyResult, EvalResult, FreshnessVerdict, GrantNotUsableReason, GrantStatusV2, LedgerPayloadV2,
+    MAX_CANONICAL_TOOL_CALL_BYTES, MAX_LEDGER_PAGE_ENTRIES, MatchedRule, PictoBinding, Policy,
+    RevokeCommand, RevokeResult, RuleContribution, SetMaintenanceCommand, SignedGrantClaimV2,
+    SignedGrantStateV2, SignedJcs, SignedLedgerCheckpointV2, SignedLedgerCursorV2, ToolCall,
+    evaluate,
 };
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::{
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::{
-        Arc, Barrier,
+        Arc, Barrier, Mutex, OnceLock,
         atomic::{AtomicI64, AtomicU64, Ordering},
     },
     thread,
@@ -37,6 +40,191 @@ struct CollidingDecisionRuntimeSource {
 struct RejectRuntimeSource;
 
 static NEXT_TEST_NONCE: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy)]
+enum RetentionFault {
+    Rejected,
+    IndeterminateBefore,
+    IndeterminateAfter,
+}
+
+#[derive(Clone)]
+struct TestRetention {
+    inner: Arc<Mutex<TestRetentionInner>>,
+}
+
+struct TestRetentionInner {
+    state: CheckpointRetentionStateV2,
+    stage_faults: VecDeque<RetentionFault>,
+    promote_faults: VecDeque<RetentionFault>,
+    stage_calls: usize,
+    promote_calls: usize,
+    last_staged: Option<SignedLedgerCheckpointV2>,
+    promote_pause: Option<(Arc<Barrier>, Arc<Barrier>)>,
+}
+
+impl Default for TestRetention {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(TestRetentionInner {
+                state: CheckpointRetentionStateV2::Empty,
+                stage_faults: VecDeque::new(),
+                promote_faults: VecDeque::new(),
+                stage_calls: 0,
+                promote_calls: 0,
+                last_staged: None,
+                promote_pause: None,
+            })),
+        }
+    }
+}
+
+impl TestRetention {
+    fn state(&self) -> CheckpointRetentionStateV2 {
+        self.inner.lock().unwrap().state.clone()
+    }
+
+    fn force_state(&self, state: CheckpointRetentionStateV2) {
+        self.inner.lock().unwrap().state = state;
+    }
+
+    fn inject_stage(&self, fault: RetentionFault) {
+        self.inner.lock().unwrap().stage_faults.push_back(fault);
+    }
+
+    fn inject_promote(&self, fault: RetentionFault) {
+        self.inner.lock().unwrap().promote_faults.push_back(fault);
+    }
+
+    fn pause_next_promote(&self, entered: Arc<Barrier>, release: Arc<Barrier>) {
+        self.inner.lock().unwrap().promote_pause = Some((entered, release));
+    }
+
+    fn calls(&self) -> (usize, usize) {
+        let inner = self.inner.lock().unwrap();
+        (inner.stage_calls, inner.promote_calls)
+    }
+
+    fn last_staged(&self) -> Option<SignedLedgerCheckpointV2> {
+        self.inner.lock().unwrap().last_staged.clone()
+    }
+}
+
+impl CheckpointRetentionV2 for TestRetention {
+    fn load(&self) -> Result<CheckpointRetentionStateV2, CheckpointRetentionErrorV2> {
+        Ok(self.state())
+    }
+
+    fn stage(
+        &mut self,
+        expected_active: Option<&SignedLedgerCheckpointV2>,
+        pending: &SignedLedgerCheckpointV2,
+    ) -> Result<(), CheckpointRetentionErrorV2> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.stage_calls += 1;
+        inner.last_staged = Some(pending.clone());
+        let fault = inner.stage_faults.pop_front();
+        if matches!(fault, Some(RetentionFault::Rejected)) {
+            return Err(CheckpointRetentionErrorV2::Rejected);
+        }
+        if matches!(fault, Some(RetentionFault::IndeterminateBefore)) {
+            return Err(CheckpointRetentionErrorV2::Indeterminate);
+        }
+
+        let next_state = match (expected_active, &inner.state) {
+            (None, CheckpointRetentionStateV2::Empty) => {
+                CheckpointRetentionStateV2::BootstrapPending(pending.clone())
+            }
+            (None, CheckpointRetentionStateV2::BootstrapPending(existing))
+                if existing == pending =>
+            {
+                inner.state.clone()
+            }
+            (None, CheckpointRetentionStateV2::Active(existing)) if existing == pending => {
+                inner.state.clone()
+            }
+            (Some(expected), CheckpointRetentionStateV2::Active(active)) if active == expected => {
+                CheckpointRetentionStateV2::ActiveWithPending {
+                    active: active.clone(),
+                    pending: pending.clone(),
+                }
+            }
+            (
+                Some(expected),
+                CheckpointRetentionStateV2::ActiveWithPending {
+                    active,
+                    pending: existing,
+                },
+            ) if active == expected && existing == pending => inner.state.clone(),
+            (Some(_), CheckpointRetentionStateV2::Active(active)) if active == pending => {
+                inner.state.clone()
+            }
+            _ => return Err(CheckpointRetentionErrorV2::Rejected),
+        };
+        inner.state = next_state;
+        if matches!(fault, Some(RetentionFault::IndeterminateAfter)) {
+            return Err(CheckpointRetentionErrorV2::Indeterminate);
+        }
+        Ok(())
+    }
+
+    fn promote(
+        &mut self,
+        expected_active: Option<&SignedLedgerCheckpointV2>,
+        pending: &SignedLedgerCheckpointV2,
+    ) -> Result<(), CheckpointRetentionErrorV2> {
+        let (fault, pause) = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.promote_calls += 1;
+            (inner.promote_faults.pop_front(), inner.promote_pause.take())
+        };
+        if matches!(fault, Some(RetentionFault::Rejected)) {
+            return Err(CheckpointRetentionErrorV2::Rejected);
+        }
+        if matches!(fault, Some(RetentionFault::IndeterminateBefore)) {
+            return Err(CheckpointRetentionErrorV2::Indeterminate);
+        }
+        if let Some((entered, release)) = pause {
+            entered.wait();
+            release.wait();
+        }
+        let mut inner = self.inner.lock().unwrap();
+        let next_state = match (expected_active, &inner.state) {
+            (None, CheckpointRetentionStateV2::BootstrapPending(existing))
+                if existing == pending =>
+            {
+                CheckpointRetentionStateV2::Active(pending.clone())
+            }
+            (
+                Some(expected),
+                CheckpointRetentionStateV2::ActiveWithPending {
+                    active,
+                    pending: existing,
+                },
+            ) if active == expected && existing == pending => {
+                CheckpointRetentionStateV2::Active(pending.clone())
+            }
+            (_, CheckpointRetentionStateV2::Active(existing)) if existing == pending => {
+                inner.state.clone()
+            }
+            _ => return Err(CheckpointRetentionErrorV2::Rejected),
+        };
+        inner.state = next_state;
+        if matches!(fault, Some(RetentionFault::IndeterminateAfter)) {
+            return Err(CheckpointRetentionErrorV2::Indeterminate);
+        }
+        Ok(())
+    }
+}
+
+fn retention_for(path: &Path) -> TestRetention {
+    static RETENTIONS: OnceLock<Mutex<HashMap<PathBuf, TestRetention>>> = OnceLock::new();
+    let mut retentions = RETENTIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
+    retentions.entry(path.to_owned()).or_default().clone()
+}
 
 impl AuthorityRuntimeSource for DefaultTestRuntimeSource {
     fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
@@ -160,34 +348,26 @@ fn try_open_with_source(
 ) -> Result<Authority, AuthorityError> {
     let grant_key = grant_key();
     let ledger_key = ledger_key();
-    let checkpoint = external_genesis_checkpoint(path, &config, &grant_key, &ledger_key);
-    Authority::open_with_runtime_source(
-        path,
-        config,
-        grant_key,
-        ledger_key,
-        checkpoint,
-        runtime_source,
-    )
-}
-
-fn external_genesis_checkpoint(
-    path: &Path,
-    config: &AuthorityConfig,
-    grant_key: &SigningKey,
-    ledger_key: &SigningKey,
-) -> SignedLedgerCheckpointV2 {
+    let retention = Box::new(retention_for(path));
     if !path.exists() {
-        return Authority::bootstrap(path, config, grant_key, ledger_key).unwrap();
+        Authority::bootstrap_with_runtime_source(
+            path,
+            config,
+            grant_key,
+            ledger_key,
+            retention,
+            runtime_source,
+        )
+    } else {
+        Authority::open_with_runtime_source(
+            path,
+            config,
+            grant_key,
+            ledger_key,
+            retention,
+            runtime_source,
+        )
     }
-    let directory = tempfile::tempdir().unwrap();
-    Authority::bootstrap(
-        &directory.path().join("equivalent-authority.sqlite3"),
-        config,
-        grant_key,
-        ledger_key,
-    )
-    .unwrap()
 }
 
 fn fixture() -> (TempDir, PathBuf, Authority) {
@@ -474,6 +654,8 @@ mod concurrency;
 mod decisions;
 #[path = "authority_v2/lifecycle.rs"]
 mod lifecycle;
+#[path = "authority_v2/retention.rs"]
+mod retention;
 #[path = "authority_v2/state.rs"]
 mod state;
 #[path = "authority_v2/tamper.rs"]

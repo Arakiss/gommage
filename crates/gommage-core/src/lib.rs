@@ -35,13 +35,15 @@ pub use authority::{
     ActivateGenerationCommand, ApprovalRequestV2, ApprovalResolutionKindV2, ApprovalResolutionV2,
     ApproveCommand, ApproveResult, Authority, AuthorityConfig, AuthorityDecisionOutcomeV2,
     AuthorityError, AuthorityGenerationV2, AuthorityMetadata, AuthorityRuntimeSource,
-    AuthorityRuntimeStateV2, AuthorizationContextV2, CommitDecisionCommandV2, CommittedDecisionV2,
-    CutoverStateV2, DecisionContextV2, DenyCommand, DenyResult, FreshnessVerdict,
-    GrantNotUsableReason, LedgerCheckpointV2, LedgerCursorV2, LedgerEntryV2, LedgerPageV2,
-    LedgerPayloadV2, LedgerVerification, MAX_DECISION_RECORD_BYTES, MAX_LEDGER_PAGE_ENTRIES,
-    RecordedCapabilityEvidenceV2, RecordedDecisionV2, RecordedEvaluationV2, RevokeCommand,
-    RevokeResult, SetMaintenanceCommand, SignedLedgerCheckpointV2, SignedLedgerCursorV2,
-    SystemAuthorityRuntimeSource, VerifiedLedgerEntryV2,
+    AuthorityRuntimeStateV2, AuthorizationContextV2, CheckpointRetentionErrorV2,
+    CheckpointRetentionOperationV2, CheckpointRetentionStateV2, CheckpointRetentionV2,
+    CommitDecisionCommandV2, CommittedDecisionV2, CutoverStateV2, DecisionContextV2, DenyCommand,
+    DenyResult, FreshnessVerdict, GrantNotUsableReason, LedgerCheckpointV2, LedgerCursorV2,
+    LedgerEntryV2, LedgerPageV2, LedgerPayloadV2, LedgerVerification, MAX_DECISION_RECORD_BYTES,
+    MAX_LEDGER_PAGE_ENTRIES, RecordedCapabilityEvidenceV2, RecordedDecisionV2,
+    RecordedEvaluationV2, RevokeCommand, RevokeResult, SetMaintenanceCommand,
+    SignedLedgerCheckpointV2, SignedLedgerCursorV2, SystemAuthorityRuntimeSource,
+    VerifiedLedgerEntryV2,
 };
 pub use capability::Capability;
 pub use crypto_envelope::{
