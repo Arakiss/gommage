@@ -17,6 +17,7 @@ use crate::{
         MAX_GRANT_TTL_SECONDS, SignedGrantClaimV2, SignedGrantStateV2, validate_decimal,
         validate_hash, validate_text, validate_token,
     },
+    toolcall::ToolCall,
 };
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -24,9 +25,12 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
+    sync::Arc,
     time::Duration,
 };
 use thiserror::Error;
+use time::OffsetDateTime;
+use uuid::Uuid;
 
 const APPLICATION_ID: i32 = 0x474f_4d32; // ASCII "GOM2".
 const SCHEMA_VERSION: i32 = 2;
@@ -571,6 +575,44 @@ pub struct ConsumeCommand {
     pub decision_event_id: String,
     /// Current Unix timestamp.
     pub consumed_at: i64,
+}
+
+/// Agent-facing approval authorization input.
+///
+/// The caller supplies only the observed host call and policy-selected scope.
+/// Authority derives build, policy, and generation identity from its active
+/// serialized state and creates all timestamps and identifiers itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizeApprovalCommandV2 {
+    /// Named host integration that observed the call.
+    pub integration: String,
+    /// Complete observed tool call; Authority computes its canonical input hash.
+    pub call: ToolCall,
+    /// Relevant normalized capabilities for the current decision.
+    pub capabilities: Vec<String>,
+    /// Exact approval scope required by current policy.
+    pub required_scope: String,
+    /// Human-readable reason shown to the operator when approval is needed.
+    pub reason: String,
+}
+
+/// Result of one serialized approval authorization attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorizeApprovalResultV2 {
+    /// One exact one-use grant was spent and signed allow evidence committed.
+    Allowed {
+        /// Signed terminal spent state.
+        state: SignedGrantStateV2,
+        /// Authority-generated signed decision event identifier.
+        decision_event_id: String,
+    },
+    /// No exact usable grant existed; one exact open request now represents it.
+    ApprovalRequired {
+        /// Immutable approval request returned to the operator plane.
+        request: Box<ApprovalRequestV2>,
+        /// `true` only for the transaction that created the request.
+        created: bool,
+    },
 }
 
 /// Administrative activation of one immutable successor generation.
@@ -1176,6 +1218,35 @@ pub enum AuthorityError {
     /// Decision admission is disabled by authoritative maintenance state.
     #[error("authority decisions are disabled during maintenance")]
     Maintenance,
+    /// Trusted runtime time or identifier generation failed closed.
+    #[error("authority runtime source failure: {0}")]
+    RuntimeSource(String),
+}
+
+/// Trusted source of wall-clock time and unique identifier entropy for Authority.
+///
+/// The source is selected only when the authority is opened. Runtime callers do
+/// not receive it and cannot supply timestamps or evidence identifiers per call.
+pub trait AuthorityRuntimeSource: Send + Sync {
+    /// Return the current Unix timestamp in whole seconds.
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError>;
+
+    /// Return one unique, token-safe nonce without a semantic prefix.
+    fn identifier_nonce(&self) -> Result<String, AuthorityError>;
+}
+
+/// Operating-system runtime source used by [`Authority::open`].
+#[derive(Debug, Default)]
+pub struct SystemAuthorityRuntimeSource;
+
+impl AuthorityRuntimeSource for SystemAuthorityRuntimeSource {
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
+        Ok(OffsetDateTime::now_utc().unix_timestamp())
+    }
+
+    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
+        Ok(Uuid::now_v7().simple().to_string())
+    }
 }
 
 /// File-backed reference-profile authorization authority.
@@ -1191,6 +1262,7 @@ pub struct Authority {
     ledger_key: SigningKey,
     grant_key_id: String,
     ledger_key_id: String,
+    runtime_source: Arc<dyn AuthorityRuntimeSource>,
 }
 
 impl Authority {
@@ -1203,6 +1275,26 @@ impl Authority {
         config: AuthorityConfig,
         grant_key: SigningKey,
         ledger_key: SigningKey,
+    ) -> Result<Self, AuthorityError> {
+        Self::open_with_runtime_source(
+            path,
+            config,
+            grant_key,
+            ledger_key,
+            Arc::new(SystemAuthorityRuntimeSource),
+        )
+    }
+
+    /// Open Authority with an explicitly selected trusted runtime source.
+    ///
+    /// This is a control-plane trust boundary intended for managed runtimes and
+    /// deterministic tests. Untrusted IPC clients must never select this source.
+    pub fn open_with_runtime_source(
+        path: &Path,
+        config: AuthorityConfig,
+        grant_key: SigningKey,
+        ledger_key: SigningKey,
+        runtime_source: Arc<dyn AuthorityRuntimeSource>,
     ) -> Result<Self, AuthorityError> {
         config.validate()?;
         let path_text = path.to_string_lossy();
@@ -1246,6 +1338,7 @@ impl Authority {
             ledger_key,
             grant_key_id,
             ledger_key_id,
+            runtime_source,
         };
         authority.verify_metadata()?;
         authority.verify_ledger(None)?;
@@ -1659,6 +1752,104 @@ fn append_ledger_entry(
     })
 }
 
+struct PreparedApprovalRequest {
+    request: ApprovalRequestV2,
+    request_jcs: String,
+    request_hash: String,
+    dedupe_hash: String,
+    event_id: String,
+}
+
+fn prepare_approval_request(
+    command: &CreateRequestCommand,
+) -> Result<PreparedApprovalRequest, AuthorityError> {
+    validate_token("request id", &command.request_id, 160)?;
+    validate_token("request event id", &command.event_id, 160)?;
+    command.context.validate()?;
+    let request = ApprovalRequestV2::from_command(command)?;
+    let request_jcs = canonicalize(&request)?;
+    let request_hash = approval_request_hash(&request_jcs);
+    let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
+        domain: "gommage.approval.dedupe",
+        version: FORMAT_VERSION,
+        context: request.context(),
+        generation: request.generation(),
+        required_scope: request.required_scope(),
+    })?;
+    let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
+    Ok(PreparedApprovalRequest {
+        request,
+        request_jcs: String::from_utf8(request_jcs).map_err(|error| {
+            AuthorityError::Corrupt(format!("request JCS was not UTF-8: {error}"))
+        })?,
+        request_hash,
+        dedupe_hash,
+        event_id: command.event_id.clone(),
+    })
+}
+
+fn create_or_get_request_in_transaction(
+    conn: &Connection,
+    ledger_key: &SigningKey,
+    prepared: PreparedApprovalRequest,
+) -> Result<CreateRequestResult, AuthorityError> {
+    let PreparedApprovalRequest {
+        request,
+        request_jcs,
+        request_hash,
+        dedupe_hash,
+        event_id,
+    } = prepared;
+    let existing_request_id = conn
+        .query_row(
+            "SELECT request_id FROM open_approvals WHERE dedupe_hash = ?1",
+            [&dedupe_hash],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if let Some(existing_request_id) = existing_request_id {
+        let existing = load_request(conn, &existing_request_id)?.ok_or_else(|| {
+            AuthorityError::Corrupt("open approval points to a missing request".into())
+        })?;
+        ensure_request_is_open(conn, &existing)?;
+        return Ok(CreateRequestResult::Existing(existing.request));
+    }
+    conn.execute(
+        "INSERT INTO approval_requests (
+            request_id, dedupe_hash, request_jcs, request_hash, event_id, created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            request.request_id(),
+            dedupe_hash,
+            request_jcs,
+            request_hash,
+            event_id,
+            request.created_at(),
+        ],
+    )?;
+    conn.execute(
+        "INSERT INTO open_approvals (dedupe_hash, request_id) VALUES (?1, ?2)",
+        params![dedupe_hash, request.request_id()],
+    )?;
+    append_ledger_entry(
+        conn,
+        ledger_key,
+        LedgerEventDraft {
+            event_id,
+            subject: request.request_id().into(),
+            timestamp: request.created_at(),
+            build_identity: Some(request.build_identity().into()),
+            policy_identity: Some(request.policy_identity().into()),
+            payload: LedgerPayloadV2::ApprovalRequested {
+                request_id: request.request_id().into(),
+                request_hash,
+                dedupe_hash,
+            },
+        },
+    )?;
+    Ok(CreateRequestResult::Created(request))
+}
+
 fn load_request(
     conn: &Connection,
     request_id: &str,
@@ -1908,6 +2099,182 @@ fn status_string(status: GrantStatusV2) -> &'static str {
     }
 }
 
+struct SelectedGrant {
+    grant_id: String,
+    signed_claim: SignedGrantClaimV2,
+    signed_previous: SignedGrantStateV2,
+    previous: GrantStateV2,
+}
+
+fn select_usable_grant(
+    conn: &Connection,
+    context: &AuthorizationContextV2,
+    generation: &AuthorityGenerationV2,
+    required_scope: &str,
+    at: i64,
+    grant_key: &VerifyingKey,
+) -> Result<(Option<SelectedGrant>, GrantNotUsableReason), AuthorityError> {
+    let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
+        domain: "gommage.approval.dedupe",
+        version: FORMAT_VERSION,
+        context,
+        generation,
+        required_scope,
+    })?;
+    let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
+    let candidate_ids = {
+        let mut statement = conn.prepare(
+            "SELECT grant_claims.grant_id
+             FROM grant_claims
+             JOIN approval_requests
+               ON approval_requests.request_id = grant_claims.request_id
+             WHERE approval_requests.dedupe_hash = ?1
+             ORDER BY grant_claims.grant_id",
+        )?;
+        statement
+            .query_map([dedupe_hash], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let mut usable = Vec::new();
+    let mut saw_terminal = false;
+    let mut saw_not_yet_valid = false;
+    let mut saw_expired = false;
+    for grant_id in candidate_ids {
+        let (signed_claim, claim) = load_claim(conn, &grant_id, grant_key)?
+            .ok_or_else(|| AuthorityError::Corrupt("matching grant claim disappeared".into()))?;
+        let stored_request = load_request(conn, claim.approval_request_id())?.ok_or_else(|| {
+            AuthorityError::Corrupt("grant claim approval request is missing".into())
+        })?;
+        if stored_request.request.context() != context
+            || stored_request.request.generation() != generation
+            || stored_request.request.required_scope() != required_scope
+        {
+            continue;
+        }
+        let (signed_previous, previous) = load_latest_state(conn, &grant_id, grant_key)?
+            .ok_or_else(|| AuthorityError::Corrupt("grant claim has no signed state".into()))?;
+        if previous.status() != GrantStatusV2::Active {
+            saw_terminal = true;
+            continue;
+        }
+        if at < claim.not_before() {
+            saw_not_yet_valid = true;
+            continue;
+        } else if at >= claim.expires_at() {
+            saw_expired = true;
+            continue;
+        }
+        usable.push(SelectedGrant {
+            grant_id,
+            signed_claim,
+            signed_previous,
+            previous,
+        });
+    }
+    if usable.len() > 1 {
+        return Err(AuthorityError::Corrupt(
+            "multiple usable grants match the exact authorization context and scope".into(),
+        ));
+    }
+    let not_usable = if saw_not_yet_valid {
+        GrantNotUsableReason::NotYetValid
+    } else if saw_expired {
+        GrantNotUsableReason::Expired
+    } else if saw_terminal {
+        GrantNotUsableReason::Terminal
+    } else {
+        GrantNotUsableReason::Missing
+    };
+    Ok((usable.pop(), not_usable))
+}
+
+struct RecordedAllow {
+    state: SignedGrantStateV2,
+    decision_event_id: String,
+}
+
+struct AllowEventIds<'a> {
+    state: &'a str,
+    decision: &'a str,
+}
+
+struct AllowRecordInput<'a> {
+    context: &'a AuthorizationContextV2,
+    generation: &'a AuthorityGenerationV2,
+    required_scope: &'a str,
+    consumed_at: i64,
+    event_ids: AllowEventIds<'a>,
+}
+
+fn spend_grant_and_record_allow(
+    conn: &Connection,
+    selected: SelectedGrant,
+    input: AllowRecordInput<'_>,
+    grant_key: &SigningKey,
+    ledger_key: &SigningKey,
+) -> Result<RecordedAllow, AuthorityError> {
+    validate_token("state event id", input.event_ids.state, 160)?;
+    validate_token("decision event id", input.event_ids.decision, 160)?;
+    let SelectedGrant {
+        grant_id,
+        signed_claim,
+        signed_previous,
+        previous,
+    } = selected;
+    let spent = GrantStateV2::terminal(
+        &previous,
+        signed_previous.state_hash(),
+        GrantStatusV2::Spent,
+        input.event_ids.state.into(),
+        input.consumed_at,
+    )?;
+    let signed_spent = SignedGrantStateV2::sign(&spent, grant_key)?;
+    insert_state(conn, &spent, &signed_spent)?;
+    append_ledger_entry(
+        conn,
+        ledger_key,
+        LedgerEventDraft {
+            event_id: input.event_ids.state.into(),
+            subject: grant_id.clone(),
+            timestamp: input.consumed_at,
+            build_identity: Some(input.context.build_identity().into()),
+            policy_identity: Some(input.context.policy_identity().into()),
+            payload: LedgerPayloadV2::GrantStateChanged {
+                grant_id: grant_id.clone(),
+                claim_hash: signed_claim.claim_hash().into(),
+                state_hash: signed_spent.state_hash().into(),
+                revision: spent.revision().into(),
+                status: GrantStatusV2::Spent,
+                operator_principal: None,
+                reason: None,
+            },
+        },
+    )?;
+    append_ledger_entry(
+        conn,
+        ledger_key,
+        LedgerEventDraft {
+            event_id: input.event_ids.decision.into(),
+            subject: grant_id.clone(),
+            timestamp: input.consumed_at,
+            build_identity: Some(input.context.build_identity().into()),
+            policy_identity: Some(input.context.policy_identity().into()),
+            payload: LedgerPayloadV2::DecisionAllow {
+                grant_id,
+                required_scope: input.required_scope.into(),
+                input_hash: input.context.input_hash().into(),
+                context: input.context.clone(),
+                generation: input.generation.clone(),
+                state_hash: signed_spent.state_hash().into(),
+            },
+        },
+    )?;
+    Ok(RecordedAllow {
+        state: signed_spent,
+        decision_event_id: input.event_ids.decision.into(),
+    })
+}
+
 fn state_actor_fields_match(
     status: GrantStatusV2,
     operator_principal: &Option<String>,
@@ -1944,6 +2311,24 @@ fn validate_timestamp(timestamp: i64) -> Result<(), AuthorityError> {
         ));
     }
     Ok(())
+}
+
+fn authority_now(source: &dyn AuthorityRuntimeSource) -> Result<i64, AuthorityError> {
+    let timestamp = source.unix_timestamp()?;
+    validate_timestamp(timestamp)?;
+    Ok(timestamp)
+}
+
+fn authority_id(
+    source: &dyn AuthorityRuntimeSource,
+    prefix: &str,
+) -> Result<String, AuthorityError> {
+    validate_token("authority id prefix", prefix, 32)?;
+    let nonce = source.identifier_nonce()?;
+    validate_token("authority identifier nonce", &nonce, 120)?;
+    let identifier = format!("{prefix}_{nonce}");
+    validate_token("authority-generated id", &identifier, 160)?;
+    Ok(identifier)
 }
 
 fn validate_key_identifier(value: &str, purpose: &str) -> Result<(), AuthorityError> {
@@ -3196,20 +3581,7 @@ impl Authority {
         &mut self,
         command: &CreateRequestCommand,
     ) -> Result<CreateRequestResult, AuthorityError> {
-        validate_token("request id", &command.request_id, 160)?;
-        validate_token("request event id", &command.event_id, 160)?;
-        command.context.validate()?;
-        let request = ApprovalRequestV2::from_command(command)?;
-        let request_jcs = canonicalize(&request)?;
-        let request_hash = approval_request_hash(&request_jcs);
-        let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
-            domain: "gommage.approval.dedupe",
-            version: FORMAT_VERSION,
-            context: request.context(),
-            generation: request.generation(),
-            required_scope: request.required_scope(),
-        })?;
-        let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
+        let prepared = prepare_approval_request(command)?;
         let ledger_key = self.ledger_key.clone();
         let grant_vk = self.grant_key.verifying_key();
         let ledger_vk = self.ledger_key.verifying_key();
@@ -3219,59 +3591,10 @@ impl Authority {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
         ensure_decision_admitted(&tx, &command.generation)?;
-        let existing_request_id = tx
-            .query_row(
-                "SELECT request_id FROM open_approvals WHERE dedupe_hash = ?1",
-                [&dedupe_hash],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if let Some(existing_request_id) = existing_request_id {
-            let existing = load_request(&tx, &existing_request_id)?.ok_or_else(|| {
-                AuthorityError::Corrupt("open approval points to a missing request".into())
-            })?;
-            ensure_decision_admitted(&tx, &command.generation)?;
-            tx.commit()?;
-            return Ok(CreateRequestResult::Existing(existing.request));
-        }
-        tx.execute(
-            "INSERT INTO approval_requests (
-                request_id, dedupe_hash, request_jcs, request_hash, event_id, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                request.request_id(),
-                dedupe_hash,
-                String::from_utf8(request_jcs).map_err(|error| {
-                    AuthorityError::Corrupt(format!("JCS was not UTF-8: {error}"))
-                })?,
-                request_hash,
-                command.event_id,
-                request.created_at(),
-            ],
-        )?;
-        tx.execute(
-            "INSERT INTO open_approvals (dedupe_hash, request_id) VALUES (?1, ?2)",
-            params![dedupe_hash, request.request_id()],
-        )?;
-        append_ledger_entry(
-            &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.event_id.clone(),
-                subject: request.request_id().into(),
-                timestamp: request.created_at(),
-                build_identity: Some(request.build_identity().into()),
-                policy_identity: Some(request.policy_identity().into()),
-                payload: LedgerPayloadV2::ApprovalRequested {
-                    request_id: request.request_id().into(),
-                    request_hash,
-                    dedupe_hash,
-                },
-            },
-        )?;
+        let result = create_or_get_request_in_transaction(&tx, &ledger_key, prepared)?;
         ensure_decision_admitted(&tx, &command.generation)?;
         tx.commit()?;
-        Ok(CreateRequestResult::Created(request))
+        Ok(result)
     }
 
     /// Resolve an open request as approved and atomically create its active grant.
@@ -3509,6 +3832,121 @@ impl Authority {
         Ok(DenyResult::Denied(resolution))
     }
 
+    /// Authorize one observed approval-gated call through one serialized transaction.
+    ///
+    /// This is the runtime-facing Authority v2 boundary. The caller cannot select
+    /// build, policy, generation, timestamp, request identifiers, or decision event
+    /// identifiers. Authority derives or creates them after acquiring the write lock,
+    /// then atomically spends the one exact usable grant or leaves one exact open
+    /// approval request representing the call.
+    pub fn authorize_approval(
+        &mut self,
+        command: &AuthorizeApprovalCommandV2,
+    ) -> Result<AuthorizeApprovalResultV2, AuthorityError> {
+        validate_text("required scope", &command.required_scope, 512, false)?;
+        validate_text("approval reason", &command.reason, 1_024, true)?;
+        let grant_key = self.grant_key.clone();
+        let ledger_key = self.ledger_key.clone();
+        let grant_vk = self.grant_key.verifying_key();
+        let ledger_vk = self.ledger_key.verifying_key();
+        let config = self.config.clone();
+        let runtime_source = Arc::clone(&self.runtime_source);
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let verification = verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
+        let runtime = load_current_runtime_state(&tx)?;
+        if runtime.maintenance {
+            return Err(AuthorityError::Maintenance);
+        }
+        let generation = runtime.active_generation;
+        let context = AuthorizationContextV2::new(
+            generation.build_identity().into(),
+            command.integration.clone(),
+            command.call.tool.clone(),
+            command.call.input_hash(),
+            generation.policy_identity().into(),
+            command.capabilities.clone(),
+        )?;
+        let authorized_at = authority_now(runtime_source.as_ref())?;
+        let evidence_time_floor = verification
+            .entries
+            .iter()
+            .map(|entry| entry.entry.timestamp())
+            .max()
+            .ok_or_else(|| {
+                AuthorityError::Corrupt("authority ledger has no genesis entry".into())
+            })?;
+        if authorized_at < evidence_time_floor {
+            return Err(AuthorityError::RuntimeSource(format!(
+                "timestamp {authorized_at} predates signed evidence time {evidence_time_floor}"
+            )));
+        }
+        let (selected, not_usable) = select_usable_grant(
+            &tx,
+            &context,
+            &generation,
+            &command.required_scope,
+            authorized_at,
+            &grant_vk,
+        )?;
+        if let Some(selected) = selected {
+            let state_event_id = authority_id(runtime_source.as_ref(), "state_spend")?;
+            let decision_event_id = authority_id(runtime_source.as_ref(), "decision_allow")?;
+            let recorded = spend_grant_and_record_allow(
+                &tx,
+                selected,
+                AllowRecordInput {
+                    context: &context,
+                    generation: &generation,
+                    required_scope: &command.required_scope,
+                    consumed_at: authorized_at,
+                    event_ids: AllowEventIds {
+                        state: &state_event_id,
+                        decision: &decision_event_id,
+                    },
+                },
+                &grant_key,
+                &ledger_key,
+            )?;
+            ensure_decision_admitted(&tx, &generation)?;
+            tx.commit()?;
+            return Ok(AuthorizeApprovalResultV2::Allowed {
+                state: recorded.state,
+                decision_event_id: recorded.decision_event_id,
+            });
+        }
+        if not_usable == GrantNotUsableReason::NotYetValid {
+            return Err(AuthorityError::RuntimeSource(
+                "matching grant validity begins after authoritative time".into(),
+            ));
+        }
+        let request_id = authority_id(runtime_source.as_ref(), "request")?;
+        let event_id = authority_id(runtime_source.as_ref(), "approval_request")?;
+        let prepared = prepare_approval_request(&CreateRequestCommand {
+            request_id,
+            event_id,
+            created_at: authorized_at,
+            context,
+            generation: generation.clone(),
+            required_scope: command.required_scope.clone(),
+            reason: command.reason.clone(),
+        })?;
+        let request = create_or_get_request_in_transaction(&tx, &ledger_key, prepared)?;
+        ensure_decision_admitted(&tx, &generation)?;
+        tx.commit()?;
+        Ok(match request {
+            CreateRequestResult::Created(request) => AuthorizeApprovalResultV2::ApprovalRequired {
+                request: Box::new(request),
+                created: true,
+            },
+            CreateRequestResult::Existing(request) => AuthorizeApprovalResultV2::ApprovalRequired {
+                request: Box::new(request),
+                created: false,
+            },
+        })
+    }
+
     /// Atomically spend a matching grant and record the final allow evidence.
     pub fn consume_and_record_allow(
         &mut self,
@@ -3529,132 +3967,46 @@ impl Authority {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         verify_all(&tx, &config, &grant_vk, &ledger_vk, None)?;
         ensure_decision_admitted(&tx, &command.generation)?;
-
-        let dedupe_jcs = canonicalize(&ApprovalDedupeV2 {
-            domain: "gommage.approval.dedupe",
-            version: FORMAT_VERSION,
-            context: &command.context,
-            generation: &command.generation,
-            required_scope: &command.required_scope,
-        })?;
-        let dedupe_hash = approval_dedupe_hash(&dedupe_jcs);
-        let candidate_ids = {
-            let mut statement = tx.prepare(
-                "SELECT grant_claims.grant_id
-                 FROM grant_claims
-                 JOIN approval_requests
-                   ON approval_requests.request_id = grant_claims.request_id
-                 WHERE approval_requests.dedupe_hash = ?1
-                 ORDER BY grant_claims.grant_id",
-            )?;
-            statement
-                .query_map([dedupe_hash], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        let mut usable = Vec::new();
-        let mut temporal_reason = None;
-        for grant_id in candidate_ids {
-            let (signed_claim, claim) =
-                load_claim(&tx, &grant_id, &grant_vk)?.ok_or_else(|| {
-                    AuthorityError::Corrupt("matching grant claim disappeared".into())
-                })?;
-            let stored_request =
-                load_request(&tx, claim.approval_request_id())?.ok_or_else(|| {
-                    AuthorityError::Corrupt("grant claim approval request is missing".into())
-                })?;
-            if stored_request.request.context() != &command.context
-                || stored_request.request.generation() != &command.generation
-                || stored_request.request.required_scope() != command.required_scope.as_str()
-            {
-                continue;
-            }
-            let (signed_previous, previous) = load_latest_state(&tx, &grant_id, &grant_vk)?
-                .ok_or_else(|| AuthorityError::Corrupt("grant claim has no signed state".into()))?;
-            if previous.status() != GrantStatusV2::Active {
-                continue;
-            }
-            let unusable = if command.consumed_at < claim.not_before() {
-                Some(GrantNotUsableReason::NotYetValid)
-            } else if command.consumed_at >= claim.expires_at() {
-                Some(GrantNotUsableReason::Expired)
-            } else {
-                None
-            };
-            if let Some(reason) = unusable {
-                temporal_reason = match temporal_reason {
-                    None => Some(reason),
-                    Some(previous_reason) if previous_reason == reason => Some(reason),
-                    Some(_) => Some(GrantNotUsableReason::Missing),
-                };
-                continue;
-            }
-            usable.push((grant_id, signed_claim, signed_previous, previous));
-        }
-        if usable.len() > 1 {
-            return Err(AuthorityError::Corrupt(
-                "multiple usable grants match the exact authorization context and scope".into(),
-            ));
-        }
-        let Some((grant_id, signed_claim, signed_previous, previous)) = usable.pop() else {
+        let (selected, not_usable) = select_usable_grant(
+            &tx,
+            &command.context,
+            &command.generation,
+            &command.required_scope,
+            command.consumed_at,
+            &grant_vk,
+        )?;
+        let Some(selected) = selected else {
             ensure_decision_admitted(&tx, &command.generation)?;
             tx.commit()?;
             return Ok(ConsumeResult::NotUsable(
-                temporal_reason.unwrap_or(GrantNotUsableReason::Missing),
+                if not_usable == GrantNotUsableReason::Terminal {
+                    GrantNotUsableReason::Missing
+                } else {
+                    not_usable
+                },
             ));
         };
-        let spent = GrantStateV2::terminal(
-            &previous,
-            signed_previous.state_hash(),
-            GrantStatusV2::Spent,
-            command.state_event_id.clone(),
-            command.consumed_at,
-        )?;
-        let signed_spent = SignedGrantStateV2::sign(&spent, &grant_key)?;
-        insert_state(&tx, &spent, &signed_spent)?;
-        append_ledger_entry(
+        let recorded = spend_grant_and_record_allow(
             &tx,
-            &ledger_key,
-            LedgerEventDraft {
-                event_id: command.state_event_id.clone(),
-                subject: grant_id.clone(),
-                timestamp: command.consumed_at,
-                build_identity: Some(command.context.build_identity().into()),
-                policy_identity: Some(command.context.policy_identity().into()),
-                payload: LedgerPayloadV2::GrantStateChanged {
-                    grant_id: grant_id.clone(),
-                    claim_hash: signed_claim.claim_hash().into(),
-                    state_hash: signed_spent.state_hash().into(),
-                    revision: spent.revision().into(),
-                    status: GrantStatusV2::Spent,
-                    operator_principal: None,
-                    reason: None,
+            selected,
+            AllowRecordInput {
+                context: &command.context,
+                generation: &command.generation,
+                required_scope: &command.required_scope,
+                consumed_at: command.consumed_at,
+                event_ids: AllowEventIds {
+                    state: &command.state_event_id,
+                    decision: &command.decision_event_id,
                 },
             },
-        )?;
-        append_ledger_entry(
-            &tx,
+            &grant_key,
             &ledger_key,
-            LedgerEventDraft {
-                event_id: command.decision_event_id.clone(),
-                subject: grant_id.clone(),
-                timestamp: command.consumed_at,
-                build_identity: Some(command.context.build_identity().into()),
-                policy_identity: Some(command.context.policy_identity().into()),
-                payload: LedgerPayloadV2::DecisionAllow {
-                    grant_id,
-                    required_scope: command.required_scope.clone(),
-                    input_hash: command.context.input_hash().into(),
-                    context: command.context.clone(),
-                    generation: command.generation.clone(),
-                    state_hash: signed_spent.state_hash().into(),
-                },
-            },
         )?;
         ensure_decision_admitted(&tx, &command.generation)?;
         tx.commit()?;
         Ok(ConsumeResult::Consumed {
-            state: signed_spent,
-            decision_event_id: command.decision_event_id.clone(),
+            state: recorded.state,
+            decision_event_id: recorded.decision_event_id,
         })
     }
 

@@ -2,20 +2,40 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signer as _, SigningKey};
 use gommage_core::{
     ActivateGenerationCommand, ApproveCommand, ApproveResult, Authority, AuthorityConfig,
-    AuthorityError, AuthorityGenerationV2, AuthorizationContextV2, ConsumeCommand, ConsumeResult,
+    AuthorityError, AuthorityGenerationV2, AuthorityRuntimeSource, AuthorizationContextV2,
+    AuthorizeApprovalCommandV2, AuthorizeApprovalResultV2, ConsumeCommand, ConsumeResult,
     CreateRequestCommand, CreateRequestResult, DenyCommand, DenyResult, FreshnessVerdict,
     GrantNotUsableReason, GrantStatusV2, RevokeCommand, RevokeResult, SetMaintenanceCommand,
-    SignedGrantClaimV2, SignedGrantStateV2, SignedJcs,
+    SignedGrantClaimV2, SignedGrantStateV2, SignedJcs, ToolCall,
 };
 use rusqlite::Connection;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Barrier},
+    sync::{
+        Arc, Barrier,
+        atomic::{AtomicI64, AtomicU64, Ordering},
+    },
     thread,
 };
 use tempfile::TempDir;
+
+struct FixedRuntimeSource {
+    timestamp: AtomicI64,
+    next_nonce: AtomicU64,
+}
+
+impl AuthorityRuntimeSource for FixedRuntimeSource {
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
+        Ok(self.timestamp.load(Ordering::SeqCst))
+    }
+
+    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
+        let nonce = self.next_nonce.fetch_add(1, Ordering::SeqCst);
+        Ok(format!("fixed{nonce:016x}"))
+    }
+}
 
 fn grant_key() -> SigningKey {
     SigningKey::from_bytes(&[41; 32])
@@ -228,6 +248,28 @@ fn approve(authority: &mut Authority) -> (SignedGrantClaimV2, SignedGrantStateV2
     }
 }
 
+fn approve_request_at(
+    authority: &mut Authority,
+    request_id: &str,
+    resolved_at: i64,
+    index: usize,
+) -> (SignedGrantClaimV2, SignedGrantStateV2) {
+    let command = ApproveCommand {
+        request_id: request_id.into(),
+        grant_id: format!("grant_runtime_{index}"),
+        resolution_event_id: format!("event_runtime_approve_{index}"),
+        activation_event_id: format!("event_runtime_activate_{index}"),
+        operator_principal: "uid:501".into(),
+        reason: "Reviewed the exact Authority-owned request".into(),
+        resolved_at,
+        ttl_seconds: 600,
+    };
+    match authority.approve(&command).unwrap() {
+        ApproveResult::Approved { claim, state } => (claim, state),
+        other => panic!("expected a new runtime grant, got {other:?}"),
+    }
+}
+
 fn consume_command(index: usize) -> ConsumeCommand {
     ConsumeCommand {
         required_scope: "git.push:refs/heads/main".into(),
@@ -236,6 +278,26 @@ fn consume_command(index: usize) -> ConsumeCommand {
         state_event_id: format!("event_spend_{index}"),
         decision_event_id: format!("event_allow_{index}"),
         consumed_at: 1_700_000_030,
+    }
+}
+
+fn authorize_command() -> AuthorizeApprovalCommandV2 {
+    AuthorizeApprovalCommandV2 {
+        integration: "codex".into(),
+        call: ToolCall {
+            tool: "Bash".into(),
+            input: json!({
+                "command": "git push origin main",
+                "timeout_ms": 120_000,
+            }),
+        },
+        capabilities: vec![
+            "proc.exec:git".into(),
+            "git.push:refs/heads/main".into(),
+            "proc.exec:git".into(),
+        ],
+        required_scope: "git.push:refs/heads/main".into(),
+        reason: "Release the reviewed commit".into(),
     }
 }
 
@@ -295,6 +357,74 @@ fn consume_command_api_has_no_client_selected_grant() {
     assert_eq!(state_event_id, "event_spend_0");
     assert_eq!(decision_event_id, "event_allow_0");
     assert_eq!(consumed_at, 1_700_000_030);
+}
+
+#[test]
+fn runtime_authorization_api_exposes_no_identity_time_or_event_controls() {
+    let AuthorizeApprovalCommandV2 {
+        integration,
+        call,
+        capabilities,
+        required_scope,
+        reason,
+    } = authorize_command();
+
+    assert_eq!(integration, "codex");
+    assert_eq!(call.tool, "Bash");
+    assert_eq!(call.input["command"], "git push origin main");
+    assert_eq!(capabilities.len(), 3);
+    assert_eq!(required_scope, "git.push:refs/heads/main");
+    assert_eq!(reason, "Release the reviewed commit");
+}
+
+#[test]
+fn trusted_open_time_and_identifier_source_owns_runtime_evidence() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    let source = Arc::new(FixedRuntimeSource {
+        timestamp: AtomicI64::new(1_800_000_000),
+        next_nonce: AtomicU64::new(1),
+    });
+    let mut authority = Authority::open_with_runtime_source(
+        &path,
+        config(),
+        grant_key(),
+        ledger_key(),
+        source.clone(),
+    )
+    .unwrap();
+    let command = authorize_command();
+    let request = match authority.authorize_approval(&command).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request,
+        other => panic!("expected source-owned request, got {other:?}"),
+    };
+    assert_eq!(request.created_at(), 1_800_000_000);
+    assert_eq!(request.request_id(), "request_fixed0000000000000001");
+    approve_request_at(
+        &mut authority,
+        request.request_id(),
+        request.created_at(),
+        8,
+    );
+
+    assert!(matches!(
+        authority.authorize_approval(&command).unwrap(),
+        AuthorizeApprovalResultV2::Allowed {
+            decision_event_id,
+            ..
+        } if decision_event_id == "decision_allow_fixed0000000000000004"
+    ));
+    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    source.timestamp.store(1_799_999_999, Ordering::SeqCst);
+    assert!(matches!(
+        authority.authorize_approval(&command),
+        Err(AuthorityError::RuntimeSource(message))
+            if message.contains("predates signed evidence time")
+    ));
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
 }
 
 #[test]
@@ -437,6 +567,228 @@ fn reference_lifecycle_is_atomic_exact_and_reopenable() {
     assert_eq!(journal.to_ascii_lowercase(), "wal");
     assert_eq!(application_id, 0x474f_4d32);
     assert_eq!(user_version, 2);
+}
+
+#[test]
+fn runtime_authorization_owns_identity_time_and_the_complete_retry_transaction() {
+    let (_directory, _path, mut authority) = fixture();
+    let command = authorize_command();
+
+    let first = authority.authorize_approval(&command).unwrap();
+    let (request_id, created_at) = match first {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => {
+            assert!(request.request_id().starts_with("request_"));
+            assert!(request.created_at() > config().genesis_at);
+            assert_eq!(request.context().build_identity(), "gommage-test-build");
+            assert_eq!(request.policy_identity(), hash('2'));
+            assert_eq!(request.generation(), &generation("1"));
+            assert_eq!(request.integration(), "codex");
+            assert_eq!(request.tool(), "Bash");
+            assert_eq!(request.input_hash(), command.call.input_hash());
+            assert_eq!(
+                request.capabilities(),
+                &["git.push:refs/heads/main", "proc.exec:git"]
+            );
+            (request.request_id().to_owned(), request.created_at())
+        }
+        other => panic!("expected Authority-owned approval request, got {other:?}"),
+    };
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "2");
+
+    let duplicate = authority.authorize_approval(&command).unwrap();
+    assert!(matches!(
+        duplicate,
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: false,
+        } if request.request_id() == request_id
+    ));
+    assert_eq!(
+        authority.verify_ledger(None).unwrap().head_seq,
+        "2",
+        "deduplicating the exact retry must not grow the ledger"
+    );
+
+    approve_request_at(&mut authority, &request_id, created_at, 1);
+    let allowed = authority.authorize_approval(&command).unwrap();
+    match allowed {
+        AuthorizeApprovalResultV2::Allowed {
+            state,
+            decision_event_id,
+        } => {
+            assert!(decision_event_id.starts_with("decision_allow_"));
+            let state = state.verify(&grant_key().verifying_key()).unwrap();
+            assert_eq!(state.status(), GrantStatusV2::Spent);
+            assert!(state.transition_event_id().starts_with("state_spend_"));
+        }
+        other => panic!("expected exact one-use authorization, got {other:?}"),
+    }
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, "6");
+
+    let replacement = authority.authorize_approval(&command).unwrap();
+    assert!(matches!(
+        replacement,
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } if request.request_id() != request_id
+            && request.request_id().starts_with("request_")
+    ));
+    let verification = authority.verify_ledger(None).unwrap();
+    assert_eq!(verification.head_seq, "7");
+    assert_eq!(
+        verification
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.event_type() == "decision_allow")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn runtime_authorization_never_spends_for_input_scope_or_context_mismatch() {
+    let (_directory, _path, mut authority) = fixture();
+    let command = authorize_command();
+    let request = match authority.authorize_approval(&command).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request,
+        other => panic!("expected initial request, got {other:?}"),
+    };
+    approve_request_at(
+        &mut authority,
+        request.request_id(),
+        request.created_at(),
+        2,
+    );
+
+    let mut input_mismatch = command.clone();
+    input_mismatch.call.input["command"] = json!("git push origin release");
+    let input_request_id = match authority.authorize_approval(&input_mismatch).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request.request_id().to_owned(),
+        other => panic!("input mismatch authorized unexpectedly: {other:?}"),
+    };
+    let mut scope_mismatch = command.clone();
+    scope_mismatch.required_scope = "git.push:refs/heads/release".into();
+    let scope_request_id = match authority.authorize_approval(&scope_mismatch).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request.request_id().to_owned(),
+        other => panic!("scope mismatch authorized unexpectedly: {other:?}"),
+    };
+    let mut context_mismatch = command.clone();
+    context_mismatch.integration = "claude-code".into();
+    let context_request_id = match authority.authorize_approval(&context_mismatch).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request.request_id().to_owned(),
+        other => panic!("context mismatch authorized unexpectedly: {other:?}"),
+    };
+    assert_ne!(input_request_id, scope_request_id);
+    assert_ne!(input_request_id, context_request_id);
+    assert_ne!(scope_request_id, context_request_id);
+    assert_eq!(
+        authority
+            .latest_state("grant_runtime_2")
+            .unwrap()
+            .unwrap()
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .status(),
+        GrantStatusV2::Active
+    );
+
+    assert!(matches!(
+        authority.authorize_approval(&command).unwrap(),
+        AuthorizeApprovalResultV2::Allowed { .. }
+    ));
+    assert_eq!(
+        authority
+            .latest_state("grant_runtime_2")
+            .unwrap()
+            .unwrap()
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .status(),
+        GrantStatusV2::Spent
+    );
+    authority.verify_ledger(None).unwrap();
+}
+
+#[test]
+fn runtime_authorization_derives_the_active_generation_and_fails_closed_in_maintenance() {
+    let (_directory, _path, mut authority) = fixture();
+    authority
+        .activate_generation(&activate_command("2", 2, 1_700_000_010))
+        .unwrap();
+
+    let request = match authority.authorize_approval(&authorize_command()).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request,
+        other => panic!("expected request in active generation, got {other:?}"),
+    };
+    assert_eq!(request.generation(), &generation("2"));
+    assert_eq!(request.build_identity(), "gommage-next-build");
+    assert_eq!(request.policy_identity(), hash('9'));
+
+    authority
+        .set_maintenance(&maintenance_command(true, 7, request.created_at() + 1))
+        .unwrap();
+    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+    assert!(matches!(
+        authority.authorize_approval(&authorize_command()),
+        Err(AuthorityError::Maintenance)
+    ));
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+}
+
+#[test]
+fn runtime_authorization_fails_closed_on_future_dated_grant_evidence() {
+    let (_directory, _path, mut authority) = fixture();
+    let command = authorize_command();
+    let request = match authority.authorize_approval(&command).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request,
+        other => panic!("expected initial request, got {other:?}"),
+    };
+    approve_request_at(
+        &mut authority,
+        request.request_id(),
+        request.created_at() + 60,
+        3,
+    );
+    let head_before = authority.verify_ledger(None).unwrap().head_seq;
+
+    assert!(matches!(
+        authority.authorize_approval(&command),
+        Err(AuthorityError::RuntimeSource(message))
+            if message.contains("predates signed evidence time")
+    ));
+    assert_eq!(authority.verify_ledger(None).unwrap().head_seq, head_before);
+    assert_eq!(
+        authority
+            .latest_state("grant_runtime_3")
+            .unwrap()
+            .unwrap()
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .status(),
+        GrantStatusV2::Active
+    );
 }
 
 #[test]
@@ -1133,6 +1485,110 @@ fn one_hundred_concurrent_consumers_yield_one_allow() {
         .filter(|entry| entry.entry.event_type() == "decision_allow")
         .count();
     assert_eq!(allow_events, 1);
+}
+
+#[test]
+fn concurrent_runtime_retries_yield_one_allow_and_one_replacement_request() {
+    let (_directory, path, mut authority) = fixture();
+    let command = authorize_command();
+    let request = match authority.authorize_approval(&command).unwrap() {
+        AuthorizeApprovalResultV2::ApprovalRequired {
+            request,
+            created: true,
+        } => request,
+        other => panic!("expected initial request, got {other:?}"),
+    };
+    approve_request_at(
+        &mut authority,
+        request.request_id(),
+        request.created_at(),
+        4,
+    );
+    drop(authority);
+
+    let barrier = Arc::new(Barrier::new(32));
+    let handles: Vec<_> = (0..32)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            let path = path.clone();
+            let command = command.clone();
+            thread::spawn(move || {
+                let mut authority = open(&path);
+                barrier.wait();
+                authority.authorize_approval(&command)
+            })
+        })
+        .collect();
+    let results: Vec<_> = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap().unwrap())
+        .collect();
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, AuthorizeApprovalResultV2::Allowed { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(
+                result,
+                AuthorizeApprovalResultV2::ApprovalRequired { created: true, .. }
+            ))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(
+                result,
+                AuthorizeApprovalResultV2::ApprovalRequired { created: false, .. }
+            ))
+            .count(),
+        30
+    );
+    let request_ids: Vec<_> = results
+        .iter()
+        .filter_map(|result| match result {
+            AuthorizeApprovalResultV2::ApprovalRequired { request, .. } => {
+                Some(request.request_id())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(request_ids.len(), 31);
+    assert!(
+        request_ids
+            .iter()
+            .all(|request_id| *request_id == request_ids[0])
+    );
+
+    let authority = open(&path);
+    let verification = authority.verify_ledger(None).unwrap();
+    assert_eq!(verification.head_seq, "7");
+    assert_eq!(
+        verification
+            .entries
+            .iter()
+            .filter(|entry| entry.entry.event_type() == "decision_allow")
+            .count(),
+        1
+    );
+    let raw = Connection::open(&path).unwrap();
+    let counts: (i64, i64, i64) = raw
+        .query_row(
+            "SELECT
+                (SELECT count(*) FROM grant_claims),
+                (SELECT count(*) FROM approval_requests),
+                (SELECT count(*) FROM open_approvals)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(counts, (1, 2, 1));
 }
 
 #[test]
