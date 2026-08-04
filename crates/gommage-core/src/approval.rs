@@ -351,11 +351,67 @@ mod approval_time {
     }
 }
 
+/// Tell the blocked caller how *it* can clear the gate, not only how the
+/// operator can.
+///
+/// An agent reads this string at the moment it is blocked, and acts on it in
+/// preference to any doctrine it was given earlier. Naming only the operator
+/// path turned every unbound ask into a handoff: measured over
+/// 2026-07-27..2026-08-04 on one host, 118 asks produced 5 pictos and left 83
+/// requests unresolved, because the agent was told to run a command reserved
+/// for the operator and then asked a human to run it.
+///
+/// A scope with no input binding is self-serviceable by design — the picto is a
+/// signed, audited declaration of intent, not a second password. Say so. When
+/// the scope *is* bound to the exact call, only the operator can clear it, and
+/// then the operator command is the whole answer.
+///
+/// Lives here because the CLI, the daemon and the MCP server each answer the
+/// same gate and must answer it identically; it was duplicated in all three.
+pub fn approval_reason(reason: &str, request_id: &str, scope: &str, bind_input: bool) -> String {
+    if bind_input {
+        return format!(
+            "{reason}; this picto is bound to the exact call, so only the operator can clear it: \
+             `gommage approval approve {request_id}` (request {request_id} pending)"
+        );
+    }
+    format!(
+        "{reason}; to proceed yourself: `gommage grant --scope {scope} --reason \"<why>\"` then \
+         retry the same call. Operator alternative: `gommage approval approve {request_id}` \
+         (request {request_id} pending)"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Decision, EvalResult};
     use tempfile::tempdir;
+
+    #[test]
+    fn unbound_scope_names_the_self_service_path_first() {
+        let msg = approval_reason("because", "apr_1", "net.out.post", false);
+        assert!(
+            msg.contains("gommage grant --scope net.out.post"),
+            "an unbound scope must tell the agent how to clear it itself: {msg}"
+        );
+        let self_service = msg.find("gommage grant").expect("self-service path");
+        let operator = msg.find("gommage approval approve").expect("operator path");
+        assert!(
+            self_service < operator,
+            "the actionable path must come first, or the agent acts on the operator one: {msg}"
+        );
+    }
+
+    #[test]
+    fn input_bound_scope_offers_only_the_operator_path() {
+        let msg = approval_reason("because", "apr_2", "deploy.vercel:prod", true);
+        assert!(
+            !msg.contains("gommage grant"),
+            "a picto bound to the exact call cannot be self-granted: {msg}"
+        );
+        assert!(msg.contains("gommage approval approve apr_2"), "{msg}");
+    }
 
     fn eval() -> EvalResult {
         EvalResult {
