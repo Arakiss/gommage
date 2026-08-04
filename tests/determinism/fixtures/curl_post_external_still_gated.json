@@ -1,0 +1,13 @@
+{
+  "name": "curl-post-to-an-external-host-still-requires-a-picto",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "curl -X POST -d @body https://api.example.com/v1/upload"
+    }
+  },
+  "expected": {
+    "kind": "ask_picto",
+    "required_scope": "net.out.post"
+  }
+}
