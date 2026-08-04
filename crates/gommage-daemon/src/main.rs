@@ -22,7 +22,7 @@ use ed25519_dalek::VerifyingKey;
 use gommage_audit::{AuditEvent, AuditWriter, recent_stream_items};
 use gommage_core::{
     ApprovalRequest, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
-    ApprovalWebhookSource, Decision, PictoConsume, PictoLookup, ToolCall,
+    ApprovalWebhookSource, Decision, PictoConsume, PictoLookup, ToolCall, approval_reason,
     approval_webhook_generic_payload, deliver_prepared_approval_webhook, evaluate,
     prepare_approval_webhook,
     runtime::{HomeLayout, Runtime},
@@ -322,9 +322,10 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
                     policy_version: request.policy_version.clone(),
                 })?;
                 notify_approval_webhook_best_effort(&mut s.writer, &request);
+                let reason = approval_reason(&reason, &request.id, &required_scope, bind_input);
                 eval.decision = Decision::AskPicto {
                     required_scope,
-                    reason: approval_reason(&reason, &request.id),
+                    reason,
                     bind_input,
                 };
             }
@@ -376,12 +377,6 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
     // touch home_root to silence dead-code lint and document the field's purpose.
     let _ = &s.home_root;
     Ok(eval)
-}
-
-fn approval_reason(reason: &str, request_id: &str) -> String {
-    format!(
-        "{reason}; approval request {request_id} pending; run `gommage approval approve {request_id}`"
-    )
 }
 
 fn notify_approval_webhook_best_effort(writer: &mut AuditWriter, request: &ApprovalRequest) {
