@@ -160,11 +160,22 @@ fn verify_json_accepts_public_fixture_library() {
             .and_then(|value| value.as_str()),
         Some("pass")
     );
+    // Assert the outcome, not the census: pinning the exact case count makes
+    // every branch fail the moment someone adds a case to the public fixture
+    // library, and blames the wrong author. Same defect as the sibling
+    // assertion in cli_beta.rs.
     assert_eq!(
         report
-            .pointer("/policy_tests/0/report/summary/passed")
+            .pointer("/policy_tests/0/report/summary/failed")
             .and_then(|value| value.as_u64()),
-        Some(8)
+        Some(0)
+    );
+    assert!(
+        report
+            .pointer("/policy_tests/0/report/summary/passed")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|passed| passed > 0),
+        "the fixture library must actually run cases, not report an empty pass"
     );
 }
 

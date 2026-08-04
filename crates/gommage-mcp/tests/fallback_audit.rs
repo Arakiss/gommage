@@ -110,7 +110,10 @@ fn fallback_path_writes_signed_audit_entry_when_daemon_is_absent() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains(r#""permissionDecision":"ask""#));
-    assert!(stdout.contains("approval request apr_"));
+    assert!(stdout.contains("request apr_"), "{stdout}");
+    // The fallback path must hand the agent the same self-service route the
+    // daemon does, or a daemonless host turns every ask into a handoff.
+    assert!(stdout.contains("gommage grant --scope"), "{stdout}");
     assert_eq!(
         verify_log(&layout.audit_log, &layout.load_verifying_key().unwrap()).unwrap(),
         2
