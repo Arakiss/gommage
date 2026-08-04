@@ -1,0 +1,12 @@
+{
+  "name": "curl-post-to-localhost-is-allowed-nothing-leaves-the-host",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "curl -X POST -d @body http://localhost:3000/ingest"
+    }
+  },
+  "expected": {
+    "kind": "allow"
+  }
+}

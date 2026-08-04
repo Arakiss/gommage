@@ -438,6 +438,29 @@
   emit:
     - "net.out.post"
 
+# The destination of that upload, when it can be read off the command with
+# certainty. Emitted IN ADDITION to the bare `net.out.post` above, never instead
+# of it: policy keeps gating every upload, and a rule may now allow the subset
+# whose host is loopback.
+#
+# Why this exists: 49 of 131 net.out.post pictos in the audit log (37%) were
+# curl to 127.0.0.1 or localhost — local dev servers, which cannot exfiltrate
+# anything because the request never leaves the host. Every one of those
+# interrupted an operator for nothing.
+#
+# The host is captured from the URL itself, and only when the URL follows the
+# upload flag. That is deliberately strict: appending `# 127.0.0.1` as a comment
+# or planting it in a header captures the REAL host (evil.example.com), and a
+# command whose URL precedes the flag captures nothing at all — so the bare
+# `net.out.post` gate still fires. Every failure mode of this rule is a picto,
+# never an allow.
+- name: bash-curl-upload-host
+  tool: Bash
+  match_input:
+    command: "^\\s*curl\\b[^#]*\\s(?:-d\\b|--data(?:-\\w+|=|\\b)|-F\\b|--form\\b|-T\\b|--upload-file\\b|-X\\s+(?:POST|PUT))[^#]*\\s['\"]?https?://(?P<host>[^/\\s?#'\"]+)"
+  emit:
+    - "net.out.post:${host}"
+
 # wget with a POST/body flag. A plain `wget https://x` (GET) does NOT match.
 - name: bash-wget-post
   tool: Bash

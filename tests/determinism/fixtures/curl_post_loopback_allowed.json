@@ -1,0 +1,12 @@
+{
+  "name": "curl-post-to-loopback-is-allowed-nothing-leaves-the-host",
+  "call": {
+    "tool": "Bash",
+    "input": {
+      "command": "curl -s -X POST -H \"Content-Type: application/json\" -d '{\"a\":1}' \"http://127.0.0.1:8789/api/v1/x\""
+    }
+  },
+  "expected": {
+    "kind": "allow"
+  }
+}

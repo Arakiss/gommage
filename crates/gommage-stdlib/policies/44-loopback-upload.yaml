@@ -1,0 +1,35 @@
+# A POST to loopback never leaves the machine, so it cannot exfiltrate. Loads
+# before 45-egress-and-perms.yaml so the allow is reached before the picto gate.
+#
+# Evidence (2026-08-03): 49 of the last 131 net.out.post pictos were curl to
+# 127.0.0.1 or localhost, every one of them a local dev server. Same shape as
+# the curl-GET false positive already handled in this directory's sibling rule.
+#
+# `all_capability` requires EVERY pattern to be present, so this only fires when
+# the mapper actually read a loopback host off the URL. An external POST emits
+# `net.out.post:evil.example.com`, which never satisfies the pattern, and a
+# command the mapper could not read emits no host capability at all — both keep
+# the picto.
+- name: allow-loopback-upload
+  decision: allow
+  match:
+    all_capability:
+      - "net.out.post"
+      - "net.out.post:127.0.0.1*"
+  reason: "an HTTP upload to 127.0.0.1 never leaves the host; there is nothing to exfiltrate"
+
+- name: allow-loopback-upload-localhost
+  decision: allow
+  match:
+    all_capability:
+      - "net.out.post"
+      - "net.out.post:localhost*"
+  reason: "an HTTP upload to localhost never leaves the host; there is nothing to exfiltrate"
+
+- name: allow-loopback-upload-ipv6
+  decision: allow
+  match:
+    all_capability:
+      - "net.out.post"
+      - "net.out.post:[::1]*"
+  reason: "an HTTP upload to the IPv6 loopback never leaves the host"
