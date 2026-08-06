@@ -844,4 +844,61 @@ mod tests {
             .unwrap();
         assert!(proc_idx < push_idx, "rule order; caps: {caps:?}");
     }
+
+    /// The shipped `bash-git-add-bulk` extractor, reproduced so these tests bind
+    /// to the real pattern rather than a paraphrase of it.
+    fn bulk_stage_mapper() -> CapabilityMapper {
+        let yaml = r#"
+- name: bash-git-add-bulk
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+add\\s+(?:--all|-A|--update|-u|\\.)(?:\\s|$)"
+  emit:
+    - "git.stage:bulk"
+"#;
+        CapabilityMapper::from_yaml_string(yaml, "bash.yaml").unwrap()
+    }
+
+    fn bulk_stage_command() -> String {
+        format!("git {} -A", "add")
+    }
+
+    #[test]
+    fn documenting_a_command_in_a_quoted_heredoc_body_emits_nothing() {
+        // Regression for the 2026-08-06 false positive: a commit body explaining
+        // *why* the danger exists was read as the danger itself. The command runs
+        // commit + push + pr create and stages nothing.
+        let m = bulk_stage_mapper();
+        let command = format!(
+            "git commit -q -F - <<'EOF'\nchore: stop tracking private artifacts\n\nThe directory was never ignored, so any `{}` from any session\nwould have carried the rest along with it.\nEOF\ngit push -q -u origin fix/untrack\ngh pr create --base dev --title t --body \"$(cat <<'EOF'\nany `{}` from any session carries the other 140 along.\nEOF\n)\"",
+            bulk_stage_command(),
+            bulk_stage_command()
+        );
+        let caps = caps_of(&m, &command);
+        assert!(
+            !caps.iter().any(|c| c == "git.stage:bulk"),
+            "prose describing the command must not emit its capability; caps: {caps:?}"
+        );
+    }
+
+    #[test]
+    fn the_real_bulk_stage_still_emits() {
+        let m = bulk_stage_mapper();
+        for command in [
+            bulk_stage_command(),
+            format!("cd /r && {}", bulk_stage_command()),
+            format!("$({})", bulk_stage_command()),
+            // Executed from stdin: the heredoc body IS the program here.
+            format!("bash <<'EOF'\n{}\nEOF", bulk_stage_command()),
+            format!("cat <<'EOF' | sh\n{}\nEOF", bulk_stage_command()),
+            // Backticks inside double quotes really do expand.
+            format!("git commit -m \"see `{}`\"", bulk_stage_command()),
+        ] {
+            let caps = caps_of(&m, &command);
+            assert!(
+                caps.iter().any(|c| c == "git.stage:bulk"),
+                "must still be caught: {command} → {caps:?}"
+            );
+        }
+    }
 }
