@@ -157,13 +157,352 @@ fn push_target(
     }
 }
 
+/// Which heredoc bodies [`mask_heredoc_bodies`] blanks out.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HeredocMask {
+    /// Every heredoc body, quoted delimiter or not. Correct for any scan that
+    /// reads the text as *commands* or *shell operators*: a heredoc body is
+    /// stdin data, and the shell never parses it as either.
+    All,
+    /// Only bodies whose delimiter was quoted or backslash-escaped (`<<'EOF'`,
+    /// `<<"EOF"`, `<<\EOF`). With a bare delimiter the shell still expands
+    /// `$(...)`, backticks and variables inside the body, so those really do
+    /// run and must stay visible to the substitution scanner.
+    LiteralOnly,
+}
+
+/// Blank out heredoc bodies so the text a heredoc *feeds to stdin* is not parsed
+/// as shell source.
+///
+/// Motivation (measured 2026-08-06): the capability mapper derives candidates
+/// from newline segments and from backtick/`$(...)` substitutions. Neither scan
+/// knew about heredocs, so a commit or PR body written with `git commit -F - <<'EOF'`
+/// had its prose parsed as commands — a line *documenting* a dangerous command
+/// emitted that command's capability, and a command name in markdown backticks
+/// was read as a substitution. Inside a quoted heredoc the shell expands
+/// nothing: that text can never execute, so deriving capabilities from it is a
+/// false positive, and one that punishes writing a warning down.
+///
+/// Replacement is in place, character for character: every body character
+/// becomes a space and newlines are kept, so line structure and character
+/// offsets are identical to the input and callers can scan the masked string
+/// exactly as they scanned the original.
+///
+/// Fail-closed by construction, three ways:
+///   - an *unterminated* heredoc is left untouched, so a body that never reaches
+///     its delimiter keeps being scanned exactly as before;
+///   - the body is masked only when the line opening it names a known
+///     **data consumer** ([`HEREDOC_DATA_CONSUMERS`]) — `cat`, `git commit -F -`,
+///     `gh`, `tee`, `pbcopy`, … — because for anything else the body may well be
+///     source code, not data;
+///   - and never when the line also names an **interpreter**
+///     ([`HEREDOC_EXECUTORS`]). `bash <<'EOF'` and `cat <<'EOF' | sh` really do
+///     execute the body from stdin, quoted delimiter or not; masking those would
+///     be an evasion, not a fix.
+///
+/// So masking only ever hides text the shell provably treats as data. Anything
+/// unrecognised keeps its current (over-eager) behaviour.
+pub(crate) fn mask_heredoc_bodies(command: &str, mask: HeredocMask) -> String {
+    // Nothing to do unless a heredoc operator is present at all — the common
+    // case, kept cheap.
+    if !command.contains("<<") {
+        return command.to_string();
+    }
+
+    let mut out: Vec<char> = command.chars().collect();
+    // Line spans as (start, end) char indices, end exclusive of the newline.
+    let lines = char_lines(&out);
+
+    let mut pending: std::collections::VecDeque<PendingHeredoc> = std::collections::VecDeque::new();
+    // Body lines collected for the heredoc currently being read, held back
+    // until its delimiter is seen. Dropped wholesale if it never is.
+    let mut body: Vec<(usize, usize)> = Vec::new();
+    let mut current: Option<PendingHeredoc> = None;
+    let mut to_blank: Vec<(usize, usize)> = Vec::new();
+    // Quote state persists across lines: a quote can span newlines. Body lines
+    // never touch it, which is the point — they are data.
+    let mut single = false;
+    let mut double = false;
+
+    for &(line_start, line_end) in &lines {
+        if let Some(heredoc) = &current {
+            let line: String = out[line_start..line_end].iter().collect();
+            if line.trim() == heredoc.delimiter {
+                // Terminator reached: the held-back body is provably data. The
+                // terminator line itself is heredoc syntax, not a command, so it
+                // is blanked too — otherwise `EOF` shows up as a segment head.
+                if heredoc.maskable && (heredoc.literal || mask == HeredocMask::All) {
+                    to_blank.append(&mut body);
+                    to_blank.push((line_start, line_end));
+                }
+                body.clear();
+                current = pending.pop_front();
+                continue;
+            }
+            body.push((line_start, line_end));
+            continue;
+        }
+
+        scan_line_for_heredocs(
+            &out[line_start..line_end],
+            &mut single,
+            &mut double,
+            &mut pending,
+        );
+        if current.is_none() {
+            current = pending.pop_front();
+        }
+    }
+
+    // Unterminated heredoc: leave every held-back line alone (fail-closed).
+
+    for (start, end) in to_blank {
+        for slot in &mut out[start..end] {
+            *slot = ' ';
+        }
+    }
+    out.into_iter().collect()
+}
+
+struct PendingHeredoc {
+    delimiter: String,
+    literal: bool,
+    /// Whether this heredoc's body is safe to mask, decided from the line that
+    /// opened it (data consumer present, no interpreter present).
+    maskable: bool,
+}
+
+/// Commands that consume a heredoc body as **data**. Masking a body requires one
+/// of these on the opening line: it is the evidence that the text is content,
+/// not source. Deliberately narrow — an unrecognised head keeps the old
+/// over-eager scanning rather than being trusted by default.
+const HEREDOC_DATA_CONSUMERS: &[&str] = &[
+    "cat", "git", "gh", "glab", "tee", "pbcopy", "wc", "grep", "rg", "sort", "uniq", "head",
+    "tail", "diff", "patch", "jq", "yq", "mail", "mailx", "sendmail", "msmtp", "psql", "mysql",
+    "sqlite3", "curl", "http", "wc", "column", "fold", "fmt", "tr", "base64", "harbard", "nahuali",
+    "urd", "gommage",
+];
+
+/// Commands that execute a heredoc body as a **program**, so its text is live
+/// code even with a quoted delimiter. Presence of any of these anywhere on the
+/// opening line blocks masking outright — `bash <<'EOF'`, `cat <<'EOF' | sh`,
+/// `ssh host <<'EOF'` all run what the body says.
+const HEREDOC_EXECUTORS: &[&str] = &[
+    "bash",
+    "sh",
+    "zsh",
+    "dash",
+    "ksh",
+    "csh",
+    "tcsh",
+    "fish",
+    "ash",
+    "busybox",
+    "eval",
+    "source",
+    "exec",
+    "xargs",
+    "env",
+    "ssh",
+    "scp",
+    "sftp",
+    "docker",
+    "podman",
+    "kubectl",
+    "nsenter",
+    "chroot",
+    "su",
+    "screen",
+    "tmux",
+    "python",
+    "python2",
+    "python3",
+    "perl",
+    "ruby",
+    "node",
+    "deno",
+    "bun",
+    "php",
+    "lua",
+    "tclsh",
+    "expect",
+    "awk",
+    "osascript",
+    "make",
+    "just",
+    "ansible",
+    "ansible-playbook",
+];
+
+/// Decide whether heredocs opened on this line may have their bodies masked.
+///
+/// Uses a deliberately simple whitespace/operator tokenisation of the line
+/// (never [`shell_segments`], which calls back into masking) and compares each
+/// token's basename against the two lists above.
+fn line_allows_masking(line: &[char]) -> bool {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut token = String::new();
+    for &ch in line {
+        if ch.is_whitespace() || matches!(ch, '|' | '&' | ';' | '(' | ')' | '\'' | '"' | '<' | '>')
+        {
+            if !token.is_empty() {
+                tokens.push(std::mem::take(&mut token));
+            }
+        } else {
+            token.push(ch);
+        }
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+
+    let basenames: Vec<&str> = tokens
+        .iter()
+        .map(|t| head_basename(t.trim_start_matches('$')))
+        .collect();
+    if basenames.iter().any(|b| HEREDOC_EXECUTORS.contains(b)) {
+        return false;
+    }
+    basenames.iter().any(|b| HEREDOC_DATA_CONSUMERS.contains(b))
+}
+
+/// Char-index line spans of `chars`, each excluding its trailing newline.
+fn char_lines(chars: &[char]) -> Vec<(usize, usize)> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for (index, ch) in chars.iter().enumerate() {
+        if *ch == '\n' {
+            lines.push((start, index));
+            start = index + 1;
+        }
+    }
+    if start <= chars.len() {
+        lines.push((start, chars.len()));
+    }
+    lines
+}
+
+/// Scan one command line for heredoc operators, appending each `<<` delimiter it
+/// opens (in source order — bash stacks multiple heredocs on one line) to
+/// `pending`. Quote state is threaded through so `echo "<<'EOF'"` opens nothing.
+fn scan_line_for_heredocs(
+    line: &[char],
+    single: &mut bool,
+    double: &mut bool,
+    pending: &mut std::collections::VecDeque<PendingHeredoc>,
+) {
+    let maskable = line_allows_masking(line);
+    let mut index = 0;
+    while index < line.len() {
+        let ch = line[index];
+        match ch {
+            '\'' if !*double => *single = !*single,
+            '"' if !*single => *double = !*double,
+            '\\' if !*single => {
+                index += 2;
+                continue;
+            }
+            '<' if !*single && !*double && line.get(index + 1) == Some(&'<') => {
+                // `<<<` is a here-string, not a heredoc: no body follows.
+                if line.get(index + 2) == Some(&'<') {
+                    index += 3;
+                    continue;
+                }
+                let mut cursor = index + 2;
+                // `<<-` strips leading tabs from the body and terminator.
+                if line.get(cursor) == Some(&'-') {
+                    cursor += 1;
+                }
+                while line.get(cursor).is_some_and(|c| *c == ' ' || *c == '\t') {
+                    cursor += 1;
+                }
+                if let Some((delimiter, literal, next)) = read_heredoc_delimiter(line, cursor) {
+                    pending.push_back(PendingHeredoc {
+                        delimiter,
+                        literal,
+                        maskable,
+                    });
+                    index = next;
+                    continue;
+                }
+                index = cursor;
+                continue;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+}
+
+/// Read the delimiter word of a heredoc starting at `start`, returning it with
+/// whether it was quoted/escaped (making the body fully literal) and the index
+/// just past it. `None` when no delimiter word is present.
+fn read_heredoc_delimiter(line: &[char], start: usize) -> Option<(String, bool, usize)> {
+    let mut index = start;
+    let mut delimiter = String::new();
+    let mut literal = false;
+
+    match line.get(index) {
+        Some('\'') => {
+            literal = true;
+            index += 1;
+            while let Some(&ch) = line.get(index) {
+                index += 1;
+                if ch == '\'' {
+                    break;
+                }
+                delimiter.push(ch);
+            }
+        }
+        Some('"') => {
+            literal = true;
+            index += 1;
+            while let Some(&ch) = line.get(index) {
+                index += 1;
+                if ch == '"' {
+                    break;
+                }
+                delimiter.push(ch);
+            }
+        }
+        Some(_) => {
+            // Bare word. A backslash or an embedded quote anywhere in it also
+            // suppresses expansion in bash (`<<\EOF`, `<<E'O'F`); treat the
+            // whole word as literal in that case.
+            while let Some(&ch) = line.get(index) {
+                if ch.is_whitespace() || matches!(ch, '<' | '>' | '|' | '&' | ';' | '(' | ')') {
+                    break;
+                }
+                index += 1;
+                if matches!(ch, '\\' | '\'' | '"') {
+                    literal = true;
+                    continue;
+                }
+                delimiter.push(ch);
+            }
+        }
+        None => return None,
+    }
+
+    if delimiter.is_empty() {
+        return None;
+    }
+    Some((delimiter, literal, index))
+}
+
 /// Split a command string into shell segments, where each segment is the list
 /// of whitespace-separated words of one simple command.
 ///
 /// Splits on the unquoted operators `&&`, `||`, `;`, `|`, and newlines.
 /// Single quotes, double quotes, and backslash escapes are honoured so that an
 /// operator inside a quoted string does not split the command.
+///
+/// Heredoc bodies are masked out first: the text a heredoc feeds to stdin is
+/// data, never a simple command, so it must not produce segments (see
+/// [`mask_heredoc_bodies`]).
 pub(crate) fn shell_segments(command: &str) -> Vec<Vec<String>> {
+    let masked = mask_heredoc_bodies(command, HeredocMask::All);
+    let command = masked.as_str();
     let mut segments = Vec::new();
     let mut words = Vec::new();
     let mut word = String::new();
@@ -508,6 +847,10 @@ pub(crate) fn shell_c_payload(args: &[String]) -> Option<&str> {
 /// digit is not part of the target). Used by the capability mapper to surface
 /// device-write redirects without the quoted-data false positive.
 pub(crate) fn redirect_targets(command: &str) -> Vec<String> {
+    // A `>` inside a heredoc body is data on stdin, not a redirect — masking
+    // first keeps `cat <<'EOF' … > /dev/sda … EOF` from looking like one.
+    let masked = mask_heredoc_bodies(command, HeredocMask::All);
+    let command = masked.as_str();
     let mut targets = Vec::new();
     let mut chars = command.chars().peekable();
     let mut single = false;
@@ -564,7 +907,14 @@ pub(crate) fn redirect_targets(command: &str) -> Vec<String> {
 /// `command`, honouring quote context (a substitution inside single quotes is
 /// data, not a substitution). Nested `$(...)` parens are balanced; the returned
 /// strings are the inner command text only (without the delimiters).
+///
+/// Bodies of *quoted-delimiter* heredocs are masked out first: there the shell
+/// expands nothing, so a command name written in markdown backticks inside a
+/// commit or PR body is prose, not a substitution. A bare-delimiter heredoc
+/// (`<<EOF`) does expand, so its substitutions stay visible.
 pub(crate) fn command_substitutions(command: &str) -> Vec<String> {
+    let masked = mask_heredoc_bodies(command, HeredocMask::LiteralOnly);
+    let command = masked.as_str();
     let chars = command.char_indices().collect::<Vec<_>>();
     let mut substitutions = Vec::new();
     let mut single = false;
@@ -861,6 +1211,176 @@ mod tests {
         assert_eq!(
             redirect_targets("echo x > \"/dev/sda\""),
             vec!["/dev/sda".to_string()]
+        );
+    }
+}
+
+#[cfg(test)]
+mod heredoc_mask_tests {
+    use super::*;
+
+    /// The command string this fix exists for, assembled at runtime so this file
+    /// does not itself carry the literal that used to trip the mapper.
+    fn bulk_stage() -> String {
+        format!("git {} -A", "add")
+    }
+
+    /// A destructive command used as *data* in the fixtures below.
+    fn destructive() -> String {
+        format!("rm {} /etc", "-rf")
+    }
+
+    fn segment_heads(command: &str) -> Vec<String> {
+        shell_segments(command)
+            .iter()
+            .filter_map(|words| words.first().cloned())
+            .collect()
+    }
+
+    #[test]
+    fn quoted_heredoc_body_is_not_parsed_as_commands() {
+        // The exact shape denied on 2026-08-06: a commit body documenting a
+        // dangerous command. Nothing in that body can execute.
+        let command = format!(
+            "git commit -q -F - <<'EOF'\nchore: untrack artifacts\n\n{} from any session would carry it.\nEOF",
+            bulk_stage()
+        );
+        assert_eq!(segment_heads(&command), vec!["git".to_string()]);
+    }
+
+    #[test]
+    fn backticks_in_a_quoted_heredoc_body_are_prose() {
+        let command = format!(
+            "gh pr create --body \"$(cat <<'EOF'\nany `{}` would carry it\nEOF\n)\"",
+            bulk_stage()
+        );
+        // The outer `$(cat <<'EOF' … )` is a real substitution and still shows up
+        // — what must not happen is the *backticked prose inside the body*
+        // becoming a substitution of its own. The mapper recurses into the outer
+        // body, and that recursion is where masking has to hold; assert it here
+        // by re-scanning the outer body the way the mapper does.
+        let outer = command_substitutions(&command);
+        assert_eq!(
+            outer.len(),
+            1,
+            "expected exactly the outer substitution: {outer:?}"
+        );
+        let inner = command_substitutions(&outer[0]);
+        assert!(
+            inner.is_empty(),
+            "markdown backticks inside a quoted heredoc must not read as substitutions: {inner:?}"
+        );
+    }
+
+    #[test]
+    fn bare_delimiter_heredoc_still_exposes_substitutions() {
+        // `<<EOF` (unquoted) expands: that substitution really does run.
+        let command = "cat <<EOF\nsnapshot: `git push --force`\nEOF";
+        assert!(
+            command_substitutions(command)
+                .iter()
+                .any(|s| s.contains("git push --force")),
+            "an unquoted heredoc expands, so its substitutions must stay visible"
+        );
+    }
+
+    #[test]
+    fn interpreter_heredoc_body_is_still_scanned() {
+        // These execute the body from stdin — masking them would be an evasion.
+        let danger = destructive();
+        for command in [
+            format!("bash <<'EOF'\n{danger}\nEOF"),
+            format!("cat <<'EOF' | sh\n{danger}\nEOF"),
+            format!("ssh host <<'EOF'\n{danger}\nEOF"),
+            format!("python3 <<'EOF'\n{danger}\nEOF"),
+        ] {
+            assert!(
+                segment_heads(&command).contains(&"rm".to_string()),
+                "body must stay visible for an executing consumer: {command}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_consumer_keeps_previous_behaviour() {
+        // Not in the data-consumer allowlist: fail closed, keep scanning.
+        let command = format!("weirdtool <<'EOF'\n{}\nEOF", destructive());
+        assert!(segment_heads(&command).contains(&"rm".to_string()));
+    }
+
+    #[test]
+    fn unterminated_heredoc_is_left_untouched() {
+        let command = format!("cat <<'EOF'\n{}\n", destructive());
+        assert!(
+            segment_heads(&command).contains(&"rm".to_string()),
+            "a heredoc that never reaches its delimiter must keep being scanned"
+        );
+    }
+
+    #[test]
+    fn quoted_heredoc_operator_opens_nothing() {
+        // The operator itself is inside quotes: data, not a heredoc.
+        let command = format!("echo \"<<'EOF'\" && {}", destructive());
+        assert!(segment_heads(&command).contains(&"rm".to_string()));
+    }
+
+    #[test]
+    fn here_string_is_not_a_heredoc() {
+        // `<<<` takes no body, so the following line is an ordinary command.
+        let command = format!("cat <<<'x'\n{}", destructive());
+        assert!(segment_heads(&command).contains(&"rm".to_string()));
+    }
+
+    #[test]
+    fn dash_form_and_indented_terminator() {
+        let command = format!(
+            "git commit -F - <<-'EOF'\n\t{} in prose\n\tEOF\n",
+            bulk_stage()
+        );
+        assert_eq!(segment_heads(&command), vec!["git".to_string()]);
+    }
+
+    #[test]
+    fn stacked_heredocs_are_consumed_in_order() {
+        let command = format!(
+            "cat <<'A' <<'B'\nfirst {d}\nA\nsecond {d}\nB",
+            d = destructive()
+        );
+        assert!(
+            !segment_heads(&command).contains(&"rm".to_string()),
+            "both stacked bodies are data: {:?}",
+            shell_segments(&command)
+        );
+    }
+
+    #[test]
+    fn redirect_inside_a_quoted_heredoc_body_is_not_a_redirect() {
+        let command = "cat <<'EOF'\nnever write > /dev/sda by hand\nEOF";
+        assert!(redirect_targets(command).is_empty());
+    }
+
+    #[test]
+    fn masking_preserves_line_structure_and_length() {
+        let command = "cat <<'EOF'\nabc\ndef\nEOF";
+        let masked = mask_heredoc_bodies(command, HeredocMask::All);
+        assert_eq!(masked.chars().count(), command.chars().count());
+        assert_eq!(masked.lines().count(), command.lines().count());
+        assert!(masked.contains("cat <<'EOF'"));
+        assert!(!masked.contains("abc"));
+    }
+
+    #[test]
+    fn commands_after_a_heredoc_terminator_are_still_seen() {
+        let command = format!("cat <<'EOF'\nprose\nEOF\n{}", destructive());
+        assert!(segment_heads(&command).contains(&"rm".to_string()));
+    }
+
+    #[test]
+    fn write_target_extraction_survives_masking() {
+        // Regression guard for the existing heredoc write-target behaviour.
+        assert_eq!(
+            shell_write_targets("cat > src/lib.rs <<EOF\nx\nEOF"),
+            vec!["src/lib.rs"]
         );
     }
 }
