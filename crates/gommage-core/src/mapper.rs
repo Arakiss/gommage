@@ -194,6 +194,43 @@ impl CapabilityMapper {
 /// The name of the field on a shell tool call that carries the command string.
 const SHELL_COMMAND_FIELD: &str = "command";
 
+/// The shell tool name every stdlib mapper is written against.
+const SHELL_TOOL_CANONICAL: &str = "Bash";
+
+/// Tool names other harnesses give their shell. Claude Code calls it `Bash`;
+/// Cursor calls it `Shell` or `run_terminal_cmd`; Codex and several agent
+/// frameworks call it `shell`, `terminal`, or `execute_command`.
+///
+/// Without this list a harness whose shell is not literally named `Bash` emits
+/// **no capability at all**: no mapper binds to its tool name, so no policy rule
+/// can match it — not even the catch-all allow, which needs `proc.exec:**` to
+/// exist — and the evaluator falls through to its fail-closed deny. The session
+/// does not end up restricted, it ends up unable to run anything. Measured on
+/// 2026-08-15: 297 fail-closed denials, 87 of them from a `Shell` tool, one of
+/// which left a Cursor session with no shell, no `gh` and no bus for hours.
+///
+/// Aliasing here rather than in the YAML is deliberate: every mapper that says
+/// `tool: Bash` — stdlib or hand-written — covers the other harnesses without
+/// having to remember a regex, and the coverage cannot drift between files.
+/// The alias affects matching ONLY; `${tool}` and the audit record keep the
+/// original name, so which harness acted stays visible.
+const SHELL_TOOL_ALIASES: &[&str] = &[
+    "shell",
+    "terminal",
+    "run_terminal_cmd",
+    "execute_command",
+    "run_command",
+    "bash_tool",
+];
+
+/// Whether `tool` is a shell tool, under any harness's name for it.
+fn is_shell_tool(tool: &str) -> bool {
+    tool == SHELL_TOOL_CANONICAL
+        || SHELL_TOOL_ALIASES
+            .iter()
+            .any(|alias| alias.eq_ignore_ascii_case(tool))
+}
+
 /// Build the deterministic list of *derived* candidate command strings for a
 /// shell tool call (everything except candidate 0, the whole command). Returns
 /// an empty vec for non-shell calls so the mapper short-circuits to legacy
@@ -204,7 +241,7 @@ const SHELL_COMMAND_FIELD: &str = "command";
 /// each `bash -c` payload. The list is de-duplicated while preserving first-seen
 /// order so identical candidates do not multiply work or perturb ordering.
 fn shell_candidates(call: &ToolCall) -> Vec<String> {
-    if call.tool != "Bash" {
+    if !is_shell_tool(&call.tool) {
         return Vec::new();
     }
     let Some(command) = call.input.get(SHELL_COMMAND_FIELD).and_then(Value::as_str) else {
@@ -414,6 +451,11 @@ fn parse_template(s: String) -> Template {
 fn match_tool(tool_match: &ToolMatch, tool: &str) -> Option<HashMap<String, String>> {
     match tool_match {
         ToolMatch::Exact(expected) if expected == tool => Some(HashMap::new()),
+        // A mapper written for `Bash` is a mapper for "the shell", whatever the
+        // calling harness names it. See SHELL_TOOL_ALIASES.
+        ToolMatch::Exact(expected) if expected == SHELL_TOOL_CANONICAL && is_shell_tool(tool) => {
+            Some(HashMap::new())
+        }
         ToolMatch::Exact(_) => None,
         ToolMatch::Pattern(re) => {
             let caps = re.captures(tool)?;
@@ -521,6 +563,119 @@ mod tests {
                 Capability::new("net.out:github.com")
             ]
         );
+    }
+
+    /// A mapper written for `Bash` must fire for every harness's shell, or that
+    /// harness emits no capability, matches no rule, and dies on the
+    /// evaluator's fail-closed deny.
+    #[test]
+    fn shell_mapper_fires_for_every_harness_tool_name() {
+        let yaml = r#"
+- name: bash-exec
+  tool: Bash
+  match_input:
+    command: ".+"
+  emit:
+    - "proc.exec:${input.command}"
+"#;
+        let m = CapabilityMapper::from_yaml_string(yaml, "bash.yaml").unwrap();
+        for tool in [
+            "Bash",
+            "Shell",
+            "shell",
+            "Terminal",
+            "run_terminal_cmd",
+            "execute_command",
+            "run_command",
+            "bash_tool",
+        ] {
+            let call = ToolCall {
+                tool: tool.into(),
+                input: json!({"command": "gh pr view 7"}),
+            };
+            assert_eq!(
+                m.map(&call),
+                vec![Capability::new("proc.exec:gh pr view 7")],
+                "shell mapper did not fire for tool {tool:?}"
+            );
+        }
+    }
+
+    /// The alias is a matching concession, not a rename: `${tool}` and the audit
+    /// record must still show which harness actually acted.
+    #[test]
+    fn shell_alias_preserves_the_original_tool_name_in_emits() {
+        let yaml = r#"
+- name: bash-exec
+  tool: Bash
+  match_input:
+    command: ".+"
+  emit:
+    - "proc.exec.by:${tool}"
+"#;
+        let m = CapabilityMapper::from_yaml_string(yaml, "bash.yaml").unwrap();
+        let call = ToolCall {
+            tool: "run_terminal_cmd".into(),
+            input: json!({"command": "ls"}),
+        };
+        assert_eq!(
+            m.map(&call),
+            vec![Capability::new("proc.exec.by:run_terminal_cmd")]
+        );
+    }
+
+    /// Anchored mappers (`^git reset --hard`) only see a compound command
+    /// through shell-candidate expansion. That expansion was gated on the tool
+    /// being literally `Bash`, so `cd /r && git reset --hard` was gated under
+    /// Claude Code and waved through under any other harness — an evasion, not
+    /// just a gap in coverage.
+    #[test]
+    fn anchored_mapper_still_sees_compound_commands_under_an_alias() {
+        let yaml = r#"
+- name: bash-git-reset-hard
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+reset\\s+--hard\\b"
+  emit:
+    - "git.reset.hard:<any>"
+"#;
+        let m = CapabilityMapper::from_yaml_string(yaml, "bash.yaml").unwrap();
+        let expected = vec![Capability::new("git.reset.hard:<any>")];
+        for tool in ["Bash", "Shell", "run_terminal_cmd"] {
+            let call = ToolCall {
+                tool: tool.into(),
+                input: json!({"command": "cd /r && git reset --hard HEAD~3"}),
+            };
+            assert_eq!(
+                m.map(&call),
+                expected,
+                "compound command escaped the anchored gate under tool {tool:?}"
+            );
+        }
+    }
+
+    /// A tool that is not a shell must not inherit shell mappers.
+    #[test]
+    fn non_shell_tools_do_not_match_the_bash_mapper() {
+        let yaml = r#"
+- name: bash-exec
+  tool: Bash
+  match_input:
+    command: ".+"
+  emit:
+    - "proc.exec:${input.command}"
+"#;
+        let m = CapabilityMapper::from_yaml_string(yaml, "bash.yaml").unwrap();
+        for tool in ["Read", "Write", "Edit", "WebFetch", "shelling", "my_shell"] {
+            let call = ToolCall {
+                tool: tool.into(),
+                input: json!({"command": "rm -rf /"}),
+            };
+            assert!(
+                m.map(&call).is_empty(),
+                "non-shell tool {tool:?} inherited the Bash mapper"
+            );
+        }
     }
 
     #[test]
