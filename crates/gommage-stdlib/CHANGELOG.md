@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.14.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.13.0-alpha.1...gommage-stdlib-v0.14.0-alpha.1) (2026-08-15)
+
+
+### Features
+
+* **egress:** stop asking for a picto to POST to your own machine ([#133](https://github.com/Arakiss/gommage/issues/133)) ([bd3d9e6](https://github.com/Arakiss/gommage/commit/bd3d9e61b6b3c542801eb53933510f8ddd48e5a3))
+
 ## [0.13.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.12.0-alpha.1...gommage-stdlib-v0.13.0-alpha.1) (2026-07-04)
 
 
