@@ -58,7 +58,10 @@ pub struct EvalResult {
 ///   1. Hardcoded hardstop check (always first, cannot be bypassed by policy).
 ///   2. Iterate `policy.rules` in declared order. First rule whose match clause
 ///      accepts the capabilities wins.
-///   3. If no rule matches, fail closed: `Gommage { reason: "no rule matched (fail-closed)" }`.
+///   3. If no rule matches, fail closed with `Gommage`. The reason distinguishes
+///      "policy has no rule for these capabilities" from "no capability was
+///      derived at all", which means no mapper covers the tool and policy was
+///      never consulted.
 pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
     if let Some(hit) = hardstop::check(caps) {
         return EvalResult {
@@ -94,9 +97,25 @@ pub fn evaluate(caps: &[Capability], policy: &Policy) -> EvalResult {
         }
     }
 
+    // Two very different situations reach this point and they used to look
+    // identical in the logs. With capabilities present, policy genuinely has no
+    // rule for them. With NONE, no mapper covered the tool at all, so policy was
+    // never consulted — every rule needs a capability to match against, the
+    // catch-all allow included. Saying so is the difference between a one-line
+    // fix in `capabilities.d` and hours spent reading policy that was never at
+    // fault. See SHELL_TOOL_ALIASES in the mapper for the case that motivated it.
+    let reason = if caps.is_empty() {
+        "no capability derived from this call: no mapper covers this tool, so no \
+         policy rule could match it (fail-closed). Add a mapper in capabilities.d \
+         for this tool name."
+            .to_string()
+    } else {
+        "no rule matched (fail-closed)".to_string()
+    };
+
     EvalResult {
         decision: Decision::Gommage {
-            reason: "no rule matched (fail-closed)".to_string(),
+            reason,
             hard_stop: false,
         },
         matched_rule: None,
@@ -195,6 +214,31 @@ mod tests {
 "#);
         let res = evaluate(&[Capability::new("fs.read:/tmp/x")], &pol);
         assert!(matches!(res.decision, Decision::Gommage { .. }));
+        let Decision::Gommage { reason, .. } = res.decision else {
+            unreachable!()
+        };
+        assert_eq!(reason, "no rule matched (fail-closed)");
+    }
+
+    /// No capability at all means no mapper covered the tool: policy was never
+    /// consulted, so the reason must not blame policy.
+    #[test]
+    fn fail_closed_without_capabilities_names_the_missing_mapper() {
+        let pol = p(r#"
+- name: catch-all
+  decision: allow
+  match: { any_capability: ["proc.exec:**"] }
+  reason: ""
+"#);
+        let res = evaluate(&[], &pol);
+        let Decision::Gommage { reason, hard_stop } = res.decision else {
+            panic!("expected fail-closed")
+        };
+        assert!(!hard_stop);
+        assert!(
+            reason.contains("no mapper covers this tool"),
+            "reason should point at the missing mapper, got: {reason}"
+        );
     }
 
     #[test]
