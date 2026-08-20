@@ -541,8 +541,7 @@ fn every_mutation_family_promotes_its_checkpoint_before_returning() {
     assert_one_checkpoint_transition(&authority, &retention, before);
 
     let before = retention.calls();
-    let mut approve_first = approval_command(&first, 11);
-    approve_first.resolved_at = first.created_at();
+    let approve_first = approval_command(&first, 11);
     assert!(matches!(
         authority.approve(&approve_first).unwrap(),
         ApproveResult::Approved { .. }
@@ -575,22 +574,23 @@ fn every_mutation_family_promotes_its_checkpoint_before_returning() {
     assert_one_checkpoint_transition(&authority, &retention, before);
     let approve_third = approval_command(&third, 13);
     let before = retention.calls();
-    assert!(matches!(
-        authority.approve(&approve_third).unwrap(),
-        ApproveResult::Approved { .. }
-    ));
+    let third_grant_id = match authority.approve(&approve_third).unwrap() {
+        ApproveResult::Approved { claim, .. } => claim
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .grant_id()
+            .to_owned(),
+        other => panic!("expected retained test approval, got {other:?}"),
+    };
     assert_one_checkpoint_transition(&authority, &retention, before);
 
     let before = retention.calls();
     assert!(matches!(
         authority
             .revoke(&RevokeCommand {
-                grant_id: "grant_13".into(),
-                event_id: "event_revoke_13".into(),
+                grant_id: third_grant_id,
                 operator_principal: "uid:501".into(),
                 reason: "Revoke the retained-checkpoint test grant".into(),
-                revoked_at: 1_700_000_031,
-                build_identity: "gommage-test-build".into(),
             })
             .unwrap(),
         RevokeResult::Revoked(_)
@@ -618,7 +618,14 @@ fn idempotent_or_terminal_no_ops_do_not_create_successor_checkpoints() {
     let retention = retention_for(&path);
     let request = create_request(&mut authority);
     let approve = approval_command(&request, 1);
-    authority.approve(&approve).unwrap();
+    let grant_id = match authority.approve(&approve).unwrap() {
+        ApproveResult::Approved { claim, .. } => claim
+            .verify(&grant_key().verifying_key())
+            .unwrap()
+            .grant_id()
+            .to_owned(),
+        other => panic!("expected initial approval, got {other:?}"),
+    };
 
     let before = retention.calls();
     assert!(matches!(
@@ -635,11 +642,8 @@ fn idempotent_or_terminal_no_ops_do_not_create_successor_checkpoints() {
         authority
             .revoke(&RevokeCommand {
                 grant_id: "missing_grant".into(),
-                event_id: "event_revoke_missing".into(),
                 operator_principal: "uid:501".into(),
                 reason: "No matching grant".into(),
-                revoked_at: 1_700_000_031,
-                build_identity: "gommage-test-build".into(),
             })
             .unwrap(),
         RevokeResult::NotUsable(GrantNotUsableReason::Missing)
@@ -653,24 +657,18 @@ fn idempotent_or_terminal_no_ops_do_not_create_successor_checkpoints() {
 
     authority
         .revoke(&RevokeCommand {
-            grant_id: "grant_1".into(),
-            event_id: "event_revoke_once".into(),
+            grant_id: grant_id.clone(),
             operator_principal: "uid:501".into(),
             reason: "Revoke once".into(),
-            revoked_at: 1_700_000_033,
-            build_identity: "gommage-test-build".into(),
         })
         .unwrap();
     let before = retention.calls();
     assert!(matches!(
         authority
             .revoke(&RevokeCommand {
-                grant_id: "grant_1".into(),
-                event_id: "event_revoke_twice".into(),
+                grant_id,
                 operator_principal: "uid:501".into(),
                 reason: "Already terminal".into(),
-                revoked_at: 1_700_000_034,
-                build_identity: "gommage-test-build".into(),
             })
             .unwrap(),
         RevokeResult::NotUsable(GrantNotUsableReason::Terminal)

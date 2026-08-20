@@ -179,10 +179,8 @@ fn every_stale_policy_outcome_fails_without_any_transition() {
     authority
         .activate_generation(&ActivateGenerationCommand {
             generation: second,
-            event_id: "event_generation_2".into(),
             operator_principal: "uid:501".into(),
             reason: "activate successor".into(),
-            activated_at: 1_700_000_020,
         })
         .unwrap();
     let head_before = authority.verify_ledger().unwrap().head_seq;
@@ -674,10 +672,8 @@ fn policy_allow_linearizes_before_or_fails_after_generation_activation() {
                 .unwrap()
                 .activate_generation(&ActivateGenerationCommand {
                     generation: second,
-                    event_id: "event_generation_2".into(),
                     operator_principal: "uid:501".into(),
                     reason: "activate successor".into(),
-                    activated_at: 1_700_000_030,
                 })
         })
     };

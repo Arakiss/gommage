@@ -37,6 +37,10 @@ struct CollidingDecisionRuntimeSource {
     identifiers: AtomicU64,
 }
 
+struct SeedCollisionRuntimeSource {
+    identifiers: AtomicU64,
+}
+
 struct RejectRuntimeSource;
 
 static NEXT_TEST_NONCE: AtomicU64 = AtomicU64::new(1);
@@ -245,6 +249,21 @@ impl AuthorityRuntimeSource for CollidingDecisionRuntimeSource {
             _ => Err(AuthorityError::RuntimeSource(
                 "unexpected extra identifier request".into(),
             )),
+        }
+    }
+}
+
+impl AuthorityRuntimeSource for SeedCollisionRuntimeSource {
+    fn unix_timestamp(&self) -> Result<i64, AuthorityError> {
+        Ok(1_700_000_030)
+    }
+
+    fn identifier_nonce(&self) -> Result<String, AuthorityError> {
+        let nonce = self.identifiers.fetch_add(1, Ordering::SeqCst);
+        if nonce == 0 {
+            Ok("collision".into())
+        } else {
+            Ok(format!("setup{nonce:016x}"))
         }
     }
 }
@@ -483,15 +502,11 @@ fn create_request(authority: &mut Authority) -> ApprovalRequestV2 {
     }
 }
 
-fn approve_command(index: usize) -> ApproveCommand {
+fn approve_command(_index: usize) -> ApproveCommand {
     ApproveCommand {
         request_id: "request_1".into(),
-        grant_id: format!("grant_{index}"),
-        resolution_event_id: format!("event_approve_{index}"),
-        activation_event_id: format!("event_activate_{index}"),
         operator_principal: "uid:501".into(),
         reason: "Reviewed exact input and scope".into(),
-        resolved_at: 1_700_000_020,
         ttl_seconds: 600,
     }
 }
@@ -499,17 +514,14 @@ fn approve_command(index: usize) -> ApproveCommand {
 fn approval_command(request: &ApprovalRequestV2, index: usize) -> ApproveCommand {
     let mut command = approve_command(index);
     command.request_id = request.request_id().into();
-    command.resolved_at = request.created_at();
     command
 }
 
-fn deny_command(request_id: &str, index: usize, resolved_at: i64) -> DenyCommand {
+fn deny_command(request_id: &str, _index: usize, _resolved_at: i64) -> DenyCommand {
     DenyCommand {
         request_id: request_id.into(),
-        event_id: format!("event_deny_{index}"),
         operator_principal: "uid:501".into(),
         reason: "Denied after exact review".into(),
-        resolved_at,
     }
 }
 
@@ -518,7 +530,7 @@ fn approve(
     request: &ApprovalRequestV2,
 ) -> (SignedGrantClaimV2, SignedGrantStateV2) {
     match authority.approve(&approval_command(request, 1)).unwrap() {
-        ApproveResult::Approved { claim, state } => (claim, state),
+        ApproveResult::Approved { claim, state, .. } => (claim, state),
         other => panic!("expected a new grant, got {other:?}"),
     }
 }
@@ -526,21 +538,17 @@ fn approve(
 fn approve_request_at(
     authority: &mut Authority,
     request_id: &str,
-    resolved_at: i64,
-    index: usize,
+    _resolved_at: i64,
+    _index: usize,
 ) -> (SignedGrantClaimV2, SignedGrantStateV2) {
     let command = ApproveCommand {
         request_id: request_id.into(),
-        grant_id: format!("grant_runtime_{index}"),
-        resolution_event_id: format!("event_runtime_approve_{index}"),
-        activation_event_id: format!("event_runtime_activate_{index}"),
         operator_principal: "uid:501".into(),
         reason: "Reviewed the exact Authority-owned request".into(),
-        resolved_at,
         ttl_seconds: 600,
     };
     match authority.approve(&command).unwrap() {
-        ApproveResult::Approved { claim, state } => (claim, state),
+        ApproveResult::Approved { claim, state, .. } => (claim, state),
         other => panic!("expected a new runtime grant, got {other:?}"),
     }
 }
@@ -627,23 +635,23 @@ fn consume_command(_index: usize) -> CommitDecisionCommandV2 {
     authorize_command()
 }
 
-fn activate_command(id: &str, index: usize, activated_at: i64) -> ActivateGenerationCommand {
+fn activate_command(id: &str, _index: usize, _activated_at: i64) -> ActivateGenerationCommand {
     ActivateGenerationCommand {
         generation: generation(id),
-        event_id: format!("event_generation_{index}"),
         operator_principal: "uid:501".into(),
         reason: "Activate the reviewed immutable generation".into(),
-        activated_at,
     }
 }
 
-fn maintenance_command(enabled: bool, index: usize, transitioned_at: i64) -> SetMaintenanceCommand {
+fn maintenance_command(
+    enabled: bool,
+    _index: usize,
+    _transitioned_at: i64,
+) -> SetMaintenanceCommand {
     SetMaintenanceCommand {
         enabled,
-        event_id: format!("event_maintenance_{index}"),
         operator_principal: "uid:501".into(),
         reason: "Perform a controlled authority transition".into(),
-        transitioned_at,
     }
 }
 
@@ -663,11 +671,10 @@ fn create_second_request(authority: &mut Authority) -> ApprovalRequestV2 {
 fn approve_second_request(
     authority: &mut Authority,
     request: &ApprovalRequestV2,
-    resolved_at: i64,
+    _resolved_at: i64,
 ) {
     let mut command = approve_command(2);
     command.request_id = request.request_id().into();
-    command.resolved_at = resolved_at;
     assert!(matches!(
         authority.approve(&command).unwrap(),
         ApproveResult::Approved { .. }

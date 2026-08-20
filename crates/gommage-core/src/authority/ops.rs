@@ -7,14 +7,10 @@ impl Authority {
         command: &ActivateGenerationCommand,
     ) -> Result<AuthorityRuntimeStateV2, AuthorityError> {
         command.generation.validate()?;
-        validate_admin_transition(
-            &command.event_id,
-            &command.operator_principal,
-            &command.reason,
-            command.activated_at,
-        )?;
+        validate_admin_transition(&command.operator_principal, &command.reason)?;
         let ledger_key = self.ledger_key.clone();
-        self.retained_commit(|tx, _| {
+        let runtime_source = Arc::clone(&self.runtime_source);
+        self.retained_commit(|tx, verification| {
             let current = load_current_runtime_state(tx)?;
             if !generation_id_is_newer(
                 command.generation.generation_id(),
@@ -29,28 +25,25 @@ impl Authority {
                     "generation id is already present".into(),
                 ));
             }
+            let activated_at = authority_evidence_time(runtime_source.as_ref(), verification)?;
+            let event_id = authority_id(runtime_source.as_ref(), "generation")?;
             let revision = next_runtime_revision(&current)?;
-            insert_generation(
-                tx,
-                &command.generation,
-                &command.event_id,
-                command.activated_at,
-            )?;
+            insert_generation(tx, &command.generation, &event_id, activated_at)?;
             insert_runtime_state(
                 tx,
                 revision,
                 command.generation.generation_id(),
                 current.maintenance,
-                &command.event_id,
-                command.activated_at,
+                &event_id,
+                activated_at,
             )?;
             append_ledger_entry(
                 tx,
                 &ledger_key,
                 LedgerEventDraft {
-                    event_id: command.event_id.clone(),
+                    event_id,
                     subject: "authority".into(),
-                    timestamp: command.activated_at,
+                    timestamp: activated_at,
                     build_identity: Some(command.generation.build_identity().into()),
                     policy_identity: Some(command.generation.policy_identity().into()),
                     payload: LedgerPayloadV2::GenerationActivated {
@@ -71,14 +64,10 @@ impl Authority {
         &mut self,
         command: &SetMaintenanceCommand,
     ) -> Result<AuthorityRuntimeStateV2, AuthorityError> {
-        validate_admin_transition(
-            &command.event_id,
-            &command.operator_principal,
-            &command.reason,
-            command.transitioned_at,
-        )?;
+        validate_admin_transition(&command.operator_principal, &command.reason)?;
         let ledger_key = self.ledger_key.clone();
-        self.retained_commit(|tx, _| {
+        let runtime_source = Arc::clone(&self.runtime_source);
+        self.retained_commit(|tx, verification| {
             let current = load_current_runtime_state(tx)?;
             if current.maintenance == command.enabled {
                 return Err(AuthorityError::InvalidInput(format!(
@@ -90,22 +79,24 @@ impl Authority {
                     }
                 )));
             }
+            let transitioned_at = authority_evidence_time(runtime_source.as_ref(), verification)?;
+            let event_id = authority_id(runtime_source.as_ref(), "maintenance")?;
             let revision = next_runtime_revision(&current)?;
             insert_runtime_state(
                 tx,
                 revision,
                 current.active_generation.generation_id(),
                 command.enabled,
-                &command.event_id,
-                command.transitioned_at,
+                &event_id,
+                transitioned_at,
             )?;
             append_ledger_entry(
                 tx,
                 &ledger_key,
                 LedgerEventDraft {
-                    event_id: command.event_id.clone(),
+                    event_id,
                     subject: "authority".into(),
-                    timestamp: command.transitioned_at,
+                    timestamp: transitioned_at,
                     build_identity: Some(current.active_generation.build_identity().into()),
                     policy_identity: Some(current.active_generation.policy_identity().into()),
                     payload: LedgerPayloadV2::MaintenanceChanged {
@@ -126,26 +117,18 @@ impl Authority {
             &command.request_id,
             &command.operator_principal,
             &command.reason,
-            command.resolved_at,
         )?;
-        validate_token("grant id", &command.grant_id, 160)?;
-        validate_token("resolution event id", &command.resolution_event_id, 160)?;
-        validate_token("activation event id", &command.activation_event_id, 160)?;
         if command.ttl_seconds <= 0 || command.ttl_seconds > MAX_GRANT_TTL_SECONDS {
             return Err(AuthorityError::InvalidInput(format!(
                 "grant TTL must be between 1 and {MAX_GRANT_TTL_SECONDS} seconds"
             )));
         }
-        let expires_at = command
-            .resolved_at
-            .checked_add(command.ttl_seconds)
-            .ok_or_else(|| AuthorityError::InvalidInput("grant expiry overflow".into()))?;
-        validate_timestamp(expires_at)?;
         let grant_key = self.grant_key.clone();
         let ledger_key = self.ledger_key.clone();
         let config = self.config.clone();
         let grant_key_id = self.grant_key_id.clone();
-        self.retained_commit(|tx, _| {
+        let runtime_source = Arc::clone(&self.runtime_source);
+        self.retained_commit(|tx, verification| {
             if let Some(resolution) = load_resolution(tx, &command.request_id)? {
                 return Ok(ApproveResult::AlreadyResolved(resolution));
             }
@@ -153,19 +136,22 @@ impl Authority {
                 .ok_or_else(|| AuthorityError::InvalidInput("approval request not found".into()))?;
             ensure_request_is_open(tx, &stored)?;
             ensure_decision_admitted(tx, stored.request.generation())?;
-            if command.resolved_at < stored.request.created_at() {
-                return Err(AuthorityError::InvalidInput(
-                    "approval cannot predate its request".into(),
-                ));
-            }
+            let resolved_at = authority_evidence_time(runtime_source.as_ref(), verification)?;
+            let expires_at = resolved_at
+                .checked_add(command.ttl_seconds)
+                .ok_or_else(|| AuthorityError::InvalidInput("grant expiry overflow".into()))?;
+            validate_timestamp(expires_at)?;
+            let grant_id = authority_id(runtime_source.as_ref(), "grant")?;
+            let resolution_event_id = authority_id(runtime_source.as_ref(), "approval_resolution")?;
+            let activation_event_id = authority_id(runtime_source.as_ref(), "grant_activate")?;
             let request_generation = stored.request.generation().clone();
             let request_build_identity = stored.request.build_identity().to_owned();
             let claim = GrantClaimV2::new(GrantClaimFields {
                 authority_instance: config.instance_id.clone(),
                 authority_epoch: config.epoch.clone(),
-                grant_id: command.grant_id.clone(),
-                issued_at: command.resolved_at,
-                not_before: command.resolved_at,
+                grant_id: grant_id.clone(),
+                issued_at: resolved_at,
+                not_before: resolved_at,
                 expires_at,
                 required_scope: stored.request.required_scope().into(),
                 input_hash: stored.request.input_hash().into(),
@@ -180,10 +166,19 @@ impl Authority {
             let active = GrantStateV2::active(
                 &claim,
                 signed_claim.claim_hash(),
-                command.activation_event_id.clone(),
-                command.resolved_at,
+                activation_event_id.clone(),
+                resolved_at,
             )?;
             let signed_state = SignedGrantStateV2::sign(&active, &grant_key)?;
+            let resolution = ApprovalResolutionV2 {
+                request_id: command.request_id.clone(),
+                kind: ApprovalResolutionKindV2::Approved,
+                operator_principal: command.operator_principal.clone(),
+                reason: command.reason.clone(),
+                resolved_at,
+                grant_id: Some(grant_id.clone()),
+                event_id: resolution_event_id.clone(),
+            };
             tx.execute(
                 "INSERT INTO approval_resolutions (
                 request_id, outcome, operator_principal, reason, resolved_at, grant_id, event_id
@@ -192,9 +187,9 @@ impl Authority {
                     command.request_id,
                     command.operator_principal,
                     command.reason,
-                    command.resolved_at,
-                    command.grant_id,
-                    command.resolution_event_id,
+                    resolved_at,
+                    grant_id,
+                    resolution_event_id,
                 ],
             )?;
             tx.execute(
@@ -202,7 +197,7 @@ impl Authority {
                 grant_id, request_id, claim_jcs, signature_b64, claim_hash
              ) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
-                    command.grant_id,
+                    grant_id,
                     command.request_id,
                     signed_claim.envelope().jcs(),
                     signed_claim.envelope().signature_b64(),
@@ -223,16 +218,16 @@ impl Authority {
                 tx,
                 &ledger_key,
                 LedgerEventDraft {
-                    event_id: command.resolution_event_id.clone(),
+                    event_id: resolution_event_id,
                     subject: command.request_id.clone(),
-                    timestamp: command.resolved_at,
+                    timestamp: resolved_at,
                     build_identity: Some(request_build_identity.clone()),
                     policy_identity: Some(stored.request.policy_identity().into()),
                     payload: LedgerPayloadV2::ApprovalResolved {
                         request_id: command.request_id.clone(),
                         request_hash: stored.request_hash,
                         outcome: ApprovalResolutionKindV2::Approved.as_str().into(),
-                        grant_id: Some(command.grant_id.clone()),
+                        grant_id: Some(grant_id.clone()),
                         claim_hash: Some(signed_claim.claim_hash().into()),
                         operator_principal: command.operator_principal.clone(),
                         reason: command.reason.clone(),
@@ -243,13 +238,13 @@ impl Authority {
                 tx,
                 &ledger_key,
                 LedgerEventDraft {
-                    event_id: command.activation_event_id.clone(),
-                    subject: command.grant_id.clone(),
-                    timestamp: command.resolved_at,
+                    event_id: activation_event_id,
+                    subject: grant_id.clone(),
+                    timestamp: resolved_at,
                     build_identity: Some(request_build_identity),
                     policy_identity: Some(stored.request.policy_identity().into()),
                     payload: LedgerPayloadV2::GrantStateChanged {
-                        grant_id: command.grant_id.clone(),
+                        grant_id,
                         claim_hash: signed_claim.claim_hash().into(),
                         state_hash: signed_state.state_hash().into(),
                         revision: active.revision().into(),
@@ -261,6 +256,7 @@ impl Authority {
             )?;
             ensure_decision_admitted(tx, &request_generation)?;
             Ok(ApproveResult::Approved {
+                resolution,
                 claim: signed_claim,
                 state: signed_state,
             })
@@ -273,22 +269,18 @@ impl Authority {
             &command.request_id,
             &command.operator_principal,
             &command.reason,
-            command.resolved_at,
         )?;
-        validate_token("denial event id", &command.event_id, 160)?;
         let ledger_key = self.ledger_key.clone();
-        self.retained_commit(|tx, _| {
+        let runtime_source = Arc::clone(&self.runtime_source);
+        self.retained_commit(|tx, verification| {
             if let Some(resolution) = load_resolution(tx, &command.request_id)? {
                 return Ok(DenyResult::AlreadyResolved(resolution));
             }
             let stored = load_request(tx, &command.request_id)?
                 .ok_or_else(|| AuthorityError::InvalidInput("approval request not found".into()))?;
             ensure_request_is_open(tx, &stored)?;
-            if command.resolved_at < stored.request.created_at() {
-                return Err(AuthorityError::InvalidInput(
-                    "denial cannot predate its request".into(),
-                ));
-            }
+            let resolved_at = authority_evidence_time(runtime_source.as_ref(), verification)?;
+            let event_id = authority_id(runtime_source.as_ref(), "approval_resolution")?;
             tx.execute(
                 "INSERT INTO approval_resolutions (
                 request_id, outcome, operator_principal, reason, resolved_at, grant_id, event_id
@@ -297,8 +289,8 @@ impl Authority {
                     command.request_id,
                     command.operator_principal,
                     command.reason,
-                    command.resolved_at,
-                    command.event_id,
+                    resolved_at,
+                    event_id,
                 ],
             )?;
             let deleted = tx.execute(
@@ -314,9 +306,9 @@ impl Authority {
                 tx,
                 &ledger_key,
                 LedgerEventDraft {
-                    event_id: command.event_id.clone(),
+                    event_id: event_id.clone(),
                     subject: command.request_id.clone(),
-                    timestamp: command.resolved_at,
+                    timestamp: resolved_at,
                     build_identity: Some(stored.request.build_identity().into()),
                     policy_identity: Some(stored.request.policy_identity().into()),
                     payload: LedgerPayloadV2::ApprovalResolved {
@@ -335,9 +327,9 @@ impl Authority {
                 kind: ApprovalResolutionKindV2::Denied,
                 operator_principal: command.operator_principal.clone(),
                 reason: command.reason.clone(),
-                resolved_at: command.resolved_at,
+                resolved_at,
                 grant_id: None,
-                event_id: command.event_id.clone(),
+                event_id,
             };
             Ok(DenyResult::Denied(resolution))
         })
@@ -346,7 +338,6 @@ impl Authority {
     /// Revoke an active grant through the same serialized state boundary.
     pub fn revoke(&mut self, command: &RevokeCommand) -> Result<RevokeResult, AuthorityError> {
         validate_token("grant id", &command.grant_id, 160)?;
-        validate_token("revocation event id", &command.event_id, 160)?;
         validate_text(
             "operator principal",
             &command.operator_principal,
@@ -354,17 +345,11 @@ impl Authority {
             false,
         )?;
         validate_text("reason", &command.reason, 1_024, true)?;
-        validate_timestamp(command.revoked_at)?;
-        validate_text(
-            "build identity",
-            &command.build_identity,
-            MAX_IDENTITY_BYTES,
-            false,
-        )?;
         let grant_key = self.grant_key.clone();
         let ledger_key = self.ledger_key.clone();
         let grant_vk = self.grant_key.verifying_key();
-        self.retained_commit(|tx, _| {
+        let runtime_source = Arc::clone(&self.runtime_source);
+        self.retained_commit(|tx, verification| {
             let Some((signed_claim, _claim)) = load_claim(tx, &command.grant_id, &grant_vk)? else {
                 return Ok(RevokeResult::NotUsable(GrantNotUsableReason::Missing));
             };
@@ -373,12 +358,15 @@ impl Authority {
             if previous.status() != GrantStatusV2::Active {
                 return Ok(RevokeResult::NotUsable(GrantNotUsableReason::Terminal));
             }
+            let runtime = load_current_runtime_state(tx)?;
+            let revoked_at = authority_evidence_time(runtime_source.as_ref(), verification)?;
+            let event_id = authority_id(runtime_source.as_ref(), "grant_revoke")?;
             let revoked = GrantStateV2::terminal(
                 &previous,
                 signed_previous.state_hash(),
                 GrantStatusV2::Revoked,
-                command.event_id.clone(),
-                command.revoked_at,
+                event_id.clone(),
+                revoked_at,
             )?;
             let signed_revoked = SignedGrantStateV2::sign(&revoked, &grant_key)?;
             insert_state(tx, &revoked, &signed_revoked)?;
@@ -386,10 +374,10 @@ impl Authority {
                 tx,
                 &ledger_key,
                 LedgerEventDraft {
-                    event_id: command.event_id.clone(),
+                    event_id,
                     subject: command.grant_id.clone(),
-                    timestamp: command.revoked_at,
-                    build_identity: Some(command.build_identity.clone()),
+                    timestamp: revoked_at,
+                    build_identity: Some(runtime.active_generation.build_identity().into()),
                     policy_identity: None,
                     payload: LedgerPayloadV2::GrantStateChanged {
                         grant_id: command.grant_id.clone(),

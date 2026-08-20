@@ -279,14 +279,10 @@ pub(super) fn next_runtime_revision(
 }
 
 pub(super) fn validate_admin_transition(
-    event_id: &str,
     operator_principal: &str,
     reason: &str,
-    timestamp: i64,
 ) -> Result<(), AuthorityError> {
-    validate_token("administrative event id", event_id, 160)?;
     validate_text("operator principal", operator_principal, 256, false)?;
     validate_text("administrative reason", reason, 1_024, true)?;
-    validate_timestamp(timestamp)?;
     Ok(())
 }

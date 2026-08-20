@@ -316,11 +316,9 @@ pub(super) fn validate_approval_actor(
     request_id: &str,
     operator_principal: &str,
     reason: &str,
-    timestamp: i64,
 ) -> Result<(), AuthorityError> {
     validate_token("request id", request_id, 160)?;
     validate_text("operator principal", operator_principal, 256, false)?;
     validate_text("reason", reason, 1_024, true)?;
-    validate_timestamp(timestamp)?;
     Ok(())
 }

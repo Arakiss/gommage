@@ -27,8 +27,7 @@ impl Authority {
         let runtime_source = Arc::clone(&self.runtime_source);
         self.retained_commit(|tx, verification| {
             ensure_decision_admitted(tx, &prepared.generation)?;
-            let decided_at = authority_now(runtime_source.as_ref())?;
-            ensure_evidence_time_not_regressed(decided_at, verification)?;
+            let decided_at = authority_evidence_time(runtime_source.as_ref(), verification)?;
 
             let result = match &prepared.evaluated.decision {
                 Decision::Allow => {
@@ -221,18 +220,5 @@ fn append_recorded_decision(
             payload: LedgerPayloadV2::DecisionRecorded { record },
         },
     )?;
-    Ok(())
-}
-
-fn ensure_evidence_time_not_regressed(
-    timestamp: i64,
-    verification: &LedgerVerification,
-) -> Result<(), AuthorityError> {
-    let floor = verification.evidence_time_floor;
-    if timestamp < floor {
-        return Err(AuthorityError::RuntimeSource(format!(
-            "timestamp {timestamp} predates signed evidence time {floor}"
-        )));
-    }
     Ok(())
 }

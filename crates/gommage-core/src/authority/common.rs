@@ -27,6 +27,20 @@ pub(super) fn authority_id(
     Ok(identifier)
 }
 
+pub(super) fn authority_evidence_time(
+    source: &dyn AuthorityRuntimeSource,
+    verification: &LedgerVerification,
+) -> Result<i64, AuthorityError> {
+    let timestamp = authority_now(source)?;
+    if timestamp < verification.evidence_time_floor {
+        return Err(AuthorityError::RuntimeSource(format!(
+            "timestamp {timestamp} predates signed evidence time {}",
+            verification.evidence_time_floor
+        )));
+    }
+    Ok(timestamp)
+}
+
 pub(super) fn validate_key_identifier(value: &str, purpose: &str) -> Result<(), AuthorityError> {
     let prefix = format!("{purpose}:sha256:");
     let Some(fingerprint) = value.strip_prefix(&prefix) else {

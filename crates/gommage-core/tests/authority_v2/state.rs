@@ -88,7 +88,12 @@ fn stale_or_maintenance_generation_cannot_be_approved_without_mutation() {
 fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
     let (_directory, _path, mut authority) = fixture();
     let first = create_request(&mut authority);
-    approve(&mut authority, &first);
+    let (first_claim, _) = approve(&mut authority, &first);
+    let first_grant_id = first_claim
+        .verify(&grant_key().verifying_key())
+        .unwrap()
+        .grant_id()
+        .to_owned();
     let second = create_second_request(&mut authority);
     authority
         .activate_generation(&activate_command("2", 2, 1_700_000_030))
@@ -108,12 +113,9 @@ fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
     assert!(matches!(
         authority
             .revoke(&RevokeCommand {
-                grant_id: "grant_1".into(),
-                event_id: "event_revoke_maintenance".into(),
+                grant_id: first_grant_id.clone(),
                 operator_principal: "uid:501".into(),
                 reason: "Revoke an obsolete active grant during maintenance".into(),
-                revoked_at: 1_700_000_031,
-                build_identity: "maintenance-admin-build".into(),
             })
             .unwrap(),
         RevokeResult::Revoked(_)
@@ -121,7 +123,7 @@ fn deny_and_revoke_remain_available_for_cleanup_during_maintenance() {
     assert!(authority.runtime_state().unwrap().maintenance());
     assert_eq!(
         authority
-            .latest_state("grant_1")
+            .latest_state(&first_grant_id)
             .unwrap()
             .unwrap()
             .verify(&grant_key().verifying_key())
@@ -137,7 +139,6 @@ fn generation_activation_linearizes_with_concurrent_approval() {
     let (_directory, _path, mut authority) = fixture();
     let request = create_request(&mut authority);
     let request_id = request.request_id().to_owned();
-    let resolved_at = request.created_at();
     let authority = Arc::new(Mutex::new(authority));
 
     let barrier = Arc::new(Barrier::new(2));
@@ -148,7 +149,6 @@ fn generation_activation_linearizes_with_concurrent_approval() {
             barrier.wait();
             let mut command = approve_command(1);
             command.request_id = request_id;
-            command.resolved_at = resolved_at;
             authority.lock().unwrap().approve(&command)
         })
     };
@@ -305,15 +305,26 @@ fn generation_activation_linearizes_with_concurrent_allow() {
 
 #[test]
 fn failure_between_spend_and_decision_rolls_back_the_whole_transition() {
-    let (_directory, path, mut authority) = fixture();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("authority.sqlite3");
+    let mut authority = open_with_source(
+        &path,
+        config(),
+        Arc::new(SeedCollisionRuntimeSource {
+            identifiers: AtomicU64::new(0),
+        }),
+    );
+    let mut seeded = authorize_command();
+    seeded.evaluation = resolved_evaluation(&generation("1"), Decision::Allow, &["test.allow"]);
+    assert!(matches!(
+        authority.commit_decision(&seeded).unwrap(),
+        CommittedDecisionV2::AllowedByPolicy { decision_event_id }
+            if decision_event_id == "decision_collision"
+    ));
     let request = create_request(&mut authority);
-    approve(&mut authority, &request);
-    let mut enter = maintenance_command(true, 91, request.created_at());
-    enter.event_id = "decision_collision".into();
-    authority.set_maintenance(&enter).unwrap();
-    authority
-        .set_maintenance(&maintenance_command(false, 92, request.created_at()))
-        .unwrap();
+    let (claim, _) = approve(&mut authority, &request);
+    let grant_id = claim.verify(&grant_key().verifying_key()).unwrap();
+    let grant_id = grant_id.grant_id().to_owned();
     let head_before = authority.verify_ledger().unwrap().head_seq;
     drop(authority);
 
@@ -333,7 +344,7 @@ fn failure_between_spend_and_decision_rolls_back_the_whole_transition() {
     let authority = open(&path);
     assert_eq!(authority.verify_ledger().unwrap().head_seq, head_before);
     let state = authority
-        .latest_state("grant_1")
+        .latest_state(&grant_id)
         .unwrap()
         .unwrap()
         .verify(&grant_key().verifying_key())

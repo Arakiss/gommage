@@ -113,11 +113,9 @@ fn thirty_two_concurrent_approvers_create_exactly_one_grant() {
     let (_directory, path, mut authority) = fixture();
     let request = create_request(&mut authority);
     let request_id = request.request_id().to_owned();
-    let resolved_at = request.created_at();
     let (authority, results) = concurrently_on_authority(authority, 32, move |index, authority| {
         let mut command = approve_command(index);
         command.request_id = request_id.clone();
-        command.resolved_at = resolved_at;
         authority.approve(&command)
     });
     let results: Vec<_> = results.into_iter().map(Result::unwrap).collect();
@@ -270,7 +268,6 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
     let (_directory, _path, mut authority) = fixture();
     let request = create_request(&mut authority);
     let request_id = request.request_id().to_owned();
-    let resolved_at = request.created_at();
     let authority = Arc::new(Mutex::new(authority));
     let barrier = Arc::new(Barrier::new(2));
     let approve_handle = {
@@ -281,7 +278,6 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
             barrier.wait();
             let mut command = approve_command(1);
             command.request_id = request_id;
-            command.resolved_at = resolved_at;
             authority.lock().unwrap().approve(&command).unwrap()
         })
     };
@@ -294,7 +290,7 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
             authority
                 .lock()
                 .unwrap()
-                .deny(&deny_command(&request_id, 1, resolved_at))
+                .deny(&deny_command(&request_id, 1, request.created_at()))
                 .unwrap()
         })
     };
@@ -309,7 +305,12 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
 
     let (_terminal_directory, _terminal_path, mut terminal_authority) = fixture();
     let terminal_request = create_request(&mut terminal_authority);
-    approve(&mut terminal_authority, &terminal_request);
+    let (terminal_claim, _) = approve(&mut terminal_authority, &terminal_request);
+    let terminal_grant_id = terminal_claim
+        .verify(&grant_key().verifying_key())
+        .unwrap()
+        .grant_id()
+        .to_owned();
     let terminal_authority = Arc::new(Mutex::new(terminal_authority));
 
     let barrier = Arc::new(Barrier::new(2));
@@ -328,18 +329,16 @@ fn approve_deny_and_consume_revoke_races_have_one_winner() {
     let revoke_handle = {
         let authority = Arc::clone(&terminal_authority);
         let barrier = Arc::clone(&barrier);
+        let grant_id = terminal_grant_id;
         thread::spawn(move || {
             barrier.wait();
             authority
                 .lock()
                 .unwrap()
                 .revoke(&RevokeCommand {
-                    grant_id: "grant_1".into(),
-                    event_id: "event_revoke".into(),
+                    grant_id,
                     operator_principal: "uid:501".into(),
                     reason: "Operator revoked before use".into(),
-                    revoked_at: 1_700_000_030,
-                    build_identity: "gommage-test-build".into(),
                 })
                 .unwrap()
         })

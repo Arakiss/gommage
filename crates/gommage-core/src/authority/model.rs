@@ -506,18 +506,10 @@ pub struct ApprovalResolutionV2 {
 pub struct ApproveCommand {
     /// Open request identifier.
     pub request_id: String,
-    /// Unique grant identifier.
-    pub grant_id: String,
-    /// Approval resolution event identifier.
-    pub resolution_event_id: String,
-    /// Active-state transition event identifier.
-    pub activation_event_id: String,
     /// Authenticated operator principal.
     pub operator_principal: String,
     /// Operator approval rationale.
     pub reason: String,
-    /// Resolution and grant issue timestamp.
-    pub resolved_at: i64,
     /// Bounded grant lifetime in seconds.
     pub ttl_seconds: i64,
 }
@@ -527,6 +519,8 @@ pub struct ApproveCommand {
 pub enum ApproveResult {
     /// This caller won resolution and committed exactly one active grant.
     Approved {
+        /// Committed terminal request resolution.
+        resolution: ApprovalResolutionV2,
         /// Signed immutable grant claim.
         claim: SignedGrantClaimV2,
         /// Signed active state at revision zero.
@@ -541,14 +535,10 @@ pub enum ApproveResult {
 pub struct DenyCommand {
     /// Open request identifier.
     pub request_id: String,
-    /// Unique denial ledger event identifier.
-    pub event_id: String,
     /// Authenticated operator principal.
     pub operator_principal: String,
     /// Operator denial rationale.
     pub reason: String,
-    /// Resolution timestamp.
-    pub resolved_at: i64,
 }
 
 /// Result of a denial attempt.
@@ -565,14 +555,10 @@ pub enum DenyResult {
 pub struct ActivateGenerationCommand {
     /// Complete successor generation identity.
     pub generation: AuthorityGenerationV2,
-    /// Signed-ledger event identifier.
-    pub event_id: String,
     /// Authenticated operator principal.
     pub operator_principal: String,
     /// Operator rationale.
     pub reason: String,
-    /// Activation timestamp.
-    pub activated_at: i64,
 }
 
 /// Administrative transition into or out of fail-closed maintenance.
@@ -580,14 +566,10 @@ pub struct ActivateGenerationCommand {
 pub struct SetMaintenanceCommand {
     /// `true` enters maintenance; `false` exits it.
     pub enabled: bool,
-    /// Signed-ledger event identifier.
-    pub event_id: String,
     /// Authenticated operator principal.
     pub operator_principal: String,
     /// Operator rationale.
     pub reason: String,
-    /// Transition timestamp.
-    pub transitioned_at: i64,
 }
 
 /// Fully verified current generation and maintenance state.
@@ -645,16 +627,10 @@ pub enum GrantNotUsableReason {
 pub struct RevokeCommand {
     /// Grant identifier.
     pub grant_id: String,
-    /// Revocation/state-transition event identifier.
-    pub event_id: String,
     /// Authenticated operator principal.
     pub operator_principal: String,
     /// Operator revocation rationale.
     pub reason: String,
-    /// Revocation timestamp.
-    pub revoked_at: i64,
-    /// Build identity executing the revocation transaction.
-    pub build_identity: String,
 }
 
 /// Result of a revoke attempt.

@@ -267,38 +267,26 @@ fn trusted_open_time_and_identifier_source_owns_runtime_evidence() {
 }
 
 #[test]
-fn resolution_commands_have_no_caller_controlled_build_identity() {
+fn administrative_commands_expose_only_semantic_operator_inputs() {
     let ApproveCommand {
         request_id,
-        grant_id,
-        resolution_event_id,
-        activation_event_id,
         operator_principal,
         reason,
-        resolved_at,
         ttl_seconds,
     } = approve_command(7);
     assert_eq!(request_id, "request_1");
-    assert_eq!(grant_id, "grant_7");
-    assert_eq!(resolution_event_id, "event_approve_7");
-    assert_eq!(activation_event_id, "event_activate_7");
     assert_eq!(operator_principal, "uid:501");
     assert_eq!(reason, "Reviewed exact input and scope");
-    assert_eq!(resolved_at, 1_700_000_020);
     assert_eq!(ttl_seconds, 600);
 
     let DenyCommand {
         request_id,
-        event_id,
         operator_principal,
         reason,
-        resolved_at,
     } = deny_command("request_2", 7, 1_700_000_021);
     assert_eq!(request_id, "request_2");
-    assert_eq!(event_id, "event_deny_7");
     assert_eq!(operator_principal, "uid:501");
     assert_eq!(reason, "Denied after exact review");
-    assert_eq!(resolved_at, 1_700_000_021);
 }
 
 #[test]
