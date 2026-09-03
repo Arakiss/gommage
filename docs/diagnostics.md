@@ -19,24 +19,29 @@ to capture a human-readable report without ANSI control sequences. Automation
 should still parse the JSON commands below instead of the TUI.
 
 `gommage tui --view dashboard|approvals|policies|audit|capabilities|recovery|onboarding|metrics|all`
-selects operator views. `--view all` is the most useful issue-report snapshot:
-it includes readiness, pending approvals, policy inventory, signed audit
-summary, mapper inventory, recovery shortcuts, and local metrics. `gommage tui
---watch` prints the same report repeatedly as plain text; use
-`--watch-ticks <n>` to bound demos, CI artifacts, and issue-report captures.
+selects operator views. A single named snapshot prints only that view; use
+`--view all` for the full issue-report capture with readiness, pending
+approvals, policy inventory, signed audit summary, mapper inventory, recovery
+shortcuts, and local metrics. `gommage tui --watch` repeats the selected
+plain-text view; use `--watch-ticks <n>` to bound demos, CI artifacts, and
+issue-report captures.
 `gommage tui --stream` prints a compact live decision/event feed using daemon
 IPC when the daemon is reachable and the signed audit log otherwise. Stream and
 snapshot output include daemon reachability, active picto counts, pending
 approval counters, webhook DLQ counts, decision counters, and audit anomaly
-counts when verification is available. Interactive mode uses `1` for
-Overview, `2` for Approvals, and `3` for Inspect. Keys `3`-`8` jump
-directly to an inspection section, while `[` and `]` move between those
-sections. In the approvals view, `t/T` changes the TTL preset, `u/U` changes
-the use-count preset, `i` reveals technical request context, and `A` /
-`D` stage an approve/deny action for the selected request. The preview shows
-the tool, scope, Picto binding, reason, and proposed grant; technical context
-adds the request ID, input hash, policy version, and matched rule. `y` is
-required only from a visible confirmation dialog before mutating state.
+counts when verification is available. Interactive mode keeps three primary
+areas: `1` Overview, `2` Approvals, and `3` Inspect. Keys `3`-`8` jump
+directly to policy, audit, capability, recovery, onboarding, and metrics
+inspection; `[` / `]` cycle those sections. In Approvals, the preview shows
+the tool, scope, input-binding mode, reason, and proposed TTL/use grant before
+confirmation. `i` reveals the request ID, input hash, policy version, and
+matched rule; `t/T` changes TTL, `u/U` changes uses, and `A` / `D` stage the
+action. `y` is required only from the visible confirmation dialog before any
+state changes.
+Sanitized demo assets live at `docs/assets/tui-dashboard.gif` and
+`docs/assets/tui-dashboard.svg`; update both whenever the TUI's primary
+sections or vocabulary change.
+
 `gommage doctor` is the lower-level operator installation health check. Use the default text output for humans and `gommage doctor --json` when you need only filesystem/runtime diagnostics.
 
 `gommage agent status <claude|codex>` is the host-agent integration check. Use

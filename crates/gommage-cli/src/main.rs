@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
-    Decision, PictoConsume, PictoLookup, ToolCall, evaluate,
+    Decision, PictoConsume, PictoLookup, ToolCall, approval_reason, evaluate,
     runtime::{Expedition, HomeLayout, Runtime},
 };
 use std::{path::PathBuf, process::ExitCode};
@@ -830,9 +830,10 @@ pub(crate) fn decide_with_pictos(
                     reason: request.reason.clone(),
                     policy_version: request.policy_version.clone(),
                 });
+                let reason = approval_reason(&reason, &request.id, &required_scope, bind_input);
                 eval.decision = Decision::AskPicto {
                     required_scope,
-                    reason: approval_reason(&reason, &request.id),
+                    reason,
                     bind_input,
                 };
             }
@@ -878,12 +879,6 @@ pub(crate) fn decide_with_pictos(
         }
     }
     Ok((eval, events))
-}
-
-fn approval_reason(reason: &str, request_id: &str) -> String {
-    format!(
-        "{reason}; approval request {request_id} pending; run `gommage approval approve {request_id}`"
-    )
 }
 
 fn cmd_expedition(sub: ExpeditionCmd, layout: HomeLayout) -> Result<ExitCode> {

@@ -104,7 +104,10 @@ fn ask_picto_creates_approval_and_approval_mints_consumable_picto() {
             .and_then(|value| value.as_str()),
         Some("ask")
     );
-    assert!(reason.contains("approval request apr_"));
+    assert!(reason.contains("request apr_"), "{reason}");
+    // An unbound scope must hand the agent the path it can walk itself, or the
+    // ask becomes a handoff to a human. See gommage_core::approval_reason.
+    assert!(reason.contains("gommage grant --scope"), "{reason}");
 
     let output = gommage(&home)
         .args(["approval", "list", "--json"])
@@ -791,7 +794,10 @@ fn resolved_approval_can_be_requested_again() {
         .pointer("/hookSpecificOutput/permissionDecisionReason")
         .and_then(|value| value.as_str())
         .unwrap();
-    assert!(reason.contains("approval request apr_"));
+    assert!(reason.contains("request apr_"), "{reason}");
+    // An unbound scope must hand the agent the path it can walk itself, or the
+    // ask becomes a handoff to a human. See gommage_core::approval_reason.
+    assert!(reason.contains("gommage grant --scope"), "{reason}");
 
     let output = gommage(&home)
         .args(["approval", "list", "--status", "pending", "--json"])

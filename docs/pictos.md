@@ -58,11 +58,14 @@ gommage tui --watch --watch-ticks 3 --view approvals
 gommage tui --stream --stream-ticks 5
 ```
 
-Interactive TUI approval is intentionally two-step. Operators can use `t/T` to
-cycle TTL presets and `u/U` to cycle use-count presets, then `A` or `D` stages
-the selected pending request. `y` is required before Gommage mints a picto or
-records a denial. Snapshot and bounded watch modes are read-only and include
-selected-request detail plus replay/evidence commands for support.
+Interactive TUI approval is intentionally two-step. The approval workbench
+shows the tool, scope, scope-only versus exact-input boundary, policy reason,
+and chosen TTL/use grant before any forensic detail. Operators can use `t/T`
+to cycle TTL presets, `u/U` to cycle use-count presets, `i` to reveal
+technical request context, then `A` or `D` to stage the selected pending
+request. `y` is required before Gommage mints a picto or records a denial.
+Snapshot and bounded watch modes are read-only and include selected-request
+detail plus replay/evidence commands for support.
 
 Replay and evidence commands are for debugging and support. Replay evaluates the
 stored request capabilities against the current policy, so an operator can see

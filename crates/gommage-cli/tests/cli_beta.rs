@@ -186,17 +186,22 @@ fn beta_check_accepts_public_fixture_library() {
         report.get("status").and_then(|value| value.as_str()),
         Some("warn")
     );
-    assert!(report["checks"].as_array().unwrap().iter().any(|check| {
-        check["name"]
-            .as_str()
-            .unwrap()
-            .starts_with("policy fixture")
-            && check["status"].as_str() == Some("pass")
-            && check["message"]
+    // Assert the outcome, not the census. This asserted "8 passed" until the
+    // public fixture library grew to ten cases, and then failed on every branch
+    // for anyone who had not touched it — a broken check that reports the wrong
+    // author. What has to hold is that the library runs and nothing fails.
+    assert!(
+        report["checks"].as_array().unwrap().iter().any(|check| {
+            check["name"]
                 .as_str()
                 .unwrap()
-                .contains("8 passed, 0 failed")
-    }));
+                .starts_with("policy fixture")
+                && check["status"].as_str() == Some("pass")
+                && check["message"].as_str().unwrap().contains("0 failed")
+        }),
+        "{}",
+        serde_json::to_string_pretty(&report["checks"]).unwrap()
+    );
 }
 
 #[test]
