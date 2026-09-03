@@ -1258,3 +1258,134 @@ fn uncovered_tool_reports_the_missing_mapper() {
         "unhelpful fail-closed reason: {reason}"
     );
 }
+
+/// Capabilities emitted for a Bash command, with `cwd` and `HOME` supplied the
+/// way the real PreToolUse hook supplies them.
+fn bash_capabilities(home: &Path, command: &str, cwd: &str, session_home: &str) -> Vec<String> {
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": cwd,
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+    })
+    .to_string();
+    let mut child = gommage(home)
+        .args(["map", "--json", "--hook"])
+        .env("HOME", session_home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    v["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.as_str().map(str::to_string))
+        .collect()
+}
+
+/// Regression (2026-09-03): `sed -i FILE` and `> FILE` emitted `fs.write`, but
+/// the DESTINATION of a file-moving verb did not. A policy rule written against
+/// the agent settings path therefore blocked the `sed` form of an edit and
+/// allowed the `mv` form of the very same edit.
+#[test]
+fn moving_verbs_emit_their_destination_as_a_write() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let target = "/home/u/.agentcfg/settings.json";
+    for verb in [
+        format!("mv /tmp/x.json {target}"),
+        format!("cp /tmp/x.json {target}"),
+        format!("install -m 644 /tmp/x.json {target}"),
+        format!("rsync -a /tmp/x.json {target}"),
+        format!("ln -s /tmp/evil {target}"),
+        format!("tee {target}"),
+        format!("dd if=/tmp/x.json of={target}"),
+    ] {
+        let caps = bash_capabilities(&home, &verb, "/tmp/proj", "/home/u");
+        assert!(
+            caps.contains(&format!("fs.write:{target}")),
+            "no destination write for {verb:?}: {caps:?}"
+        );
+    }
+}
+
+/// `~` is how a shell user actually spells the home directory, and policy
+/// patterns expand `${HOME}` to an absolute path — so a capability left as
+/// `~/...` matched no home-anchored rule at all.
+#[test]
+fn tilde_destinations_are_expanded_to_the_session_home() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let expected = "fs.write:/home/u/.agentcfg/settings.json".to_string();
+    for command in [
+        "mv /tmp/x.json ~/.agentcfg/settings.json",
+        "cp /tmp/x.json ~/.agentcfg/settings.json",
+        "tee ~/.agentcfg/settings.json",
+        "sed -i '' s/a/b/ ~/.agentcfg/settings.json",
+        "dd if=/tmp/x.json of=~/.agentcfg/settings.json",
+        "echo x > ~/.agentcfg/settings.json",
+    ] {
+        let caps = bash_capabilities(&home, command, "/tmp/proj", "/home/u");
+        assert!(
+            caps.contains(&expected),
+            "tilde not expanded for {command:?}: {caps:?}"
+        );
+    }
+}
+
+/// The `cd X && …` chain must not launder the destination.
+#[test]
+fn cd_chain_does_not_hide_a_tilde_destination() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let caps = bash_capabilities(
+        &home,
+        "cd /tmp && tee ~/.agentcfg/settings.json < x.json",
+        "/tmp/proj",
+        "/home/u",
+    );
+    assert!(
+        caps.contains(&"fs.write:/home/u/.agentcfg/settings.json".to_string()),
+        "cd chain hid the destination: {caps:?}"
+    );
+}
+
+/// Negative case: an ordinary rename inside the project must stay allowed. The
+/// fix must not turn every `mv` into a harness-integrity denial.
+#[test]
+fn ordinary_project_rename_is_still_allowed() {
+    let temp = tempdir().unwrap();
+    let home = temp.path().join(".gommage");
+    init_home_with_stdlib(&home);
+
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "cwd": "/tmp/proj",
+        "tool_name": "Bash",
+        "tool_input": {"command": "mv a.txt b.txt"},
+    })
+    .to_string();
+    let out = run_hook_command(&home, &["decide", "--hook"], payload.as_bytes());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        v["decision"]["kind"].as_str(),
+        Some("allow"),
+        "ordinary rename was not allowed: {v}"
+    );
+}

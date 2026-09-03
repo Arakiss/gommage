@@ -158,6 +158,19 @@ fn enrich_bash_input(map: &mut serde_json::Map<String, serde_json::Value>, cwd: 
         "__gommage_cwd".to_string(),
         serde_json::Value::String(cwd.to_string()),
     );
+    // `$HOME` for the tilde-expanding mapper rules. Policy patterns expand
+    // `${HOME}` to an absolute path, so a capability whose payload is still
+    // `~/.claude/settings.json` matches NOTHING: measured 2026-09-03, the
+    // absolute form was denied by `deny-agent-hook-config-tamper` while the
+    // `~/` form of the very same write fell through to the catch-all allow.
+    // The mapper has no environment of its own, so the home directory has to
+    // arrive as input like the cwd does.
+    if let Some(home) = std::env::var("HOME").ok().filter(|home| !home.is_empty()) {
+        map.insert(
+            "__gommage_home".to_string(),
+            serde_json::Value::String(home),
+        );
+    }
     if let Some(branch) = git_branch_for_path(cwd) {
         map.insert(
             "__gommage_cwd_git_branch".to_string(),

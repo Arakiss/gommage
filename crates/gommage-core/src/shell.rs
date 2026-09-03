@@ -26,8 +26,8 @@
 ///
 /// This is the host-adapter companion to the stdlib Bash mapper. It deliberately
 /// recognizes the same write shapes the mapper surfaces as `fs.write:*`: `tee`,
-/// `cp` / `install` destinations, `sed -i` targets, `dd of=...`, and output
-/// redirects. The result is used by hook adapters to attach destination Git
+/// `cp` / `install` / `mv` / `rsync` / `ln` destinations, `sed -i` targets,
+/// `dd of=...`, and output redirects. The result is used by hook adapters to attach destination Git
 /// context before evaluation; it is not part of the evaluator and it never
 /// suppresses the raw command capability.
 pub fn shell_write_targets(command: &str) -> Vec<String> {
@@ -48,7 +48,11 @@ pub fn shell_write_targets(command: &str) -> Vec<String> {
                     push_target(path.to_string(), &mut out, &mut seen);
                 }
             }
-            "cp" | "install" => {
+            // The destination of every file-moving verb is a write. `mv`,
+            // `rsync` and `ln` joined `cp`/`install` on 2026-09-03: the stdlib
+            // mapper gated only the latter two, so moving a file onto a guarded
+            // path was the same effect through an unwatched verb.
+            "cp" | "install" | "mv" | "rsync" | "ln" => {
                 if let Some(path) = last_non_flag_arg(&real[1..]) {
                     push_target(path.to_string(), &mut out, &mut seen);
                 }
@@ -812,6 +816,48 @@ mod write_target_tests {
     #[test]
     fn ignores_quoted_redirect_data() {
         assert!(shell_write_targets("echo '> src/lib.rs'").is_empty());
+    }
+
+    /// Regression (2026-09-03): only `cp` and `install` were recognised, so a
+    /// file moved onto a guarded path produced no write target at all.
+    #[test]
+    fn extracts_moving_verb_destinations() {
+        assert_eq!(
+            shell_write_targets("mv /tmp/x.json /Users/a/.claude/settings.json"),
+            vec!["/Users/a/.claude/settings.json"]
+        );
+        assert_eq!(
+            shell_write_targets("rsync -a /tmp/x.json /Users/a/.claude/settings.json"),
+            vec!["/Users/a/.claude/settings.json"]
+        );
+        assert_eq!(
+            shell_write_targets("ln -s /tmp/evil /Users/a/.claude/settings.json"),
+            vec!["/Users/a/.claude/settings.json"]
+        );
+        assert_eq!(
+            shell_write_targets("install -m 644 a.json /Users/a/.claude/settings.json"),
+            vec!["/Users/a/.claude/settings.json"]
+        );
+    }
+
+    /// A `cd` chain must not hide the destination: the mapper scans each
+    /// segment, so the `tee` segment still surfaces its target.
+    #[test]
+    fn moving_verb_destination_survives_a_cd_chain() {
+        assert_eq!(
+            shell_write_targets("cd /tmp && mv x.json /Users/a/.claude/settings.json"),
+            vec!["/Users/a/.claude/settings.json"]
+        );
+    }
+
+    /// Multi-source `mv a b dir/` resolves to the destination directory —
+    /// conservative, never narrower than the truth.
+    #[test]
+    fn multi_source_move_uses_the_last_argument() {
+        assert_eq!(
+            shell_write_targets("mv a.txt b.txt /Users/a/.claude/"),
+            vec!["/Users/a/.claude/"]
+        );
     }
 }
 

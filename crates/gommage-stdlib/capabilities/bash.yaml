@@ -276,11 +276,30 @@
   emit:
     - "fs.write:${cwd}/${wpath}"
 
-# cp / install: best-effort two-argument `<src> <dest>` form; dest is the write.
+# File-moving / copying verbs: best-effort `<src>… <dest>` form; the LAST
+# non-flag argument is the destination, and the destination is the write.
+#
+# `mv`, `rsync` and `ln` were missing here until 2026-09-03. Because only `cp`
+# and `install` were listed, `mv /tmp/x.json ~/.claude/settings.json` emitted
+# `proc.exec:` alone and no `fs.write:`, so every policy rule written against
+# `fs.write:${HOME}/.claude/settings.json` — the harness-integrity denies among
+# them — simply did not see the write. Same file, same destructive effect, a
+# different verb: the gate was verb-shaped, not effect-shaped.
+#
+# `ln` is included because the write is the LINKNAME (the last argument), which
+# is exactly the position this pattern captures; `ln -s /evil ~/.claude/settings.json`
+# replaces the harness config just as surely as a copy does.
+#
+# Multi-source forms (`mv a b c dir/`) still resolve to the last argument, which
+# is the destination directory — conservative, and never narrower than the truth.
+# The destination is the LAST argument, so the pattern is greedy up to it
+# rather than anchored on a two-argument shape. That also fixes `install -m 644
+# SRC DEST`, where the old `(?:-\S+\s+)*` did not consume the `644` belonging to
+# `-m` and the SOURCE was captured as the write target.
 - name: bash-fs-write-cp
   tool: Bash
   match_input:
-    command: "^\\s*(?:cp|install)\\s+(?:-\\S+\\s+)*[^-\\s]\\S*\\s+(?P<wpath>[^-\\s][^\\s]*)"
+    command: "^\\s*(?:cp|install|mv|rsync|ln)\\s+.*\\s(?P<wpath>[^-\\s>&|;][^\\s>&|;]*)\\s*$"
   emit:
     - "fs.write:${wpath}"
 
@@ -288,7 +307,7 @@
   tool: Bash
   match_input:
     __gommage_cwd: "^(?P<cwd>.+)$"
-    command: "^\\s*(?:cp|install)\\s+(?:-\\S+\\s+)*[^-\\s]\\S*\\s+(?P<wpath>[^-/~\\s>&|;][^\\s>&|;]*)"
+    command: "^\\s*(?:cp|install|mv|rsync|ln)\\s+.*\\s(?P<wpath>[^-/~\\s>&|;][^\\s>&|;]*)\\s*$"
   emit:
     - "fs.write:${cwd}/${wpath}"
 
@@ -340,6 +359,72 @@
     command: ">>?\\s*(?P<wpath>[^-/~\\s>&|][^\\s>&|]*)"
   emit:
     - "fs.write:${cwd}/${wpath}"
+
+# --- Tilde destinations (R2b) -----------------------------------------------
+#
+# Every rule above emits the path exactly as it was written. Policy patterns,
+# by contrast, expand `${HOME}` to an absolute path before matching (see
+# `runtime::default_policy_env`). So a capability payload that still begins with
+# `~/` matches no `${HOME}/...` pattern at all.
+#
+# Measured 2026-09-03 against a two-rule policy: `cp x $HOME/.claude/settings.json`
+# was denied by the `fs.write:${HOME}/.claude/settings.json` rule, while
+# `cp x ~/.claude/settings.json` — the identical write, spelled the way a shell
+# user actually spells it — fell through to the catch-all allow. The `~` was a
+# bypass for every home-anchored rule in the policy set, harness-integrity
+# included.
+#
+# These rules re-emit the same write with `~` replaced by the session's real
+# home, which arrives as `__gommage_home` from the hook adapter. They only ADD a
+# capability; the literal `~/...` form is still emitted by the rules above, so
+# nothing that matched before stops matching.
+- name: bash-fs-write-verb-home
+  tool: Bash
+  match_input:
+    __gommage_home: "^(?P<home>.+)$"
+    command: "^\\s*(?:cp|install|mv|rsync|ln)\\s+.*\\s~/(?P<wpath>[^\\s>&|;]+)\\s*$"
+  emit:
+    - "fs.write:${home}/${wpath}"
+
+- name: bash-fs-write-tee-home
+  tool: Bash
+  match_input:
+    __gommage_home: "^(?P<home>.+)$"
+    command: "^\\s*tee(?:\\s+-\\S+)*\\s+~/(?P<wpath>[^\\s>&|;]+)"
+  emit:
+    - "fs.write:${home}/${wpath}"
+
+- name: bash-fs-write-sed-in-place-home
+  tool: Bash
+  match_input:
+    __gommage_home: "^(?P<home>.+)$"
+    command: "^\\s*sed\\s+(?:-\\S+\\s+)*(?:-i(?:\\.[^\\s]+)?|--in-place(?:=[^\\s]+)?)(?:\\s+\\.[^\\s]+)?(?:\\s+-\\S+)*\\s+\\S+\\s+~/(?P<wpath>[^\\s>&|;]+)"
+  emit:
+    - "fs.write:${home}/${wpath}"
+
+- name: bash-fs-write-dd-home
+  tool: Bash
+  match_input:
+    __gommage_home: "^(?P<home>.+)$"
+    command: "\\bof=~/(?P<wpath>[^\\s>&|;]+)"
+  emit:
+    - "fs.write:${home}/${wpath}"
+
+- name: bash-fs-write-redirect-home
+  tool: Bash
+  match_input:
+    __gommage_home: "^(?P<home>.+)$"
+    command: ">>?\\s*~/(?P<wpath>[^\\s>&|;]+)"
+  emit:
+    - "fs.write:${home}/${wpath}"
+
+- name: bash-fs-read-verb-home
+  tool: Bash
+  match_input:
+    __gommage_home: "^(?P<home>.+)$"
+    command: "^\\s*(?:cat|head|tail|less|od|xxd|base64|strings|file)(?:\\s+-\\S+)*\\s+~/(?P<rpath>[^\\s<>&|;]+)"
+  emit:
+    - "fs.read:${home}/${rpath}"
 
 # --- Raw device writes (host destruction) -----------------------------------
 #
