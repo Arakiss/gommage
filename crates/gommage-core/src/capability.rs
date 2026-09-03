@@ -5,7 +5,7 @@ use std::fmt;
 /// does. Policies match on capabilities; they do not read tool inputs directly.
 ///
 /// Examples:
-///   - `fs.read:/Users/dolores/Projects/foo/README.md`
+///   - `fs.read:$HOME/Projects/foo/README.md`
 ///   - `fs.write:**/node_modules/**`
 ///   - `git.push:refs/heads/main`
 ///   - `net.out:api.stripe.com`
