@@ -3,6 +3,13 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.18.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.18.0-alpha.1...gommage-core-v0.18.1-alpha.1) (2026-09-03)
+
+
+### Bug fixes
+
+* **core:** emit fs.write for move/copy destinations and tilde paths ([#139](https://github.com/Arakiss/gommage/issues/139)) ([78feab4](https://github.com/Arakiss/gommage/commit/78feab4a58557bdac0097eaca54c4d7b6b5c8966))
+
 ## [0.18.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.17.0-alpha.1...gommage-core-v0.18.0-alpha.1) (2026-08-15)
 
 
