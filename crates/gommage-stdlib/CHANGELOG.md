@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.14.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.14.0-alpha.1...gommage-stdlib-v0.14.1-alpha.1) (2026-09-03)
+
+
+### Bug fixes
+
+* **core:** emit fs.write for move/copy destinations and tilde paths ([#139](https://github.com/Arakiss/gommage/issues/139)) ([78feab4](https://github.com/Arakiss/gommage/commit/78feab4a58557bdac0097eaca54c4d7b6b5c8966))
+
 ## [0.14.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.13.0-alpha.1...gommage-stdlib-v0.14.0-alpha.1) (2026-08-15)
 
 
