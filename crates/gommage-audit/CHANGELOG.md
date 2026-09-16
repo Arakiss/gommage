@@ -1,5 +1,12 @@
 # Changelog — gommage-audit
 
+## [0.8.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.7.5-alpha.1...gommage-audit-v0.8.0-alpha.1) (2026-09-16)
+
+
+### Features
+
+* **daemon:** gate policy reloads on config drift with a picto ([#143](https://github.com/Arakiss/gommage/issues/143)) ([492723e](https://github.com/Arakiss/gommage/commit/492723e534a25330568108c7df11f92ef8876e20))
+
 ## [0.7.5-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.7.4-alpha.1...gommage-audit-v0.7.5-alpha.1) (2026-09-03)
 
 ## [0.7.4-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-audit-v0.7.3-alpha.1...gommage-audit-v0.7.4-alpha.1) (2026-08-15)
