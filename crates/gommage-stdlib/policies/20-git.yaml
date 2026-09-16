@@ -7,6 +7,18 @@
       - "git.stage:bulk"
   reason: "Do not stage the whole tree. Stage explicit paths instead, for example `git add path/to/file.rs path/to/test.rs`."
 
+# Deleting a remote branch destroys shared work and is not recoverable from
+# the local clone alone. Gate it for every branch, not only the protected ones:
+# an agent that deletes a colleague's feature branch has done real damage even
+# though pushing to that same branch is allowed.
+- name: gate-remote-branch-delete
+  decision: ask_picto
+  required_scope: "git.push.delete"
+  match:
+    any_capability:
+      - "git.push.delete:*"
+  reason: "deleting a remote branch destroys shared history; require a signed picto (scope git.push.delete)"
+
 - name: gate-main-push
   decision: ask_picto
   required_scope: "git.push:main"

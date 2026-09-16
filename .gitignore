@@ -4,6 +4,7 @@ Cargo.lock.bak
 
 # local state
 /.codex-runs/
+/.urd/
 /.gommage
 *.ed25519
 *.sqlite
