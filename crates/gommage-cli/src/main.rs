@@ -770,6 +770,9 @@ fn warn_if_scope_unknown(rt: &Runtime, scope: &str) {
         .iter()
         .filter_map(|r| r.required_scope.as_deref())
         .collect();
+    // The daemon consumes this scope itself when a reload finds changed
+    // policy/capability files; no rule names it, but the picto is real.
+    known.push(gommage_core::runtime::CONFIG_ACTIVATION_SCOPE);
     if known.contains(&scope) {
         return;
     }

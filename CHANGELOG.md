@@ -46,6 +46,10 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
   Picto that activated the change.
 - `CapabilityMapper::version_hash()` and `PolicyReadModel::config_fingerprint()`
   expose the fingerprints to tooling.
+- `gommage_core::runtime::CONFIG_ACTIVATION_SCOPE` names the reload activation
+  scope once for the daemon and the CLI; `gommage grant` no longer warns that
+  `harness.configure` "matches no ask_picto rule" when no policy rule names it,
+  because the daemon consumes that scope itself.
 - `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes
   only the canonical observed tool input as well as its scope.
 - `gommage daemon reload` reloads policy and capability mappers in the running

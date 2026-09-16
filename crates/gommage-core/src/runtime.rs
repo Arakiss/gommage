@@ -257,6 +257,14 @@ impl PolicyReadModel {
     }
 }
 
+/// Scope a picto must carry to activate changed policy / capability files
+/// through a daemon reload (see the daemon's reload gate). It is the scope the
+/// stdlib `gate-agent-harness-config-edit` rule requires to *write* those
+/// files, so one grant covers the edit and its activation. Consumed by the
+/// daemon itself, not by an `ask_picto` rule, which is why tooling that lists
+/// "known scopes" from the loaded policy must add it explicitly.
+pub const CONFIG_ACTIVATION_SCOPE: &str = "harness.configure";
+
 /// See [`PolicyReadModel::config_fingerprint`].
 pub fn config_fingerprint(policy_version: &str, mapper_version: &str) -> String {
     use sha2::Digest as _;
