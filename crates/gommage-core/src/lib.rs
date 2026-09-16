@@ -20,6 +20,7 @@ pub mod webhook_signature;
 
 pub use approval::{
     ApprovalRequest, ApprovalResolution, ApprovalState, ApprovalStatus, ApprovalStore,
+    approval_reason,
 };
 pub use approval_webhook::{
     ApprovalWebhookDeadLetter, ApprovalWebhookDeadLetterStore, ApprovalWebhookDeliveryKind,

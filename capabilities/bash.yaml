@@ -23,6 +23,23 @@
 # refspec position and slip a push past the branch gate. The mapper also
 # strips redirections from the per-segment candidate (see collect_candidates);
 # this charset is the defense-in-depth backstop on the raw command.
+# A refspec with an empty source side deletes the destination branch:
+# `git push origin :main` is the classic way to delete a remote branch. The
+# generic mapper below captures the whole refspec, so that command emitted
+# `git.push:refs/heads/:main`, which matches no branch gate. Deleting a
+# protected branch therefore slipped through while a plain push to the same
+# branch was gated. This mapper emits the destination branch so the existing
+# branch gates apply, plus a dedicated capability so policy can gate deletion
+# of any remote branch independently of the branch name.
+- name: bash-git-push-delete-refspec
+  tool: Bash
+  match_input:
+    command: "^\\s*git\\s+push(?:\\s+[-\\w]+)*\\s+(?P<remote>[\\w.-]+)\\s+\\+?:(?P<ref>[^\\s<>&|;]+)"
+  emit:
+    - "git.push:refs/heads/${ref}"
+    - "git.push.delete:${ref}"
+    - "net.out:github.com"
+
 - name: bash-git-push
   tool: Bash
   match_input:

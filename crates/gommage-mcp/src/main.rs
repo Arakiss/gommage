@@ -15,8 +15,8 @@ use gommage_audit::{AuditEvent, AuditWriter};
 use gommage_core::{
     ApprovalRequest, ApprovalWebhookDeliveryKind, ApprovalWebhookDeliverySettings,
     ApprovalWebhookSource, Capability, CapabilityMapper, Decision, EvalResult, PictoConsume,
-    PictoLookup, ToolCall, approval_webhook_generic_payload, deliver_prepared_approval_webhook,
-    evaluate, evaluate_bypass, prepare_approval_webhook,
+    PictoLookup, ToolCall, approval_reason, approval_webhook_generic_payload,
+    deliver_prepared_approval_webhook, evaluate, evaluate_bypass, prepare_approval_webhook,
     runtime::{HomeLayout, Runtime},
     webhook_signature::WebhookSignatureReport,
 };
@@ -804,9 +804,10 @@ fn decide_in_process_and_audit(
                 for event in notify_approval_webhook_best_effort(&request) {
                     events.push(event);
                 }
+                let reason = approval_reason(&reason, &request.id, &required_scope, bind_input);
                 eval.decision = Decision::AskPicto {
                     required_scope,
-                    reason: approval_reason(&reason, &request.id),
+                    reason,
                     bind_input,
                 };
             }
@@ -854,12 +855,6 @@ fn decide_in_process_and_audit(
     }
     writer.append(call, &eval, expedition_name.as_deref())?;
     Ok(eval)
-}
-
-fn approval_reason(reason: &str, request_id: &str) -> String {
-    format!(
-        "{reason}; approval request {request_id} pending; run `gommage approval approve {request_id}`"
-    )
 }
 
 fn notify_approval_webhook_best_effort(request: &ApprovalRequest) -> Vec<AuditEvent> {

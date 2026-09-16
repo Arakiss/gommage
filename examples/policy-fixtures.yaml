@@ -46,6 +46,26 @@ cases:
       required_scope: git.push.force
       matched_rule: no-force-push
 
+  - name: gate_delete_protected_branch_by_refspec
+    description: An empty-source refspec deletes the remote branch. This used to be allowed because the ref capture emitted refs/heads/:main, which matched no branch gate, so deleting main slipped through while pushing to it did not.
+    tool: Bash
+    input:
+      command: "git push origin :main"
+    expect:
+      decision: ask_picto
+      required_scope: git.push.delete
+      matched_rule: gate-remote-branch-delete
+
+  - name: gate_delete_feature_branch_by_refspec
+    description: Deleting any remote branch is gated, not only protected ones, because removing a colleague's branch destroys shared work even where pushing to it is allowed.
+    tool: Bash
+    input:
+      command: "git push origin :feat/some-work"
+    expect:
+      decision: ask_picto
+      required_scope: git.push.delete
+      matched_rule: gate-remote-branch-delete
+
   - name: ask_web_fetch
     description: Agent-native web fetches cross the local trust boundary and should require approval.
     tool: WebFetch
