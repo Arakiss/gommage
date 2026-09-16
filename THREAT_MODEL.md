@@ -187,7 +187,18 @@ Capability mapper rules compile user-supplied regex (from `capabilities/*.yaml`)
 - YAML tags invoking custom types — we deserialize into a closed set of types (`RawRule`, `RawMapperRule`); unknown tags error at parse time.
 - Duplicate keys — YAML spec is ambiguous, but `serde_yaml_ng` rejects duplicate struct fields in policy and mapper files instead of silently accepting last-wins behavior.
 
-**Today's posture**: users are trusted authors of `~/.gommage/policy.d/*.yaml`. If your policy directory can be written to by an attacker, Gommage is already bypassed (Section 2.2).
+**Today's posture**: users are trusted authors of `~/.gommage/policy.d/*.yaml`. If your policy directory can be written to by an attacker, Gommage is already bypassed (Section 2.2). An *agent* running under the user's UID is a narrower case, handled in 2.11.
+
+### 2.11 Agent-written policy activation
+
+The stdlib gates agent writes to `~/.gommage/policy.d/**` and `capabilities.d/**` with a `harness.configure` picto, but only writes the mapper can see: `Edit`/`Write` tools, redirections, `tee`, `cp`, `sed -i`. A script the agent runs (`python3 fix.py`, `bun -e`), an `mv`, or an editor opened from a shell writes the same files and surfaces no capability; Gommage has zero heuristics and does not guess what an opaque program will write.
+
+The choke point is therefore activation, not the write. The daemon keeps a fingerprint (`sha256` over the policy version hash and the capability files) of the configuration it is serving:
+
+- `gommage daemon reload` and `SIGHUP` re-read disk and compare. Unchanged files reload freely. Changed files require a usable `harness.configure` picto, consumed on the spot; without one the reload is refused, the previous configuration stays live, and a signed `policy_reload_refused` entry records both fingerprints.
+- At startup the daemon compares what it loaded with the last fingerprint it accepted (`~/.gommage/config.fingerprint`). A mismatch loads anyway (whoever restarts the process owns it) and leaves a `config_drift_at_startup` entry.
+
+This is friction plus evidence under the Section 2.2 trust model, not confinement: an agent that can mint pictos can still activate its own edit, but it cannot do so silently, and an out-of-band write is inert until someone activates it. Both events are signed audit entries; `gommage tail` renders them.
 
 ---
 
@@ -308,5 +319,6 @@ Please do **not** open public GitHub issues for vulnerabilities.
 
 1. `gommage explain <audit-id>` — shows the exact rule that fired, the capabilities in play, and the policy version hash.
 2. Edit `~/.gommage/policy.d/*.yaml` to adjust the rule.
-3. `kill -HUP $(pgrep gommage-daemon)` — daemon reloads without restarting.
-4. New decisions reflect the change; the audit log records the new policy version hash so retroactive review can reconstruct "which policy was in effect when".
+3. Mint the activation picto: `gommage grant --scope harness.configure --reason "<why>"`, then `gommage confirm <id>`. Changed files do not go live without one (Section 2.11).
+4. `gommage daemon reload` (or `kill -HUP $(pgrep gommage-daemon)`) — the daemon consumes the picto and reloads without restarting; without a picto it refuses and keeps the previous rules.
+5. New decisions reflect the change; the audit log records the new policy version hash, the configuration fingerprint, and the picto that activated it, so retroactive review can reconstruct "which policy was in effect when" and who turned it on.

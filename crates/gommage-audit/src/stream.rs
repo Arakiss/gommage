@@ -178,11 +178,40 @@ fn event_item(line: usize, value: serde_json::Value) -> Result<AuditStreamItem, 
             rules,
             mapper_rules,
             policy_version,
+            config_fingerprint,
+            picto_id,
         } => (
             "policy reloaded".to_string(),
             format!(
-                "source={source} rules={rules} mapper_rules={mapper_rules} policy={policy_version}"
+                "source={source} rules={rules} mapper_rules={mapper_rules} policy={policy_version}{}{}",
+                config_fingerprint
+                    .as_deref()
+                    .map(|f| format!(" fingerprint={f}"))
+                    .unwrap_or_default(),
+                picto_id
+                    .as_deref()
+                    .map(|p| format!(" picto={p}"))
+                    .unwrap_or_default(),
             ),
+        ),
+        AuditEvent::PolicyReloadRefused {
+            source,
+            required_scope,
+            loaded_fingerprint,
+            disk_fingerprint,
+            reason,
+        } => (
+            "policy reload refused".to_string(),
+            format!(
+                "source={source} scope={required_scope} loaded={loaded_fingerprint} disk={disk_fingerprint} reason={reason}"
+            ),
+        ),
+        AuditEvent::ConfigDriftAtStartup {
+            recorded_fingerprint,
+            loaded_fingerprint,
+        } => (
+            "config drift at startup".to_string(),
+            format!("recorded={recorded_fingerprint} loaded={loaded_fingerprint}"),
         ),
         AuditEvent::BypassActivated {
             tool,

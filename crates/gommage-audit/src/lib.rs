@@ -149,6 +149,32 @@ pub enum AuditEvent {
         rules: usize,
         mapper_rules: usize,
         policy_version: String,
+        /// Fingerprint over policy + capability files now loaded. Absent on
+        /// entries written before the reload gate existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config_fingerprint: Option<String>,
+        /// The `harness.configure` picto consumed to activate changed files.
+        /// Absent when the files were unchanged or on pre-gate entries.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        picto_id: Option<String>,
+    },
+    /// Policy or capability files changed on disk but the reload was refused:
+    /// no usable `harness.configure` picto. The daemon keeps serving the
+    /// previously loaded configuration.
+    PolicyReloadRefused {
+        source: String,
+        required_scope: String,
+        loaded_fingerprint: String,
+        disk_fingerprint: String,
+        reason: String,
+    },
+    /// At startup the daemon loaded configuration whose fingerprint differs
+    /// from the last one it accepted. Somebody changed the files while no
+    /// daemon was watching; the load proceeds (the operator owns process
+    /// lifecycle) and this entry is the evidence.
+    ConfigDriftAtStartup {
+        recorded_fingerprint: String,
+        loaded_fingerprint: String,
     },
     BypassActivated {
         tool: String,
