@@ -27,6 +27,22 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 
 ### Added
 
+- Policy reloads are now gated on drift. The daemon fingerprints the policy
+  and capability files it serves; `gommage daemon reload` and `SIGHUP`
+  re-read disk and, when the fingerprint changed, require and consume a
+  `harness.configure` Picto before installing the new rules. Without one the
+  reload is refused, the previous rules stay live, and a signed
+  `policy_reload_refused` audit entry records both fingerprints. Unchanged
+  files reload freely. This closes the gap where a script, `mv`, or editor
+  wrote `~/.gommage/policy.d` or `capabilities.d` without surfacing any
+  capability to the mapper: the write is now inert until activated.
+- Startup compares the loaded configuration with the last accepted
+  fingerprint (`~/.gommage/config.fingerprint`) and records a
+  `config_drift_at_startup` audit entry on mismatch; the load proceeds.
+- `policy_reloaded` audit entries carry the configuration fingerprint and the
+  Picto that activated the change.
+- `CapabilityMapper::version_hash()` and `PolicyReadModel::config_fingerprint()`
+  expose the fingerprints to tooling.
 - `ask_picto` rules can set `bind_input: true` to mint a Picto that authorizes
   only the canonical observed tool input as well as its scope.
 - `gommage daemon reload` reloads policy and capability mappers in the running

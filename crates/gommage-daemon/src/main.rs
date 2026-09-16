@@ -25,11 +25,15 @@ use gommage_core::{
     ApprovalWebhookSource, Decision, PictoConsume, PictoLookup, ToolCall,
     approval_webhook_generic_payload, deliver_prepared_approval_webhook, evaluate,
     prepare_approval_webhook,
-    runtime::{HomeLayout, Runtime},
+    runtime::{HomeLayout, PolicyReadModel, Runtime},
     webhook_signature::WebhookSignatureReport,
 };
 use serde::{Deserialize, Serialize};
-use std::{env, path::PathBuf, sync::Arc};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use time::OffsetDateTime;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -93,7 +97,8 @@ async fn main() -> Result<()> {
 
     let rt = Runtime::open(HomeLayout::at(&layout.root)).context("opening runtime")?;
     let audit_path = layout.audit_log.clone();
-    let writer = AuditWriter::open(&audit_path, sk)?;
+    let mut writer = AuditWriter::open(&audit_path, sk)?;
+    note_startup_fingerprint(&layout.root, &rt, &mut writer);
 
     let socket_path = args.socket.unwrap_or_else(|| layout.socket.clone());
     if socket_path.exists() {
@@ -127,7 +132,8 @@ async fn main() -> Result<()> {
 
     // SIGHUP → reload policy + capability mappers. Standard Unix convention
     // for long-running daemons; no restart required after editing
-    // `~/.gommage/policy.d/*.yaml`.
+    // `~/.gommage/policy.d/*.yaml`. Same gate as the IPC reload: changed
+    // files need a `harness.configure` picto (see `reload_guarded`).
     let mut sighup = signal(SignalKind::hangup()).context("installing SIGHUP handler")?;
     // SIGTERM / SIGINT → graceful shutdown. We don't hold any state that
     // needs flushing beyond the audit log (which flushes on every append),
@@ -147,25 +153,16 @@ async fn main() -> Result<()> {
             }
             _ = sighup.recv() => {
                 let mut s = shared.lock().await;
-                match s.rt.reload_policy() {
-                    Ok(()) => {
-                        let rules = s.rt.policy.rules.len();
-                        let mapper_rules = s.rt.mapper.rule_count();
-                        let policy_version = s.rt.policy.version_hash.clone();
-                        if let Err(e) = s.writer.append_event(AuditEvent::PolicyReloaded {
-                            source: "sighup".to_string(),
-                            rules,
-                            mapper_rules,
-                            policy_version: policy_version.clone(),
-                        }) {
-                            tracing::error!(?e, "failed to audit SIGHUP reload");
-                        }
-                        tracing::info!(
-                            rules,
-                            version = %policy_version,
-                            "policy reloaded via SIGHUP"
-                        )
-                    },
+                match reload_guarded(&mut s, "sighup") {
+                    Ok(ReloadOutcome::Unchanged { rules, fingerprint }) => {
+                        tracing::info!(rules, %fingerprint, "SIGHUP: policy unchanged on disk")
+                    }
+                    Ok(ReloadOutcome::Reloaded { rules, fingerprint, picto_id, .. }) => {
+                        tracing::info!(rules, %fingerprint, %picto_id, "policy reloaded via SIGHUP")
+                    }
+                    Ok(ReloadOutcome::Refused { message }) => {
+                        tracing::warn!(%message, "SIGHUP reload refused; keeping previous policy")
+                    }
                     Err(e) => tracing::error!(?e, "SIGHUP reload failed; keeping previous policy"),
                 }
             }
@@ -217,6 +214,207 @@ struct State {
     home_root: PathBuf,
 }
 
+/// Scope a picto must carry to activate changed policy / capability files
+/// through a reload. It is the scope the stdlib `gate-agent-harness-config-edit`
+/// rule already requires to *write* those files, so one grant covers the edit
+/// and its activation.
+const CONFIG_RELOAD_SCOPE: &str = "harness.configure";
+
+/// Last configuration fingerprint the daemon accepted, kept next to the
+/// policy so a restart can tell whether the files changed while nobody was
+/// watching. Rebuildable state, not authority: the audit log is the record.
+const CONFIG_FINGERPRINT_FILE: &str = "config.fingerprint";
+
+#[derive(Debug)]
+enum ReloadOutcome {
+    /// Files on disk match what is loaded; nothing to do.
+    Unchanged { rules: usize, fingerprint: String },
+    /// Files changed and a `harness.configure` picto was consumed to activate them.
+    Reloaded {
+        rules: usize,
+        mapper_rules: usize,
+        fingerprint: String,
+        picto_id: String,
+    },
+    /// Files changed but no usable picto; the previous configuration stays live.
+    Refused { message: String },
+}
+
+fn fingerprint_path(home_root: &Path) -> PathBuf {
+    home_root.join(CONFIG_FINGERPRINT_FILE)
+}
+
+fn read_recorded_fingerprint(home_root: &Path) -> Option<String> {
+    fs::read_to_string(fingerprint_path(home_root))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn record_fingerprint(home_root: &Path, fingerprint: &str) {
+    if let Err(e) = fs::write(fingerprint_path(home_root), format!("{fingerprint}\n")) {
+        tracing::warn!(?e, "could not record the config fingerprint");
+    }
+}
+
+/// At startup, compare the fingerprint just loaded with the last one this
+/// daemon accepted and leave evidence when they differ. The load proceeds
+/// either way: whoever restarted the daemon owns the process, and refusing to
+/// start would take the gate down with it.
+fn note_startup_fingerprint(home_root: &Path, rt: &Runtime, writer: &mut AuditWriter) {
+    let loaded = rt.config_fingerprint();
+    if let Some(recorded) = read_recorded_fingerprint(home_root)
+        && recorded != loaded
+    {
+        tracing::warn!(
+            %recorded,
+            %loaded,
+            "policy/capability files changed while no daemon was running; loading them (audit: config_drift_at_startup)"
+        );
+        if let Err(e) = writer.append_event(AuditEvent::ConfigDriftAtStartup {
+            recorded_fingerprint: recorded,
+            loaded_fingerprint: loaded.clone(),
+        }) {
+            tracing::error!(?e, "failed to audit startup config drift");
+        }
+    }
+    record_fingerprint(home_root, &loaded);
+}
+
+/// Reload policy + capability mappers from disk, gated on drift.
+///
+/// Unchanged files reload freely (a no-op). Changed files need a usable
+/// `harness.configure` picto, consumed here; without one the daemon keeps the
+/// configuration it already serves and leaves a `policy_reload_refused` audit
+/// entry. This is what makes an out-of-band write to `~/.gommage` (a script,
+/// `mv`, an editor) inert until someone holding a picto activates it.
+fn reload_guarded(s: &mut State, source: &str) -> Result<ReloadOutcome> {
+    let read_model =
+        PolicyReadModel::load(&s.rt.layout).context("loading policy + capability files")?;
+    let disk = read_model.config_fingerprint();
+    let loaded = s.rt.config_fingerprint();
+    if disk == loaded {
+        return Ok(ReloadOutcome::Unchanged {
+            rules: s.rt.policy.rules.len(),
+            fingerprint: loaded,
+        });
+    }
+
+    let now = OffsetDateTime::now_utc();
+    let picto = match s
+        .rt
+        .pictos
+        .find_verified_match(CONFIG_RELOAD_SCOPE, now, &s.verifying_key)?
+    {
+        PictoLookup::None => {
+            return refuse_reload(
+                s,
+                source,
+                &loaded,
+                &disk,
+                format!("no usable picto for scope \"{CONFIG_RELOAD_SCOPE}\""),
+            );
+        }
+        PictoLookup::BadSignature { id, scope } => {
+            s.writer.append_event(AuditEvent::PictoRejected {
+                id: id.clone(),
+                scope,
+                reason: "bad signature".to_string(),
+            })?;
+            return refuse_reload(
+                s,
+                source,
+                &loaded,
+                &disk,
+                format!("picto {id} for scope \"{CONFIG_RELOAD_SCOPE}\" has a bad signature"),
+            );
+        }
+        PictoLookup::Verified { picto } => picto,
+    };
+
+    match s
+        .rt
+        .pictos
+        .consume_verified(&picto.id, now, &s.verifying_key)?
+    {
+        PictoConsume::Consumed { picto } => {
+            s.writer.append_event(AuditEvent::PictoConsumed {
+                id: picto.id.clone(),
+                scope: picto.scope,
+                uses: picto.uses,
+                max_uses: picto.max_uses,
+                status: picto.status.as_str().to_string(),
+            })?;
+            s.rt.install_read_model(read_model);
+            let rules = s.rt.policy.rules.len();
+            let mapper_rules = s.rt.mapper.rule_count();
+            s.writer.append_event(AuditEvent::PolicyReloaded {
+                source: source.to_string(),
+                rules,
+                mapper_rules,
+                policy_version: s.rt.policy.version_hash.clone(),
+                config_fingerprint: Some(disk.clone()),
+                picto_id: Some(picto.id.clone()),
+            })?;
+            record_fingerprint(&s.home_root, &disk);
+            Ok(ReloadOutcome::Reloaded {
+                rules,
+                mapper_rules,
+                fingerprint: disk,
+                picto_id: picto.id,
+            })
+        }
+        PictoConsume::NotUsable => refuse_reload(
+            s,
+            source,
+            &loaded,
+            &disk,
+            format!(
+                "picto {} for scope \"{CONFIG_RELOAD_SCOPE}\" is no longer usable",
+                picto.id
+            ),
+        ),
+        PictoConsume::BadSignature { id, scope } => {
+            s.writer.append_event(AuditEvent::PictoRejected {
+                id: id.clone(),
+                scope,
+                reason: "bad signature".to_string(),
+            })?;
+            refuse_reload(
+                s,
+                source,
+                &loaded,
+                &disk,
+                format!("picto {id} for scope \"{CONFIG_RELOAD_SCOPE}\" has a bad signature"),
+            )
+        }
+    }
+}
+
+fn refuse_reload(
+    s: &mut State,
+    source: &str,
+    loaded: &str,
+    disk: &str,
+    reason: String,
+) -> Result<ReloadOutcome> {
+    s.writer.append_event(AuditEvent::PolicyReloadRefused {
+        source: source.to_string(),
+        required_scope: CONFIG_RELOAD_SCOPE.to_string(),
+        loaded_fingerprint: loaded.to_string(),
+        disk_fingerprint: disk.to_string(),
+        reason: reason.clone(),
+    })?;
+    Ok(ReloadOutcome::Refused {
+        message: format!(
+            "policy/capability files changed on disk (loaded {loaded}, disk {disk}) but {reason}; \
+             the daemon keeps the previously loaded rules. Activate the change with a picto: \
+             `gommage grant --scope {CONFIG_RELOAD_SCOPE} --reason <why>`, then \
+             `gommage confirm <id>`, then `gommage daemon reload`"
+        ),
+    })
+}
+
 async fn handle_connection(
     stream: tokio::net::UnixStream,
     shared: Arc<Mutex<State>>,
@@ -253,22 +451,20 @@ async fn handle_request(req: Request, shared: &Arc<Mutex<State>>) -> String {
         }
         Request::Reload => {
             let mut s = shared.lock().await;
-            match s.rt.reload_policy() {
-                Ok(()) => {
-                    let rules = s.rt.policy.rules.len();
-                    let mapper_rules = s.rt.mapper.rule_count();
-                    let policy_version = s.rt.policy.version_hash.clone();
-                    match s.writer.append_event(AuditEvent::PolicyReloaded {
-                        source: "ipc".to_string(),
-                        rules,
-                        mapper_rules,
-                        policy_version,
-                    }) {
-                        Ok(_) => ok(&format!("reloaded {rules} rules")),
-                        Err(e) => err(format!("reload audited failed: {e}")),
-                    }
-                }
-                Err(e) => err(format!("reload failed: {e}")),
+            match reload_guarded(&mut s, "ipc") {
+                Ok(ReloadOutcome::Unchanged { rules, fingerprint }) => ok(&format!(
+                    "unchanged: {rules} rules already loaded (fingerprint {fingerprint})"
+                )),
+                Ok(ReloadOutcome::Reloaded {
+                    rules,
+                    mapper_rules,
+                    fingerprint,
+                    picto_id,
+                }) => ok(&format!(
+                    "reloaded {rules} rules, {mapper_rules} mapper rules (fingerprint {fingerprint}, picto {picto_id})"
+                )),
+                Ok(ReloadOutcome::Refused { message }) => err(message),
+                Err(e) => err(format!("reload failed: {e:#}")),
             }
         }
         Request::Decide { call } => {
@@ -373,8 +569,6 @@ fn decide_and_audit(s: &mut State, call: &ToolCall) -> Result<gommage_core::Eval
 
     let expedition_name = s.rt.expedition.as_ref().map(|e| e.name.clone());
     s.writer.append(call, &eval, expedition_name.as_deref())?;
-    // touch home_root to silence dead-code lint and document the field's purpose.
-    let _ = &s.home_root;
     Ok(eval)
 }
 
@@ -497,9 +691,148 @@ fn err(msg: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::socket_is_live;
+    use super::{
+        CONFIG_RELOAD_SCOPE, ReloadOutcome, State, note_startup_fingerprint,
+        read_recorded_fingerprint, reload_guarded, socket_is_live,
+    };
+    use gommage_audit::AuditWriter;
+    use gommage_core::runtime::{HomeLayout, Runtime};
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;
+
+    const EXTRA_MAPPER: &str = "- name: test-extra\n  tool: Bash\n  emit:\n    - \"test.extra\"\n";
+
+    fn test_state(root: &std::path::Path) -> (State, ed25519_dalek::SigningKey) {
+        let layout = HomeLayout::at(root);
+        layout.ensure().expect("ensure home");
+        let sk = layout.load_key().expect("load key");
+        let verifying_key = sk.verifying_key();
+        let rt = Runtime::open(HomeLayout::at(root)).expect("open runtime");
+        let writer = AuditWriter::open(&layout.audit_log, sk.clone()).expect("open writer");
+        (
+            State {
+                rt,
+                writer,
+                verifying_key,
+                home_root: root.to_path_buf(),
+            },
+            sk,
+        )
+    }
+
+    fn add_mapper_file(root: &std::path::Path, name: &str) {
+        std::fs::write(root.join("capabilities.d").join(name), EXTRA_MAPPER).expect("write mapper");
+    }
+
+    fn audit_log(root: &std::path::Path) -> String {
+        std::fs::read_to_string(root.join("audit.log")).unwrap_or_default()
+    }
+
+    #[test]
+    fn reload_is_a_no_op_when_files_are_unchanged() {
+        let td = tempfile::tempdir().unwrap();
+        let (mut state, _sk) = test_state(td.path());
+        let outcome = reload_guarded(&mut state, "test").expect("reload");
+        assert!(
+            matches!(outcome, ReloadOutcome::Unchanged { .. }),
+            "unchanged files must not need a picto, got {outcome:?}"
+        );
+        assert!(!audit_log(td.path()).contains("policy_reload_refused"));
+    }
+
+    #[test]
+    fn changed_files_are_refused_without_a_picto() {
+        let td = tempfile::tempdir().unwrap();
+        let (mut state, _sk) = test_state(td.path());
+        let before = state.rt.mapper.rule_count();
+        add_mapper_file(td.path(), "zz-test.yaml");
+
+        let outcome = reload_guarded(&mut state, "test").expect("reload");
+        let ReloadOutcome::Refused { message } = outcome else {
+            panic!("changed files without a picto must be refused, got {outcome:?}");
+        };
+        assert!(message.contains(CONFIG_RELOAD_SCOPE), "{message}");
+        assert!(message.contains("gommage grant"), "{message}");
+        assert_eq!(
+            state.rt.mapper.rule_count(),
+            before,
+            "a refused reload must keep the loaded mapper"
+        );
+        let log = audit_log(td.path());
+        assert!(log.contains("policy_reload_refused"), "{log}");
+        assert!(!log.contains("policy_reloaded"), "{log}");
+    }
+
+    #[test]
+    fn changed_files_load_once_a_picto_is_consumed() {
+        let td = tempfile::tempdir().unwrap();
+        let (mut state, sk) = test_state(td.path());
+        let before = state.rt.mapper.rule_count();
+        add_mapper_file(td.path(), "zz-test.yaml");
+        state
+            .rt
+            .pictos
+            .create(
+                "picto_test_reload",
+                CONFIG_RELOAD_SCOPE,
+                1,
+                600,
+                "test",
+                &sk,
+                false,
+            )
+            .expect("mint picto");
+
+        let outcome = reload_guarded(&mut state, "test").expect("reload");
+        let ReloadOutcome::Reloaded {
+            picto_id,
+            fingerprint,
+            ..
+        } = outcome
+        else {
+            panic!("a usable picto must activate changed files, got {outcome:?}");
+        };
+        assert_eq!(picto_id, "picto_test_reload");
+        assert_eq!(state.rt.mapper.rule_count(), before + 1);
+        assert_eq!(state.rt.config_fingerprint(), fingerprint);
+        assert_eq!(
+            read_recorded_fingerprint(td.path()).as_deref(),
+            Some(fingerprint.as_str()),
+            "an accepted reload records its fingerprint"
+        );
+        let log = audit_log(td.path());
+        assert!(log.contains("picto_consumed"), "{log}");
+        assert!(log.contains("policy_reloaded"), "{log}");
+
+        // The single-use picto is spent: the next change is refused again.
+        add_mapper_file(td.path(), "zz-test-2.yaml");
+        let outcome = reload_guarded(&mut state, "test").expect("reload");
+        assert!(
+            matches!(outcome, ReloadOutcome::Refused { .. }),
+            "a consumed picto must not cover a second change, got {outcome:?}"
+        );
+        assert_eq!(state.rt.mapper.rule_count(), before + 1);
+    }
+
+    #[test]
+    fn startup_drift_is_audited_and_loaded() {
+        let td = tempfile::tempdir().unwrap();
+        let (mut state, _sk) = test_state(td.path());
+        note_startup_fingerprint(td.path(), &state.rt, &mut state.writer);
+        assert!(!audit_log(td.path()).contains("config_drift_at_startup"));
+
+        add_mapper_file(td.path(), "zz-test.yaml");
+        let restarted = Runtime::open(HomeLayout::at(td.path())).expect("reopen runtime");
+        note_startup_fingerprint(td.path(), &restarted, &mut state.writer);
+
+        let log = audit_log(td.path());
+        assert!(log.contains("config_drift_at_startup"), "{log}");
+        assert_eq!(
+            read_recorded_fingerprint(td.path()).as_deref(),
+            Some(restarted.config_fingerprint().as_str()),
+            "startup records what it loaded so the next restart compares against it"
+        );
+    }
 
     fn unique_sock(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("gommage-live-{}-{tag}.sock", std::process::id()))

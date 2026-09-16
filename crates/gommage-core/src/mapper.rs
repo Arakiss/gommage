@@ -66,9 +66,36 @@ enum TemplatePart {
 /// The capability mapper. Deterministic by construction: rules are tried in
 /// load order (lexicographic filenames, then declaration order within each
 /// file), and every rule whose conditions hold emits its capabilities.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CapabilityMapper {
     rules: Vec<CompiledRule>,
+    /// `sha256:<hex>` over the sorted mapper source files (relative name +
+    /// raw bytes). Identifies exactly which capability files built this
+    /// mapper, the same way `Policy::version_hash` does for policy files.
+    version_hash: String,
+}
+
+impl Default for CapabilityMapper {
+    fn default() -> Self {
+        Self {
+            rules: Vec::new(),
+            version_hash: mapper_version_hash(&[]),
+        }
+    }
+}
+
+/// Hash `(label, content)` pairs in the order given. Callers pass the sorted
+/// file list so the result is stable across runs and machines.
+fn mapper_version_hash(sources: &[(String, String)]) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    for (label, content) in sources {
+        h.update(label.as_bytes());
+        h.update([0u8]);
+        h.update(content.as_bytes());
+        h.update([0u8]);
+    }
+    format!("sha256:{}", hex::encode(h.finalize()))
 }
 
 impl CapabilityMapper {
@@ -78,6 +105,13 @@ impl CapabilityMapper {
 
     pub fn rule_count(&self) -> usize {
         self.rules.len()
+    }
+
+    /// `sha256:<hex>` identifying the exact capability source files loaded.
+    /// Two mappers built from byte-identical files share a hash; any edit to
+    /// any file changes it.
+    pub fn version_hash(&self) -> &str {
+        &self.version_hash
     }
 
     pub fn load_from_dir(dir: &Path) -> Result<Self, GommageError> {
@@ -99,14 +133,25 @@ impl CapabilityMapper {
         files.sort();
 
         let mut rules = Vec::new();
+        let mut sources: Vec<(String, String)> = Vec::with_capacity(files.len());
         for file in &files {
             let raw = fs::read_to_string(file)?;
             let parsed: Vec<RawMapperRule> = serde_yaml::from_str(&raw)?;
             for (index, r) in parsed.into_iter().enumerate() {
                 rules.push(compile(r, file.clone(), index)?);
             }
+            let label = file
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            sources.push((label, raw));
         }
-        Ok(Self { rules })
+        let version_hash = mapper_version_hash(&sources);
+        Ok(Self {
+            rules,
+            version_hash,
+        })
     }
 
     pub fn from_yaml_string(s: &str, label: &str) -> Result<Self, GommageError> {
@@ -116,7 +161,11 @@ impl CapabilityMapper {
         for (index, r) in parsed.into_iter().enumerate() {
             rules.push(compile(r, path.clone(), index)?);
         }
-        Ok(Self { rules })
+        let version_hash = mapper_version_hash(&[(label.to_string(), s.to_string())]);
+        Ok(Self {
+            rules,
+            version_hash,
+        })
     }
 
     /// Map a single tool call into the list of capabilities it implies.

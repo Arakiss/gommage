@@ -247,6 +247,25 @@ impl PolicyReadModel {
             expedition,
         })
     }
+
+    /// `sha256:<hex>` over the policy version hash and the mapper version
+    /// hash together: one value that changes when any policy file, any
+    /// capability file, or the expedition environment that policy substitutes
+    /// from changes. Two loads of byte-identical configuration agree.
+    pub fn config_fingerprint(&self) -> String {
+        config_fingerprint(&self.policy.version_hash, self.mapper.version_hash())
+    }
+}
+
+/// See [`PolicyReadModel::config_fingerprint`].
+pub fn config_fingerprint(policy_version: &str, mapper_version: &str) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    h.update(b"policy:");
+    h.update(policy_version.as_bytes());
+    h.update(b"\nmapper:");
+    h.update(mapper_version.as_bytes());
+    format!("sha256:{}", hex::encode(h.finalize()))
 }
 
 /// Everything needed to evaluate a tool call: policy + mapper + picto store.
@@ -277,13 +296,29 @@ impl Runtime {
         })
     }
 
-    /// Reload policy + capability mappers from disk. Use on SIGHUP.
+    /// Reload policy + capability mappers from disk unconditionally. The
+    /// daemon does not call this directly: it loads a [`PolicyReadModel`],
+    /// compares fingerprints, checks for a `harness.configure` picto when
+    /// they differ, and only then calls [`Runtime::install_read_model`].
     pub fn reload_policy(&mut self) -> Result<(), GommageError> {
         let read_model = PolicyReadModel::load(&self.layout)?;
+        self.install_read_model(read_model);
+        Ok(())
+    }
+
+    /// Replace the loaded policy, mapper, and expedition with an already
+    /// loaded read model. Infallible: the caller decided the model is
+    /// acceptable before calling.
+    pub fn install_read_model(&mut self, read_model: PolicyReadModel) {
         self.mapper = read_model.mapper;
         self.policy = read_model.policy;
         self.expedition = read_model.expedition;
-        Ok(())
+    }
+
+    /// See [`PolicyReadModel::config_fingerprint`]: the fingerprint of the
+    /// configuration currently loaded in this runtime.
+    pub fn config_fingerprint(&self) -> String {
+        config_fingerprint(&self.policy.version_hash, self.mapper.version_hash())
     }
 }
 
