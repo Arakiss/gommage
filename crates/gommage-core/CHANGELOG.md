@@ -3,6 +3,18 @@
 All notable changes to the `gommage-core` crate. Public-API semver is
 enforced by `cargo-semver-checks` in CI.
 
+## [0.19.0-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.18.1-alpha.1...gommage-core-v0.19.0-alpha.1) (2026-09-16)
+
+
+### Features
+
+* **daemon:** gate policy reloads on config drift with a picto ([#143](https://github.com/Arakiss/gommage/issues/143)) ([492723e](https://github.com/Arakiss/gommage/commit/492723e534a25330568108c7df11f92ef8876e20))
+
+
+### Bug fixes
+
+* **cli:** grant knows the reload activation scope ([#146](https://github.com/Arakiss/gommage/issues/146)) ([2b35b2a](https://github.com/Arakiss/gommage/commit/2b35b2ad0f1dbf9db4ddb1d6016e8037551bee97))
+
 ## [0.18.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-core-v0.18.0-alpha.1...gommage-core-v0.18.1-alpha.1) (2026-09-03)
 
 

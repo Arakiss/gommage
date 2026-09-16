@@ -1,5 +1,17 @@
 # Changelog — gommage-cli
 
+## [0.52.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.51.1-beta.1...gommage-cli-v0.52.0-beta.1) (2026-09-16)
+
+
+### Features
+
+* **daemon:** gate policy reloads on config drift with a picto ([#143](https://github.com/Arakiss/gommage/issues/143)) ([492723e](https://github.com/Arakiss/gommage/commit/492723e534a25330568108c7df11f92ef8876e20))
+
+
+### Bug fixes
+
+* **cli:** grant knows the reload activation scope ([#146](https://github.com/Arakiss/gommage/issues/146)) ([2b35b2a](https://github.com/Arakiss/gommage/commit/2b35b2ad0f1dbf9db4ddb1d6016e8037551bee97))
+
 ## [0.51.1-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.51.0-beta.1...gommage-cli-v0.51.1-beta.1) (2026-09-03)
 
 
