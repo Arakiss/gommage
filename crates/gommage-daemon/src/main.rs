@@ -215,10 +215,9 @@ struct State {
 }
 
 /// Scope a picto must carry to activate changed policy / capability files
-/// through a reload. It is the scope the stdlib `gate-agent-harness-config-edit`
-/// rule already requires to *write* those files, so one grant covers the edit
-/// and its activation.
-const CONFIG_RELOAD_SCOPE: &str = "harness.configure";
+/// through a reload. Defined once in core so the CLI's "known scopes" warning
+/// and this gate cannot drift apart.
+const CONFIG_RELOAD_SCOPE: &str = gommage_core::runtime::CONFIG_ACTIVATION_SCOPE;
 
 /// Last configuration fingerprint the daemon accepted, kept next to the
 /// policy so a restart can tell whether the files changed while nobody was
