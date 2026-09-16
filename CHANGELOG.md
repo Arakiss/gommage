@@ -16,6 +16,9 @@ Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) —
 - Bumped determinism-critical dependency pins for `regex`, `rusqlite`,
   `time`, and `uuid`; this class of change requires a green determinism suite
   before merge.
+- Bumped the transitive `lru` pin (via `ratatui-core`) from 0.18.0 to 0.18.4
+  to clear RUSTSEC-2026-0253 (unsound `LruCache::pop()` panic safety), which
+  had kept the scheduled `cargo-audit` job red on `main` since 2026-09-13.
 - `gommage tui` now uses a focused Overview, Approvals, and Inspect workflow
   instead of an eight-tab information dump. The approval workbench keeps the
   selected request, scope, Picto boundary, draft, confirmation, and result in
