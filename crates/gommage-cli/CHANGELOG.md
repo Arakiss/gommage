@@ -1,5 +1,12 @@
 # Changelog — gommage-cli
 
+## [0.52.1-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.52.0-beta.1...gommage-cli-v0.52.1-beta.1) (2026-10-04)
+
+
+### Bug fixes
+
+* **stdlib:** map agent task control and audit host mods as harness ([#147](https://github.com/Arakiss/gommage/issues/147)) ([6691cb3](https://github.com/Arakiss/gommage/commit/6691cb3aa6cb6221da9b0d631af1136d0cbe97ec))
+
 ## [0.52.0-beta.1](https://github.com/Arakiss/gommage/compare/gommage-cli-v0.51.1-beta.1...gommage-cli-v0.52.0-beta.1) (2026-09-16)
 
 
