@@ -31,3 +31,10 @@
     any_capability:
       - "mcp.call:*"
   reason: "unclassified MCP tools require an explicit picto by default"
+
+- name: allow-agent-control
+  decision: allow
+  match:
+    any_capability:
+      - "agent.control:*"
+  reason: "background task control of the agent's own session; reversible, audited"

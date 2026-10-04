@@ -24,6 +24,17 @@
       - "fs.write:${HOME}/.claude/hooks/**"
   reason: "agent hook and sandbox configuration are part of the harness, not normal repo work"
 
+# Must stay ahead of 06-agent-config-writable's fs.write:${HOME}/.claude/** allow so the audit names it.
+# Allow, not ask: a mod edit is reversible, and activation is gated elsewhere (a new mod
+# loads only through settings.json, denied above, or the host's hot-reload consent).
+- name: audit-claude-mods-write
+  decision: allow
+  match:
+    any_capability:
+      - "fs.write:${HOME}/.claude/mods/**"
+      - "fs.write:${HOME}/.claude/dev-mods/**"
+  reason: "Claude Code mods run in-process above every settings hook, gommage included; writes are allowed and audited by name"
+
 - name: deny-gommage-home-tamper
   decision: gommage
   match:
@@ -44,6 +55,9 @@
       - "fs.write:${HOME}/.local/bin/gommage"
       - "fs.write:${HOME}/.local/bin/gommage-daemon"
       - "fs.write:${HOME}/.local/bin/gommage-mcp"
+      - "fs.write:${HOME}/.cargo/bin/gommage"
+      - "fs.write:${HOME}/.cargo/bin/gommage-daemon"
+      - "fs.write:${HOME}/.cargo/bin/gommage-mcp"
       - "fs.write:/usr/local/bin/gommage"
       - "fs.write:/usr/local/bin/gommage-daemon"
       - "fs.write:/usr/local/bin/gommage-mcp"

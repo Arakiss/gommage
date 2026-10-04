@@ -97,6 +97,30 @@ normal policy evaluation. This is a recovery mechanism, not a security grant:
 Do not expose hook environment mutation to untrusted repositories. Use OS
 sandboxing and host-agent config review for that boundary.
 
+### 2.2.2 Host plugins above the hook chain (Claude Code mods)
+
+Claude Code mods (function-hook plugins under `~/.claude/mods/` and
+`~/.claude/dev-mods/`, loaded through `CLAUDE_CODE_PLUGIN_DIRS`) run in-process
+with the agent. Their `tool.call` hooks run before every settings
+`PreToolUse` hook, Gommage included, and a mod's own process spawns never pass
+through tool hooks. A mod can therefore rewrite, short-circuit, or execute
+around a call Gommage would have judged.
+
+- the stdlib `audit-claude-mods-write` rule (`05-harness-integrity`) allows
+  agent writes to both mod trees and records them under its own name, ahead of
+  the `06-agent-config-writable` carve-out for `~/.claude/**`. It audits rather
+  than gates because activation is gated elsewhere: a new mod loads only through
+  `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`, which
+  `deny-agent-hook-config-tamper` denies, and a `dev-mods` hot reload needs the
+  person's consent in the host. An edit to a mod already enabled takes effect
+  on its next load and stays reviewable in the audit trail;
+- Gommage **does not** see mods installed by the operator, by another process,
+  or by a writer it cannot map (for example a shell command it does not parse),
+  and it does not inspect what a loaded mod does.
+
+Review mod directories as part of host-agent config, and treat
+`CLAUDE_CODE_PLUGIN_DIRS` like the hook environment above.
+
 ### 2.3 Malicious repository or working tree
 
 An agent operating on a repo containing hostile content — a symlinked `README.md` pointing at `/etc/shadow`, a project-local `.gommage/policy.d/` override placed under the repo by an attacker, a file named `../../../etc/passwd` — should not be able to extract capabilities Gommage wouldn't otherwise grant.

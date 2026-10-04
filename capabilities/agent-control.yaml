@@ -1,0 +1,30 @@
+# Capability mappers for Claude Code background task control.
+#
+# These tools stop or read the output of shells and tasks the agent started in
+# its own session. Each emits a constant capability: no input field reaches the
+# payload, so a task id or filter cannot shape what policy sees.
+
+- name: agent-control-task-stop
+  tool: TaskStop
+  emit:
+    - "agent.control:TaskStop"
+
+- name: agent-control-kill-shell
+  tool: KillShell
+  emit:
+    - "agent.control:KillShell"
+
+- name: agent-control-kill-bash
+  tool: KillBash
+  emit:
+    - "agent.control:KillBash"
+
+- name: agent-control-task-output
+  tool: TaskOutput
+  emit:
+    - "agent.control:TaskOutput"
+
+- name: agent-control-bash-output
+  tool: BashOutput
+  emit:
+    - "agent.control:BashOutput"

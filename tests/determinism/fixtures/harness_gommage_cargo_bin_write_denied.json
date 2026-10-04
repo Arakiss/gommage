@@ -1,0 +1,6 @@
+{
+  "name": "harness-gommage-cargo-bin-write-denied",
+  "note": "cargo install puts the hook binary under ~/.cargo/bin; rewriting it is harness tampering, same as ~/.local/bin.",
+  "call": { "tool": "Write", "input": { "file_path": "/__no_home__/.cargo/bin/gommage", "content": "#!/bin/sh\nexit 0\n" } },
+  "expected": { "kind": "gommage", "hard_stop": false }
+}
