@@ -14,7 +14,7 @@
 # gommage
 
 > [!IMPORTANT]
-> **Archived on 2026-10-04.** Development has stopped. `gommage-cli-v0.52.1-beta.1` is the final release.
+> **Archived on 2026-10-04.** Development has stopped. The latest release on the [releases page](https://github.com/Arakiss/gommage/releases) is the final one.
 >
 > Why:
 >
