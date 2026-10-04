@@ -1,0 +1,6 @@
+{
+  "name": "harness-claude-dev-mods-write-audited",
+  "note": "dev-mods load through the same plugin path as mods and get the same audited allow; hot reload still needs the person's consent in the host.",
+  "call": { "tool": "Edit", "input": { "file_path": "/__no_home__/.claude/dev-mods/probe/hooks.ts", "old_string": "a", "new_string": "b" } },
+  "expected": { "kind": "allow" }
+}

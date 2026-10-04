@@ -759,6 +759,83 @@ mod tests {
     }
 
     #[test]
+    fn harness_integrity_wins_over_agent_posture_carve_outs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let layout = HomeLayout::at(tmp.path());
+        layout.ensure().unwrap();
+        for file in gommage_stdlib::POLICIES {
+            std::fs::write(layout.policy_dir.join(file.name), file.contents).unwrap();
+        }
+        for file in gommage_stdlib::CAPABILITIES {
+            std::fs::write(layout.capabilities_dir.join(file.name), file.contents).unwrap();
+        }
+        write_agent_posture_policy(&layout, false).unwrap();
+
+        let mut env = std::collections::HashMap::new();
+        env.insert("HOME".to_string(), "/home/test".to_string());
+        env.insert("EXPEDITION_ROOT".to_string(), "/home/test/proj".to_string());
+        let policy = gommage_core::Policy::load_from_dir(&layout.policy_dir, &env).unwrap();
+        let mapper =
+            gommage_core::CapabilityMapper::load_from_dir(&layout.capabilities_dir).unwrap();
+
+        let decide = |tool: &str, input: serde_json::Value| {
+            let call = gommage_core::ToolCall {
+                tool: tool.to_string(),
+                input,
+            };
+            gommage_core::evaluate(&mapper.map(&call), &policy)
+        };
+        let write = |path: &str| decide("Write", serde_json::json!({ "file_path": path }));
+
+        let mods = write("/home/test/.claude/mods/x/y.ts");
+        assert!(matches!(mods.decision, gommage_core::Decision::Allow));
+        assert_eq!(mods.matched_rule.unwrap().name, "audit-claude-mods-write");
+        let dev_mods = write("/home/test/.claude/dev-mods/probe/hooks.ts");
+        assert!(matches!(dev_mods.decision, gommage_core::Decision::Allow));
+        assert_eq!(
+            dev_mods.matched_rule.unwrap().name,
+            "audit-claude-mods-write"
+        );
+
+        let config = write("/home/test/.claude/CLAUDE.md");
+        assert!(matches!(config.decision, gommage_core::Decision::Allow));
+        assert_eq!(
+            config.matched_rule.unwrap().name,
+            "agent-config-writable-claude"
+        );
+
+        let binary = write("/home/test/.cargo/bin/gommage");
+        assert!(matches!(
+            binary.decision,
+            gommage_core::Decision::Gommage { .. }
+        ));
+        assert_eq!(
+            binary.matched_rule.unwrap().name,
+            "deny-gommage-binary-tamper"
+        );
+
+        for tool in [
+            "TaskStop",
+            "KillShell",
+            "KillBash",
+            "TaskOutput",
+            "BashOutput",
+        ] {
+            let control = decide(tool, serde_json::json!({ "task_id": "b7k2x9" }));
+            assert_eq!(
+                control
+                    .capabilities
+                    .iter()
+                    .map(|c| c.as_str().to_string())
+                    .collect::<Vec<_>>(),
+                vec![format!("agent.control:{tool}")]
+            );
+            assert!(matches!(control.decision, gommage_core::Decision::Allow));
+            assert_eq!(control.matched_rule.unwrap().name, "allow-agent-control");
+        }
+    }
+
+    #[test]
     fn agent_posture_dry_run_writes_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let layout = HomeLayout::at(tmp.path());

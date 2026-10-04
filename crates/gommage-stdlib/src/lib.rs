@@ -59,6 +59,10 @@ pub const POLICIES: &[StdlibFile] = &[
 
 pub const CAPABILITIES: &[StdlibFile] = &[
     StdlibFile {
+        name: "agent-control.yaml",
+        contents: include_str!("../capabilities/agent-control.yaml"),
+    },
+    StdlibFile {
         name: "bash.yaml",
         contents: include_str!("../capabilities/bash.yaml"),
     },

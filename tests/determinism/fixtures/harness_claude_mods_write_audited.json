@@ -1,0 +1,6 @@
+{
+  "name": "harness-claude-mods-write-audited",
+  "note": "Claude Code mods run in-process above every settings hook. Writing one is allowed and audited under audit-claude-mods-write; a new mod only loads through settings.json, which stays denied.",
+  "call": { "tool": "Write", "input": { "file_path": "/__no_home__/.claude/mods/x/y.ts", "content": "export default {}" } },
+  "expected": { "kind": "allow" }
+}

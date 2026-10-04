@@ -1,0 +1,6 @@
+{
+  "name": "agent-control-bash-output-allowed",
+  "note": "Reading a background shell's output is session-local task control; the filter input never reaches the capability.",
+  "call": { "tool": "BashOutput", "input": { "bash_id": "shell_1", "filter": "rm -rf /" } },
+  "expected": { "kind": "allow" }
+}

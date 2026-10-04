@@ -1,0 +1,6 @@
+{
+  "name": "agent-control-task-stop-allowed",
+  "note": "TaskStop ends a background task of the agent's own session. It maps to a constant agent.control capability instead of failing closed as an unmapped tool.",
+  "call": { "tool": "TaskStop", "input": { "task_id": "b7k2x9" } },
+  "expected": { "kind": "allow" }
+}

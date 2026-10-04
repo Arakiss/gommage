@@ -66,6 +66,15 @@ cases:
       required_scope: mcp.write
       matched_rule: ask-mcp-write
 
+  - name: allow_agent_task_stop
+    description: Stopping the agent's own background task is session-local control and must not fail closed as an unmapped tool.
+    tool: TaskStop
+    input:
+      task_id: b7k2x9
+    expect:
+      decision: allow
+      matched_rule: allow-agent-control
+
   - name: deny_unparsed_codex_apply_patch
     description: Codex apply_patch payloads that cannot be parsed into file paths fail closed.
     tool: apply_patch
