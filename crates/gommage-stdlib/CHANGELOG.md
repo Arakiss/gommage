@@ -1,5 +1,12 @@
 # Changelog — gommage-stdlib
 
+## [0.14.2-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.14.1-alpha.1...gommage-stdlib-v0.14.2-alpha.1) (2026-10-04)
+
+
+### Bug fixes
+
+* **stdlib:** map agent task control and audit host mods as harness ([#147](https://github.com/Arakiss/gommage/issues/147)) ([6691cb3](https://github.com/Arakiss/gommage/commit/6691cb3aa6cb6221da9b0d631af1136d0cbe97ec))
+
 ## [0.14.1-alpha.1](https://github.com/Arakiss/gommage/compare/gommage-stdlib-v0.14.0-alpha.1...gommage-stdlib-v0.14.1-alpha.1) (2026-09-03)
 
 
