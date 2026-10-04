@@ -13,6 +13,18 @@
 
 # gommage
 
+> [!IMPORTANT]
+> **Archived on 2026-10-04.** Development has stopped. `gommage-cli-v0.52.1-beta.1` is the final release.
+>
+> Why:
+>
+> - **The hosts now ship it.** Claude Code's auto mode, permission rules and classifier rules, and Codex's approval policy and sandbox, cover the deny lists, shell hard stops and harness protection gommage was built for, and the teams that own those hosts maintain them.
+> - **A gate running as the agent's own user cannot contain that agent.** The threat model already said so ("friction plus evidence, not confinement"): an agent that can run `gommage grant` can approve itself.
+> - **`ask_picto` depended on the host showing a prompt.** In bypass permission modes the host never asks, so those calls went through while the audit log recorded a pending approval. For a safety layer, failing silently is the worst way to fail.
+> - **Keeping it correct costs more than one maintainer can give.** The agent hosts change their hook and permission surfaces every week.
+>
+> The released binaries and crates stay available, and the code, policy library and audit format stay here for reference. If you run gommage, move to your host's native permission settings, then remove it with `gommage uninstall --all --purge-backups --yes`. Issues and pull requests are closed.
+
 > _« ce qui n'a pas lieu d'être, s'efface. »_
 
 Gommage is a deterministic policy and audit layer for matched AI coding-agent tool calls. It evaluates declarative YAML rules, records signed audit evidence, and can require a short-lived signed grant for an exceptional action.
